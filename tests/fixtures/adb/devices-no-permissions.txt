@@ -1,0 +1,2 @@
+List of devices attached
+???????????? no permissions (user in plugdev group; are your udev rules wrong?); see [http://developer.android.com/tools/device.html]
