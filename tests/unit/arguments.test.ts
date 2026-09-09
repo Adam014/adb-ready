@@ -29,6 +29,7 @@ describe("parseArguments", () => {
         timeoutMs: 1_500,
         adbPath: "/path with spaces/adb",
         select: true,
+        pairingCodeStdin: false,
       },
     });
   });
@@ -86,8 +87,21 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses wireless endpoints and secure pairing-code input mode", () => {
+    expect(parseArguments(["connect", "192.168.1.20:37123", "--json"])).toMatchObject({
+      ok: true,
+      options: { command: "connect", endpoint: "192.168.1.20:37123" },
+    });
+    expect(
+      parseArguments(["pair", "[fd00::20]:41234", "--pairing-code-stdin", "--non-interactive"]),
+    ).toMatchObject({
+      ok: true,
+      options: { command: "pair", endpoint: "[fd00::20]:41234", pairingCodeStdin: true },
+    });
+  });
+
   test("rejects unknown commands and options", () => {
-    expect(parseArguments(["pair"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(parseArguments(["launch"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
     expect(parseArguments(["doctor", "--magical"])).toEqual({
       ok: false,
       code: "CLI_INVALID_OPTION",

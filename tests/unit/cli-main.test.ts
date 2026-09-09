@@ -265,4 +265,46 @@ describe("runCli", () => {
     expect(streams.error.value).toContain("has not authorized this computer");
     expect(streams.error.value).toContain("No ready Android target can be selected.");
   });
+
+  test("requires secure stdin for non-interactive pairing before probing ADB", async () => {
+    const streams = io();
+    const broken = dependencies();
+    broken.locateAdb = async () => {
+      throw new Error("must not probe ADB");
+    };
+    const exitCode = await runCli(
+      ["pair", "192.168.1.20:41234", "--json", "--non-interactive"],
+      streams,
+      broken,
+    );
+
+    expect(exitCode).toBe(ExitCode.InvalidInput);
+    expect(JSON.parse(streams.output.value).problems[0]?.code).toBe("INVALID_PAIRING_CODE");
+  });
+
+  test("pairs from stdin without leaking the code to machine output", async () => {
+    const streams = io();
+    streams.input.autoInput = "123456\n";
+    const fixture = dependencies();
+    fixture.runner = async (request) => {
+      if (request.args?.includes("pair")) {
+        expect(request.input).toBe("123456\n");
+        return result(request, "Successfully paired to 192.168.1.20:41234\n");
+      }
+      return result(request, "");
+    };
+    const exitCode = await runCli(
+      ["pair", "192.168.1.20:41234", "--pairing-code-stdin", "--non-interactive", "--json"],
+      streams,
+      fixture,
+    );
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      command: "pair",
+      data: { endpoint: "192.168.1.20:41234", paired: true },
+    });
+    expect(streams.output.value).not.toContain("123456");
+    expect(streams.error.value).toBe("");
+  });
 });

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { AdbClient } from "../adb/client.js";
-import type { AdbDevice, AdbMdnsService, AdbVersion } from "../adb/parsers.js";
+import {
+  type AdbDevice,
+  type AdbMdnsService,
+  type AdbVersion,
+  parseAdbNetworkEndpoint,
+} from "../adb/parsers.js";
 import { EventBus } from "../core/event-bus.js";
 import { redactText } from "../core/redaction.js";
 import {
@@ -80,6 +85,23 @@ export interface TargetDiscoveryData {
   };
 }
 
+export interface ConnectData {
+  adbPath: string;
+  endpoint: string;
+  status: "already-connected" | "connected";
+  serial: string;
+  state: "device";
+  hardwareSerial?: string;
+  discovered: boolean;
+}
+
+export interface PairData {
+  adbPath: string;
+  endpoint: string;
+  paired: true;
+  discovered: boolean;
+}
+
 interface CommandContext {
   bus: EventBus;
   clock: () => Date;
@@ -102,6 +124,9 @@ function exitCodeForProblems(problems: readonly Problem[]): ExitCode {
   if (errors.some(({ code }) => code === ProblemCode.OperationInterrupted)) {
     return ExitCode.Interrupted;
   }
+  if (errors.some(({ category }) => category.startsWith("input."))) {
+    return ExitCode.InvalidInput;
+  }
   if (errors.some(({ category }) => category.startsWith("environment."))) {
     return ExitCode.Environment;
   }
@@ -109,6 +134,27 @@ function exitCodeForProblems(problems: readonly Problem[]): ExitCode {
     return ExitCode.Target;
   }
   return ExitCode.AdbOperation;
+}
+
+function commandProblem(
+  code: string,
+  category: string,
+  summary: string,
+  detail: string,
+  commandId: string,
+  evidence: Problem["evidence"] = [],
+): Problem {
+  return {
+    code,
+    category,
+    severity: "error",
+    summary,
+    detail,
+    retryable: true,
+    evidence,
+    actions: [],
+    correlation: { commandId },
+  };
 }
 
 function createContext(command: string, dependencies: CommandDependencies): CommandContext {
@@ -462,6 +508,263 @@ export async function runDevices(
       targets: inspection.targets,
       discovery: inspection.discovery,
       ...(selected === undefined ? {} : { selected }),
+    },
+    problems,
+  );
+}
+
+async function resolveWirelessEndpoint(
+  client: AdbClient,
+  requested: string | undefined,
+  serviceType: "connect" | "pairing",
+  commandId: string,
+  signal: AbortSignal | undefined,
+): Promise<{ endpoint?: string; discovered: boolean; problem?: Problem }> {
+  if (requested !== undefined) {
+    const endpoint = parseAdbNetworkEndpoint(requested);
+    return endpoint === undefined
+      ? {
+          discovered: false,
+          problem: commandProblem(
+            ProblemCode.InvalidEndpoint,
+            "input.endpoint",
+            "The wireless endpoint is invalid.",
+            "Use HOST:PORT, IPv4:PORT, or [IPv6]:PORT with a port from 1 to 65535.",
+            commandId,
+            [{ source: "input", field: "endpoint", value: requested }],
+          ),
+        }
+      : { endpoint: endpoint.serial, discovered: false };
+  }
+
+  const mdns = await client.mdnsServices(signal);
+  if (!processSucceeded(mdns.process)) {
+    return {
+      discovered: true,
+      problem: operationProblem("mdns-services", mdns, commandId),
+    };
+  }
+  const serviceKinds =
+    serviceType === "connect" ? new Set(["connect", "legacy"]) : new Set(["pairing"]);
+  const endpoints = [
+    ...new Set(
+      mdns.value
+        .filter((service) => serviceKinds.has(service.serviceType))
+        .map(({ endpoint }) => endpoint.serial),
+    ),
+  ].sort();
+  if (endpoints.length === 0) {
+    return {
+      discovered: true,
+      problem: commandProblem(
+        ProblemCode.WirelessEndpointNotFound,
+        "target.discovery",
+        `No wireless ${serviceType} endpoint was discovered.`,
+        serviceType === "pairing"
+          ? "Open Wireless debugging and choose Pair device with pairing code, or provide its displayed HOST:PORT explicitly."
+          : "Enable Wireless debugging, keep the target on a reachable network, or provide HOST:PORT explicitly.",
+        commandId,
+      ),
+    };
+  }
+  if (endpoints.length > 1) {
+    return {
+      discovered: true,
+      problem: commandProblem(
+        ProblemCode.MultipleWirelessEndpoints,
+        "target.selection",
+        `Multiple wireless ${serviceType} endpoints require an explicit selection.`,
+        `Run the command again with one of these endpoints: ${endpoints.join(", ")}`,
+        commandId,
+        [{ source: "adb.mdns", field: "endpoints", value: endpoints }],
+      ),
+    };
+  }
+  const endpoint = endpoints[0];
+  return endpoint === undefined ? { discovered: true } : { endpoint, discovered: true };
+}
+
+export async function runConnect(
+  requestedEndpoint: string | undefined,
+  config: CommandConfig = {},
+  dependencies: CommandDependencies = {},
+  signal?: AbortSignal,
+): Promise<CommandExecution<ConnectData>> {
+  const context = createContext("connect", dependencies);
+  const problems: Problem[] = [];
+  if (requestedEndpoint !== undefined && parseAdbNetworkEndpoint(requestedEndpoint) === undefined) {
+    problems.push(
+      commandProblem(
+        ProblemCode.InvalidEndpoint,
+        "input.endpoint",
+        "The wireless endpoint is invalid.",
+        "Use HOST:PORT, IPv4:PORT, or [IPv6]:PORT with a port from 1 to 65535.",
+        context.commandId,
+        [{ source: "input", field: "endpoint", value: requestedEndpoint }],
+      ),
+    );
+    return finish<ConnectData>(context, null, problems);
+  }
+  const executable = await resolveAdb(context, config, dependencies);
+  if (executable === undefined) {
+    problems.push(adbNotFoundProblem({ commandId: context.commandId }, config.adbPath));
+    return finish<ConnectData>(context, null, problems);
+  }
+  const client = createClient(executable, context, config, dependencies);
+  const resolution = await resolveWirelessEndpoint(
+    client,
+    requestedEndpoint,
+    "connect",
+    context.commandId,
+    signal,
+  );
+  if (resolution.problem !== undefined || resolution.endpoint === undefined) {
+    if (resolution.problem !== undefined) {
+      problems.push(resolution.problem);
+    }
+    return finish<ConnectData>(context, null, problems);
+  }
+
+  const connection = await client.connect(resolution.endpoint, signal);
+  if (!processSucceeded(connection.process)) {
+    problems.push(operationProblem("connect", connection, context.commandId));
+    return finish<ConnectData>(context, null, problems);
+  }
+  if (connection.value.status !== "connected" && connection.value.status !== "already-connected") {
+    problems.push(
+      commandProblem(
+        ProblemCode.WirelessConnectionFailed,
+        "adb.connect",
+        "ADB did not confirm the wireless connection.",
+        "The operation returned without a verified connected state.",
+        context.commandId,
+        [{ source: "adb.connect", field: "status", value: connection.value.status }],
+      ),
+    );
+    return finish<ConnectData>(context, null, problems);
+  }
+
+  const state = await client.getState(resolution.endpoint, signal);
+  if (!processSucceeded(state.process)) {
+    problems.push(operationProblem("get-state", state, context.commandId));
+    return finish<ConnectData>(context, null, problems);
+  }
+  if (state.value !== "device") {
+    problems.push(
+      commandProblem(
+        ProblemCode.WirelessConnectionFailed,
+        "target.verification",
+        "The wireless target could not be verified as ready.",
+        `ADB reported ${state.value ?? "no state"} after connecting.`,
+        context.commandId,
+        [{ source: "adb.get-state", field: "state", value: state.value ?? null }],
+      ),
+    );
+    return finish<ConnectData>(context, null, problems);
+  }
+
+  const identity = await client.getHardwareSerial(resolution.endpoint, signal);
+  if (identity.process.aborted) {
+    problems.push(operationProblem("hardware-serial", identity, context.commandId));
+    return finish<ConnectData>(context, null, problems);
+  }
+  const hardwareSerial = processSucceeded(identity.process)
+    ? normalizedHardwareSerial(identity.value)
+    : undefined;
+  return finish(
+    context,
+    {
+      adbPath: redactedPath(executable),
+      endpoint: resolution.endpoint,
+      status: connection.value.status,
+      serial: resolution.endpoint,
+      state: "device",
+      ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
+      discovered: resolution.discovered,
+    },
+    problems,
+  );
+}
+
+export async function runPair(
+  requestedEndpoint: string | undefined,
+  pairingCode: string,
+  config: CommandConfig = {},
+  dependencies: CommandDependencies = {},
+  signal?: AbortSignal,
+): Promise<CommandExecution<PairData>> {
+  const context = createContext("pair", dependencies);
+  const problems: Problem[] = [];
+  if (!/^\d{6}$/u.test(pairingCode)) {
+    problems.push(
+      commandProblem(
+        ProblemCode.InvalidPairingCode,
+        "input.pairing-code",
+        "The pairing code must contain exactly six digits.",
+        "Open Pair device with pairing code on Android and enter the current six-digit code.",
+        context.commandId,
+      ),
+    );
+    return finish<PairData>(context, null, problems);
+  }
+  if (requestedEndpoint !== undefined && parseAdbNetworkEndpoint(requestedEndpoint) === undefined) {
+    problems.push(
+      commandProblem(
+        ProblemCode.InvalidEndpoint,
+        "input.endpoint",
+        "The wireless pairing endpoint is invalid.",
+        "Use the HOST:PORT shown on Android's pairing-code screen.",
+        context.commandId,
+        [{ source: "input", field: "endpoint", value: requestedEndpoint }],
+      ),
+    );
+    return finish<PairData>(context, null, problems);
+  }
+  const executable = await resolveAdb(context, config, dependencies);
+  if (executable === undefined) {
+    problems.push(adbNotFoundProblem({ commandId: context.commandId }, config.adbPath));
+    return finish<PairData>(context, null, problems);
+  }
+  const client = createClient(executable, context, config, dependencies);
+  const resolution = await resolveWirelessEndpoint(
+    client,
+    requestedEndpoint,
+    "pairing",
+    context.commandId,
+    signal,
+  );
+  if (resolution.problem !== undefined || resolution.endpoint === undefined) {
+    if (resolution.problem !== undefined) {
+      problems.push(resolution.problem);
+    }
+    return finish<PairData>(context, null, problems);
+  }
+
+  const pairing = await client.pair(resolution.endpoint, pairingCode, signal);
+  if (!processSucceeded(pairing.process)) {
+    problems.push(operationProblem("pair", pairing, context.commandId));
+    return finish<PairData>(context, null, problems);
+  }
+  if (!pairing.value.paired) {
+    problems.push(
+      commandProblem(
+        ProblemCode.WirelessPairingFailed,
+        "adb.pair",
+        "ADB did not confirm wireless pairing.",
+        "Check that the pairing screen is still open and the six-digit code has not expired.",
+        context.commandId,
+      ),
+    );
+    return finish<PairData>(context, null, problems);
+  }
+
+  return finish(
+    context,
+    {
+      adbPath: redactedPath(executable),
+      endpoint: resolution.endpoint,
+      paired: true,
+      discovered: resolution.discovered,
     },
     problems,
   );

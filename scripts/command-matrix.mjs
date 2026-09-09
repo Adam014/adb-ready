@@ -147,6 +147,8 @@ try {
       ["help command", ["help"], "ADB Ready"],
       ["doctor help", ["help", "doctor"], "adb-ready doctor"],
       ["devices help", ["devices", "--help"], "adb-ready devices"],
+      ["connect help", ["connect", "--help"], "adb-ready connect"],
+      ["pair help", ["help", "pair"], "adb-ready pair"],
       ["version flag", ["--version"], manifest.version],
       ["version command", ["version"], manifest.version],
     ]) {
@@ -155,6 +157,26 @@ try {
       expectIncludes(execution.stdout, expected, `${alias} ${label}`);
       assertions += 1;
     }
+
+    const connect = command(
+      alias,
+      ["connect", "192.0.2.10:37123", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(connect, 0, `${alias} connect JSON`);
+    const connectPayload = parseJson(connect.stdout, `${alias} connect JSON`);
+    if (connectPayload.data?.serial !== "192.0.2.10:37123") {
+      throw new Error(`${alias} connect: final serial was not verified`);
+    }
+    assertions += 1;
+
+    const pairWithoutInput = command(alias, ["pair", "--json", "--non-interactive"], env);
+    expectStatus(pairWithoutInput, 2, `${alias} pair secure-input requirement`);
+    const pairPayload = parseJson(pairWithoutInput.stdout, `${alias} pair input failure`);
+    if (pairPayload.problems?.[0]?.code !== "INVALID_PAIRING_CODE") {
+      throw new Error(`${alias} pair: missing secure-input diagnostic`);
+    }
+    assertions += 1;
 
     for (const publicCommand of ["doctor", "devices"]) {
       const execution = command(alias, [publicCommand, "--json"], env);

@@ -4,7 +4,7 @@ import type { TextSink } from "./spinner.js";
 import { style } from "./style.js";
 import type { TerminalCapabilities } from "./terminal.js";
 
-export type HomeAction = "devices" | "doctor" | "exit" | "help" | "version";
+export type HomeAction = "connect" | "devices" | "doctor" | "exit" | "help" | "pair" | "version";
 export type HomeResult =
   | { kind: "action"; action: HomeAction }
   | { kind: "cancelled"; reason: "interrupt" | "signal" }
@@ -40,7 +40,7 @@ function productPanel(version: string, capabilities: TerminalCapabilities): stri
     "",
     "CHECK  ADB and your local setup",
     "SEE    every visible target",
-    "USE    human or JSON output",
+    "LINK   Wireless debugging",
     "",
     `adb-ready  v${version}`,
   ];
@@ -151,6 +151,16 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         value: "devices" as const,
         label: "Show Android targets",
         description: "See connected devices and running emulators",
+      },
+      {
+        value: "connect" as const,
+        label: "Connect wirelessly",
+        description: "Discover and verify a Wireless debugging target",
+      },
+      {
+        value: "pair" as const,
+        label: "Pair a new target",
+        description: "Use Android's hidden six-digit pairing code",
       },
       {
         value: "version" as const,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
-import { runDevices, runDoctor } from "../../src/app/commands.js";
+import { runConnect, runDevices, runDoctor, runPair } from "../../src/app/commands.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import { ProblemCode } from "../../src/domain/problems.js";
 import type {
@@ -38,6 +38,15 @@ function commandName(request: ProcessRequest): string {
   }
   if (args.includes("ro.serialno")) {
     return `hardware-serial:${String(args[args.indexOf("-s") + 1])}`;
+  }
+  if (args.includes("connect")) {
+    return "connect";
+  }
+  if (args.includes("pair")) {
+    return "pair";
+  }
+  if (args.includes("get-state")) {
+    return "get-state";
   }
   if (args.includes("devices")) {
     return "devices";
@@ -282,5 +291,106 @@ describe("runDevices", () => {
 
     expect(execution.exitCode).toBe(ExitCode.Interrupted);
     expect(execution.result.problems[0]?.code).toBe(ProblemCode.OperationInterrupted);
+  });
+});
+
+describe("wireless target commands", () => {
+  test("connects an explicit endpoint and verifies the final serial", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runConnect(
+      "192.168.1.20:37123",
+      {},
+      deterministicDependencies(
+        fixtureRunner(
+          {
+            connect: "connected to 192.168.1.20:37123\n",
+            "get-state": "device\n",
+            "hardware-serial:192.168.1.20:37123": "PHONE-1\n",
+          },
+          requests,
+        ),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data).toEqual({
+      adbPath: "~/Android/sdk/platform-tools/adb",
+      endpoint: "192.168.1.20:37123",
+      status: "connected",
+      serial: "192.168.1.20:37123",
+      state: "device",
+      hardwareSerial: "PHONE-1",
+      discovered: false,
+    });
+    expect(requests.map(commandName)).toEqual([
+      "connect",
+      "get-state",
+      "hardware-serial:192.168.1.20:37123",
+    ]);
+  });
+
+  test("uses one discovered connect service but refuses to guess among several", async () => {
+    const one = await runConnect(
+      undefined,
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          "mdns-services":
+            "List of discovered mdns services\n" +
+            "adb-PHONE-1-x _adb-tls-connect._tcp 192.168.1.20:37123\n",
+          connect: "connected to 192.168.1.20:37123\n",
+          "get-state": "device\n",
+        }),
+      ),
+    );
+    expect(one.result.data).toMatchObject({ endpoint: "192.168.1.20:37123", discovered: true });
+
+    const several = await runConnect(
+      undefined,
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          "mdns-services":
+            "List of discovered mdns services\n" +
+            "adb-A-x _adb-tls-connect._tcp 192.168.1.20:37123\n" +
+            "adb-B-y _adb-tls-connect._tcp 192.168.1.21:37124\n",
+        }),
+      ),
+    );
+    expect(several.exitCode).toBe(ExitCode.Target);
+    expect(several.result.problems[0]?.code).toBe(ProblemCode.MultipleWirelessEndpoints);
+  });
+
+  test("passes the pairing code only over stdin and never returns it", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runPair(
+      "192.168.1.20:41234",
+      "123456",
+      {},
+      deterministicDependencies(
+        fixtureRunner(
+          { pair: "Successfully paired to 192.168.1.20:41234 [guid=fixture]\n" },
+          requests,
+        ),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(requests[0]).toMatchObject({
+      args: ["pair", "192.168.1.20:41234"],
+      input: "123456\n",
+    });
+    expect(JSON.stringify(execution.result)).not.toContain("123456");
+  });
+
+  test("rejects malformed endpoints and pairing codes as input errors", async () => {
+    const deps = deterministicDependencies(fixtureRunner({}));
+    const connection = await runConnect("0.0.0.0:5555", {}, deps);
+    const pairing = await runPair("192.168.1.20:41234", "12ab56", {}, deps);
+
+    expect(connection.exitCode).toBe(ExitCode.InvalidInput);
+    expect(connection.result.problems[0]?.code).toBe(ProblemCode.InvalidEndpoint);
+    expect(pairing.exitCode).toBe(ExitCode.InvalidInput);
+    expect(pairing.result.problems[0]?.code).toBe(ProblemCode.InvalidPairingCode);
   });
 });

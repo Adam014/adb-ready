@@ -1,4 +1,4 @@
-export type CommandName = "devices" | "doctor" | "help" | "version";
+export type CommandName = "connect" | "devices" | "doctor" | "help" | "pair" | "version";
 export type OutputFormat = "human" | "json" | "ndjson" | "plain";
 
 export interface CliOptions {
@@ -19,6 +19,8 @@ export interface CliOptions {
   select: boolean;
   device?: string;
   transportId?: string;
+  endpoint?: string;
+  pairingCodeStdin: boolean;
 }
 
 export interface CliParseFailure {
@@ -35,7 +37,7 @@ export interface CliParseSuccess {
 
 export type CliParseResult = CliParseFailure | CliParseSuccess;
 
-const COMMANDS = new Set<CommandName>(["devices", "doctor", "help", "version"]);
+const COMMANDS = new Set<CommandName>(["connect", "devices", "doctor", "help", "pair", "version"]);
 const BOOLEAN_OPTIONS = new Set([
   "-h",
   "--help",
@@ -52,6 +54,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--animation",
   "--no-animation",
   "--select",
+  "--pairing-code-stdin",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -96,6 +99,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let select = false;
   let device: string | undefined;
   let transportId: string | undefined;
+  let endpoint: string | undefined;
+  let pairingCodeStdin = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -104,16 +109,28 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     }
 
     if (!argument.startsWith("-")) {
-      if (!COMMANDS.has(argument as CommandName)) {
-        return failure("CLI_USAGE", `Unknown command: ${argument}`);
-      }
-      const candidate = argument as CommandName;
       if (command === undefined) {
+        if (!COMMANDS.has(argument as CommandName)) {
+          return failure("CLI_USAGE", `Unknown command: ${argument}`);
+        }
+        const candidate = argument as CommandName;
         command = candidate;
         continue;
       }
-      if (command === "help" && (candidate === "doctor" || candidate === "devices")) {
-        helpTarget = candidate;
+      if (command === "help" && COMMANDS.has(argument as CommandName)) {
+        const candidate = argument as CommandName;
+        if (
+          candidate === "connect" ||
+          candidate === "devices" ||
+          candidate === "doctor" ||
+          candidate === "pair"
+        ) {
+          helpTarget = candidate;
+          continue;
+        }
+      }
+      if ((command === "connect" || command === "pair") && endpoint === undefined) {
+        endpoint = argument;
         continue;
       }
       return failure("CLI_USAGE", `Unexpected argument: ${argument}`);
@@ -136,7 +153,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     };
 
     if (option === "-h" || option === "--help") {
-      if (command === "doctor" || command === "devices") {
+      if (
+        command === "connect" ||
+        command === "doctor" ||
+        command === "devices" ||
+        command === "pair"
+      ) {
         helpTarget = command;
       }
       command = "help";
@@ -195,6 +217,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         return failure("CLI_INVALID_VALUE", `Invalid transport ID: ${value}.`, option);
       }
       transportId = value;
+    } else if (option === "--pairing-code-stdin") {
+      pairingCodeStdin = true;
     } else if (option === "--timeout") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -276,6 +300,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (device !== undefined && transportId !== undefined) {
     return failure("CLI_USAGE", "--device and --transport-id cannot be combined.");
   }
+  if (pairingCodeStdin && command !== "pair") {
+    return failure(
+      "CLI_USAGE",
+      "--pairing-code-stdin can only be used with the pair command.",
+      "--pairing-code-stdin",
+    );
+  }
 
   return {
     ok: true,
@@ -297,6 +328,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       select,
       ...(device === undefined ? {} : { device }),
       ...(transportId === undefined ? {} : { transportId }),
+      ...(endpoint === undefined ? {} : { endpoint }),
+      pairingCodeStdin,
     },
   };
 }

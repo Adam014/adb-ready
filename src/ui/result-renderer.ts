@@ -1,5 +1,5 @@
 import type { AdbDevice } from "../adb/parsers.js";
-import type { DevicesData, DoctorData } from "../app/commands.js";
+import type { ConnectData, DevicesData, DoctorData, PairData } from "../app/commands.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
@@ -40,6 +40,14 @@ function hasDevices(value: unknown): value is DoctorData | DevicesData {
 
 function hasTargets(value: unknown): value is DoctorData | DevicesData {
   return isRecord(value) && Array.isArray(value.targets);
+}
+
+function isConnectData(value: unknown): value is ConnectData {
+  return isRecord(value) && value.state === "device" && typeof value.serial === "string";
+}
+
+function isPairData(value: unknown): value is PairData {
+  return isRecord(value) && value.paired === true && typeof value.endpoint === "string";
 }
 
 function deviceLabel(device: AdbDevice): string {
@@ -107,6 +115,25 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     );
   }
 
+  if (result.command === "connect" && isConnectData(result.data)) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Connected ${clean(result.data.endpoint)}`,
+      `${style.success(glyphs.success, capabilities)} Verified  ${clean(result.data.serial)} · device`,
+    );
+    if (result.data.hardwareSerial !== undefined) {
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Identity  ${clean(result.data.hardwareSerial)}`,
+      );
+    }
+  }
+
+  if (result.command === "pair" && isPairData(result.data)) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Paired ${clean(result.data.endpoint)}`,
+      style.dim("Run adb-ready connect to verify the final device transport.", capabilities),
+    );
+  }
+
   if (hasTargets(result.data)) {
     const targets = result.data.targets;
     lines.push(style.strong(`Targets (${String(targets.length)})`, capabilities));
@@ -155,6 +182,18 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`runtime=${clean(data.runtime.name)}\n`);
     sink.write(`runtime_version=${clean(data.runtime.version)}\n`);
     sink.write(`adb_version=${clean(data.adb.version.platformToolsVersion ?? "unknown")}\n`);
+  }
+  if (isConnectData(result.data)) {
+    sink.write(`endpoint=${clean(result.data.endpoint)}\n`);
+    sink.write(`serial=${clean(result.data.serial)}\n`);
+    sink.write(`state=${clean(result.data.state)}\n`);
+    if (result.data.hardwareSerial !== undefined) {
+      sink.write(`hardware_serial=${clean(result.data.hardwareSerial)}\n`);
+    }
+  }
+  if (isPairData(result.data)) {
+    sink.write(`endpoint=${clean(result.data.endpoint)}\n`);
+    sink.write("paired=true\n");
   }
   if (hasTargets(result.data)) {
     sink.write(`target_count=${String(result.data.targets.length)}\n`);

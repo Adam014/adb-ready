@@ -98,7 +98,7 @@ describe("home screen", () => {
   test("supports the version menu shortcut", async () => {
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("3", "\r"),
+      input: new AutoInput("5", "\r"),
       sink: new MemorySink(),
       capabilities: { ...interactive, animation: false },
     });

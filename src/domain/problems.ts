@@ -21,6 +21,12 @@ export const ProblemCode = {
   TargetUnauthorized: "TARGET_UNAUTHORIZED",
   TargetUnknownState: "TARGET_UNKNOWN_STATE",
   TargetNotFound: "TARGET_NOT_FOUND",
+  InvalidEndpoint: "INVALID_ENDPOINT",
+  InvalidPairingCode: "INVALID_PAIRING_CODE",
+  WirelessEndpointNotFound: "WIRELESS_ENDPOINT_NOT_FOUND",
+  MultipleWirelessEndpoints: "MULTIPLE_WIRELESS_ENDPOINTS",
+  WirelessConnectionFailed: "WIRELESS_CONNECTION_FAILED",
+  WirelessPairingFailed: "WIRELESS_PAIRING_FAILED",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {

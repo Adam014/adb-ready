@@ -8,6 +8,9 @@ const command = [
   "devices",
   "mdns",
   "ro.serialno",
+  "connect",
+  "get-state",
+  "pair",
 ].find((candidate) => args.includes(candidate));
 const scenario = process.env.ADB_READY_FAKE_SCENARIO ?? "ready";
 
@@ -36,6 +39,12 @@ if (scenario === "failure") {
   process.stdout.write("List of discovered mdns services\n");
 } else if (command === "ro.serialno") {
   process.stdout.write("fixture-hardware-serial\n");
+} else if (command === "connect") {
+  process.stdout.write(`connected to ${args.at(-1) ?? "fixture.local:37123"}\n`);
+} else if (command === "get-state") {
+  process.stdout.write("device\n");
+} else if (command === "pair") {
+  process.stdout.write(`Successfully paired to ${args.at(-1) ?? "fixture.local:41234"}\n`);
 } else {
   process.stderr.write(`unsupported fake ADB arguments: ${args.join(" ")}\n`);
   process.exitCode = 1;

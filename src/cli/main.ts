@@ -5,8 +5,10 @@ import {
   type CommandDependencies,
   type CommandExecution,
   type DevicesData,
+  runConnect,
   runDevices,
   runDoctor,
+  runPair,
 } from "../app/commands.js";
 import { loadConfig } from "../config/loader.js";
 import type { ConfigError, ConfigValues } from "../config/types.js";
@@ -21,6 +23,7 @@ import {
 import { ProblemCode } from "../domain/problems.js";
 import type { AndroidTarget } from "../target/model.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
+import { readPairingCode } from "../ui/pairing-code.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
 import { NdjsonEventRenderer, renderResult } from "../ui/result-renderer.js";
 import { type SelectInput, selectOne } from "../ui/select.js";
@@ -39,9 +42,11 @@ Usage:
   adbr [command] [options]
 
 Commands:
+  connect [HOST:PORT]    Connect and verify a wireless Android target
   doctor                 Inspect the local ADB environment
   devices                List visible Android targets
-  help [doctor|devices]  Show help
+  pair [HOST:PORT]       Pair using Android's six-digit pairing code
+  help [COMMAND]         Show help
   version                Show version
 
 Output:
@@ -63,6 +68,7 @@ Execution:
   --select               Interactively select from listed devices
   -s, --device SELECTOR  Select an exact serial or configured alias
   --transport-id ID      Select an exact ADB transport ID
+  --pairing-code-stdin   Read the pairing code from stdin without echoing it
 
 Other:
   -h, --help             Show help
@@ -70,6 +76,11 @@ Other:
 `;
 
 const COMMAND_HELP = {
+  connect: `Usage: adb-ready connect [HOST:PORT] [options]
+
+Connects a TLS/legacy wireless endpoint and verifies its stable ADB serial.
+When the endpoint is omitted, exactly one mDNS connect service must be visible.
+`,
   doctor: `Usage: adb-ready doctor [options]
 
 Runs read-only host, ADB capability, server, and target diagnostics.
@@ -77,6 +88,11 @@ Runs read-only host, ADB capability, server, and target diagnostics.
   devices: `Usage: adb-ready devices [options]
 
 Lists every target visible to ADB. Add --select to open the keyboard picker.
+`,
+  pair: `Usage: adb-ready pair [HOST:PORT] [options]
+
+Pairs with Android Wireless debugging using a hidden six-digit code prompt.
+For automation, pipe the code and add --pairing-code-stdin.
 `,
 } as const;
 
@@ -438,6 +454,48 @@ async function runCliInternal(
   const values = loaded.config.values;
   const errorCapabilities = capabilities(options, values, io, "error", options.format);
   const outputCapabilities = capabilities(options, values, io, "output", options.format);
+  let pairingCode: string | undefined;
+  if (options.command === "pair") {
+    if (!errorCapabilities.interactive && !options.pairingCodeStdin) {
+      const failure = failureResult(
+        "pair",
+        [
+          inputProblem(
+            ProblemCode.InvalidPairingCode,
+            "A pairing code source is required in non-interactive mode.",
+            "Pipe the six-digit code to stdin and add --pairing-code-stdin.",
+          ),
+        ],
+        dependencies,
+      );
+      renderFailure(failure, options.format, io);
+      return ExitCode.InvalidInput;
+    }
+    const input = await readPairingCode({
+      input: io.input,
+      sink: io.error,
+      capabilities: errorCapabilities,
+      fromStdin: options.pairingCodeStdin,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (input.kind !== "submitted") {
+      const interrupted = input.kind === "cancelled" && input.reason !== "eof";
+      const failure = failureResult(
+        "pair",
+        [
+          inputProblem(
+            interrupted ? ProblemCode.OperationInterrupted : ProblemCode.InvalidPairingCode,
+            interrupted ? "Pairing code entry was cancelled." : "No pairing code was received.",
+            "Open Android's pairing-code screen and try again.",
+          ),
+        ],
+        dependencies,
+      );
+      renderFailure(failure, options.format, io);
+      return interrupted ? ExitCode.Interrupted : ExitCode.InvalidInput;
+    }
+    pairingCode = input.value;
+  }
   const bus = dependencies.bus ?? new EventBus(dependencies.clock);
   const progress =
     options.format === "human" && !options.quiet
@@ -460,12 +518,27 @@ async function runCliInternal(
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
   };
 
-  let execution: CommandExecution<DevicesData> | Awaited<ReturnType<typeof runDoctor>>;
+  let execution:
+    | CommandExecution<DevicesData>
+    | Awaited<ReturnType<typeof runConnect>>
+    | Awaited<ReturnType<typeof runDoctor>>
+    | Awaited<ReturnType<typeof runPair>>;
   try {
-    execution =
-      options.command === "doctor"
-        ? await runDoctor(config, commandDependencies, signal)
-        : await runDevices(config, commandDependencies, signal);
+    if (options.command === "doctor") {
+      execution = await runDoctor(config, commandDependencies, signal);
+    } else if (options.command === "devices") {
+      execution = await runDevices(config, commandDependencies, signal);
+    } else if (options.command === "connect") {
+      execution = await runConnect(options.endpoint, config, commandDependencies, signal);
+    } else {
+      execution = await runPair(
+        options.endpoint,
+        pairingCode ?? "",
+        config,
+        commandDependencies,
+        signal,
+      );
+    }
   } finally {
     progress?.dispose();
     events?.dispose();
