@@ -1,6 +1,7 @@
 import process from "node:process";
 import { EventBus } from "../src/core/event-bus.js";
 import { type Problem, type ResultEnvelope, SCHEMA_VERSION } from "../src/domain/contracts.js";
+import { confirmAction } from "../src/ui/confirm.js";
 import { ProgressRenderer } from "../src/ui/progress-renderer.js";
 import { renderResult } from "../src/ui/result-renderer.js";
 import { selectOne } from "../src/ui/select.js";
@@ -15,6 +16,7 @@ type ScenarioName =
   | "slow-progress"
   | "recovery"
   | "interrupt"
+  | "confirmation"
   | "output-modes";
 
 const SCENARIOS: Array<{ value: ScenarioName; label: string; description: string }> = [
@@ -38,6 +40,11 @@ const SCENARIOS: Array<{ value: ScenarioName; label: string; description: string
     description: "Failed probe followed by success",
   },
   { value: "interrupt", label: "Ctrl-C cleanup", description: "Cursor and animation restoration" },
+  {
+    value: "confirmation",
+    label: "Safe confirmation",
+    description: "Action, scope, risk, and automation equivalent",
+  },
   { value: "output-modes", label: "Output modes", description: "Plain, JSON, and NDJSON previews" },
 ];
 
@@ -260,6 +267,23 @@ async function runScenario(name: ScenarioName): Promise<void> {
     } finally {
       process.removeListener("SIGINT", abort);
       renderer.dispose();
+    }
+  } else if (name === "confirmation") {
+    if (capabilities.interactive) {
+      const confirmation = await confirmAction({
+        action: "Clear app data",
+        scope: `${readyDevice.serial} · com.example.fixture`,
+        risk: "destructive",
+        nonInteractiveFlag: "--yes",
+        input: process.stdin,
+        sink: process.stderr,
+        capabilities,
+      });
+      process.stderr.write(`Fixture result: ${confirmation.kind}. No target was changed.\n`);
+    } else {
+      process.stderr.write(
+        "Confirmation unavailable in non-interactive mode. No target was changed.\n",
+      );
     }
   } else {
     const fixture = result([readyDevice]);

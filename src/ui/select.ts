@@ -33,6 +33,7 @@ export interface SelectOptions<T> {
   signal?: AbortSignal;
   preamble?: (frame: number) => readonly string[];
   refreshIntervalMs?: number;
+  help?: string;
 }
 
 function truncate(value: string, width: number): string {
@@ -113,9 +114,9 @@ function renderMenu<T>(
   const bottom = capabilities.unicode ? "╰─" : "+-";
   const rail = capabilities.unicode ? "│" : "|";
   const compact = capabilities.columns < 60;
-  const help = capabilities.unicode
-    ? "↑↓ move · 1-9 jump · enter open"
-    : "up/down · 1-9 jump · enter open";
+  const help =
+    options.help ??
+    (capabilities.unicode ? "↑↓ move · 1-9 jump · enter open" : "up/down · 1-9 jump · enter open");
   const lines = [...(options.preamble?.(frame) ?? [])];
   lines.push(
     `${style.dim(top, capabilities)} ${style.strong(
