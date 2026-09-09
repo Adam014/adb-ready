@@ -47,6 +47,23 @@ describe("runProcess", () => {
     expect(result.stderr).toBe("failure");
   });
 
+  test("writes sensitive input through stdin without retaining it in process evidence", async () => {
+    const secret = "739201";
+    const result = await runProcess({
+      executable: process.execPath,
+      args: [
+        "-e",
+        'let value = ""; process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => process.stdout.write(String(value.length)))',
+      ],
+      input: `${secret}\n`,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("7");
+    expect(result.args.join(" ")).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
   test("terminates a process after its timeout", async () => {
     const result = await runProcess({
       executable: process.execPath,
@@ -97,6 +114,9 @@ describe("runProcess", () => {
     ).rejects.toBeInstanceOf(RangeError);
     await expect(
       runProcess({ executable: process.execPath, maxBufferBytes: -1 }),
+    ).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      runProcess({ executable: process.execPath, stdio: "inherit", input: "secret" }),
     ).rejects.toBeInstanceOf(RangeError);
   });
 });

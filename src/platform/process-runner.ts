@@ -13,6 +13,7 @@ export interface ProcessRequest {
   killSignal?: NodeJS.Signals;
   stdio?: ProcessStdio;
   maxBufferBytes?: number;
+  input?: string | Uint8Array;
 }
 
 export interface ProcessResult {
@@ -95,6 +96,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   ) {
     throw new RangeError("timeoutMs must be a non-negative safe integer");
   }
+  if (request.stdio === "inherit" && request.input !== undefined) {
+    throw new RangeError("input cannot be combined with inherited stdio");
+  }
 
   const stdout = createBoundedCapture(maxBufferBytes);
   const stderr = createBoundedCapture(maxBufferBytes);
@@ -108,13 +112,23 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
       cwd: request.cwd,
       env: { ...process.env, ...request.env },
       shell: false,
-      stdio: stdio === "inherit" ? "inherit" : ["ignore", "pipe", "pipe"],
+      stdio:
+        stdio === "inherit"
+          ? "inherit"
+          : [request.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       windowsHide: true,
     });
 
     if (stdio === "capture") {
       child.stdout?.on("data", (chunk: Uint8Array) => stdout.append(chunk));
       child.stderr?.on("data", (chunk: Uint8Array) => stderr.append(chunk));
+      if (request.input !== undefined) {
+        child.stdin?.on("error", () => {
+          // A child may close stdin before consuming all input. Its exit state
+          // remains the authoritative operation result.
+        });
+        child.stdin?.end(request.input);
+      }
     }
 
     const killSignal = request.killSignal ?? "SIGTERM";

@@ -1,0 +1,6 @@
+List of discovered mdns services
+adb-14141FDF600081         _adb._tcp                 192.168.86.38:5555
+adb-14141FDF600081-QXjCrW  _adb-tls-pairing._tcp     192.168.86.38:33861
+adb-14141FDF600081-TnSdi9  _adb-tls-connect._tcp     192.168.86.38:33015
+adb-ipv6-connect           _adb-tls-connect._tcp     [fd00::1234]:37123
+invalid-unspecified        _adb-tls-connect._tcp     0.0.0.0:4444

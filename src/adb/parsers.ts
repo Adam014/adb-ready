@@ -27,6 +27,34 @@ export interface AdbVersion {
   raw: string;
 }
 
+export type AdbMdnsServiceType = "connect" | "legacy" | "pairing" | "unknown";
+
+export interface AdbNetworkEndpoint {
+  host: string;
+  port: number;
+  serial: string;
+  version: 4 | 6 | "hostname";
+}
+
+export interface AdbMdnsService {
+  instance: string;
+  rawServiceType: string;
+  serviceType: AdbMdnsServiceType;
+  endpoint: AdbNetworkEndpoint;
+}
+
+export interface AdbConnectResult {
+  status: "already-connected" | "connected" | "failed" | "unknown";
+  endpoint?: string;
+  message: string;
+}
+
+export interface AdbPairResult {
+  paired: boolean;
+  endpoint?: string;
+  message: string;
+}
+
 const KNOWN_STATES = new Set<AdbDeviceState>([
   "bootloader",
   "device",
@@ -140,4 +168,141 @@ export function parseKeyValueLines(output: string): Record<string, string> {
     }
   }
   return values;
+}
+
+export function parseAdbNetworkEndpoint(value: string): AdbNetworkEndpoint | undefined {
+  const normalized = value.trim();
+  const bracketed = normalized.startsWith("[");
+  const separator = bracketed ? normalized.lastIndexOf("]:") : normalized.lastIndexOf(":");
+  const host = bracketed ? normalized.slice(1, separator) : normalized.slice(0, separator);
+  const portText = normalized.slice(separator + (bracketed ? 2 : 1));
+  const port = Number(portText);
+  if (
+    separator < 1 ||
+    host === "" ||
+    (!bracketed &&
+      (host.includes(":") || host.includes("[") || host.includes("]") || /\s/u.test(host))) ||
+    (bracketed && (host.includes("[") || host.includes("]"))) ||
+    !/^\d+$/u.test(portText) ||
+    host === "0.0.0.0" ||
+    host === "::" ||
+    !Number.isSafeInteger(port) ||
+    port < 1 ||
+    port > 65_535
+  ) {
+    return undefined;
+  }
+
+  const version = bracketed ? 6 : /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(host) ? 4 : "hostname";
+  if (version === 4 && host.split(".").some((part) => Number(part) > 255)) {
+    return undefined;
+  }
+
+  return {
+    host,
+    port,
+    serial: version === 6 ? `[${host}]:${String(port)}` : `${host}:${String(port)}`,
+    version,
+  };
+}
+
+function mdnsServiceType(value: string): AdbMdnsServiceType {
+  if (value === "_adb-tls-connect._tcp") {
+    return "connect";
+  }
+  if (value === "_adb-tls-pairing._tcp") {
+    return "pairing";
+  }
+  if (value === "_adb._tcp") {
+    return "legacy";
+  }
+  return "unknown";
+}
+
+export function parseAdbMdnsServices(output: string): AdbMdnsService[] {
+  const services: AdbMdnsService[] = [];
+  const seen = new Set<string>();
+
+  for (const rawLine of output.replaceAll("\r\n", "\n").split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line === "List of discovered mdns services") {
+      continue;
+    }
+
+    const match = line.match(/^(.*?)\s+(_adb(?:-tls-(?:pairing|connect))?\._tcp)\s+(\S+)$/u);
+    if (match === null) {
+      continue;
+    }
+    const instance = match[1]?.trim();
+    const rawServiceType = match[2];
+    const endpoint = parseAdbNetworkEndpoint(match[3] ?? "");
+    if (
+      instance === undefined ||
+      instance === "" ||
+      rawServiceType === undefined ||
+      endpoint === undefined
+    ) {
+      continue;
+    }
+
+    const key = `${rawServiceType}\0${instance}\0${endpoint.serial}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    services.push({
+      instance,
+      rawServiceType,
+      serviceType: mdnsServiceType(rawServiceType),
+      endpoint,
+    });
+  }
+
+  return services.sort((left, right) =>
+    `${left.serviceType}\0${left.instance}\0${left.endpoint.serial}`.localeCompare(
+      `${right.serviceType}\0${right.instance}\0${right.endpoint.serial}`,
+    ),
+  );
+}
+
+export function parseAdbConnectResult(output: string): AdbConnectResult {
+  const message = output.replaceAll("\r\n", "\n").trim();
+  const already = message.match(/already connected to\s+(\S+)/iu);
+  if (already !== null) {
+    return {
+      status: "already-connected",
+      ...(already[1] === undefined ? {} : { endpoint: already[1] }),
+      message,
+    };
+  }
+  const connected = message.match(/(?:^|\n)connected to\s+(\S+)/iu);
+  if (connected !== null) {
+    return {
+      status: "connected",
+      ...(connected[1] === undefined ? {} : { endpoint: connected[1] }),
+      message,
+    };
+  }
+  return {
+    status: /failed|cannot|unable|error/iu.test(message) ? "failed" : "unknown",
+    message,
+  };
+}
+
+export function parseAdbPairResult(output: string): AdbPairResult {
+  const message = output.replaceAll("\r\n", "\n").trim();
+  const success = message.match(/successfully paired to\s+(\S+)/iu);
+  return {
+    paired: success !== null,
+    ...(success?.[1] === undefined ? {} : { endpoint: success[1] }),
+    message,
+  };
+}
+
+export function parseSingleLine(output: string): string | undefined {
+  return output
+    .replaceAll("\r\n", "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
 }

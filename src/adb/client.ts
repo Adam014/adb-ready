@@ -8,12 +8,19 @@ import {
   runProcess,
 } from "../platform/process-runner.js";
 import {
+  type AdbConnectResult,
   type AdbDevice,
+  type AdbMdnsService,
+  type AdbPairResult,
   type AdbVersion,
+  parseAdbConnectResult,
   parseAdbDevices,
+  parseAdbMdnsServices,
+  parseAdbPairResult,
   parseAdbVersion,
   parseFeatureList,
   parseKeyValueLines,
+  parseSingleLine,
 } from "./parsers.js";
 
 export interface AdbClientOptions {
@@ -71,7 +78,7 @@ export class AdbClient {
       ["version"],
       parseAdbVersion,
       signal,
-      false,
+      { useServerArguments: false },
     );
   }
 
@@ -105,6 +112,67 @@ export class AdbClient {
     );
   }
 
+  async mdnsServices(signal?: AbortSignal): Promise<AdbObservation<AdbMdnsService[]>> {
+    return await this.#observe(
+      "mdns-services",
+      "Discovering wireless Android services",
+      ["mdns", "services"],
+      parseAdbMdnsServices,
+      signal,
+    );
+  }
+
+  async getState(
+    serial: string,
+    signal?: AbortSignal,
+  ): Promise<AdbObservation<string | undefined>> {
+    return await this.#observe(
+      "get-state",
+      `Verifying Android target ${serial}`,
+      ["-s", serial, "get-state"],
+      parseSingleLine,
+      signal,
+    );
+  }
+
+  async getHardwareSerial(
+    serial: string,
+    signal?: AbortSignal,
+  ): Promise<AdbObservation<string | undefined>> {
+    return await this.#observe(
+      "hardware-serial",
+      `Reading stable identity for ${serial}`,
+      ["-s", serial, "shell", "getprop", "ro.serialno"],
+      parseSingleLine,
+      signal,
+    );
+  }
+
+  async connect(endpoint: string, signal?: AbortSignal): Promise<AdbObservation<AdbConnectResult>> {
+    return await this.#observe(
+      "connect",
+      `Connecting Android target ${endpoint}`,
+      ["connect", endpoint],
+      parseAdbConnectResult,
+      signal,
+    );
+  }
+
+  async pair(
+    endpoint: string,
+    pairingCode: string,
+    signal?: AbortSignal,
+  ): Promise<AdbObservation<AdbPairResult>> {
+    return await this.#observe(
+      "pair",
+      `Pairing Android target ${endpoint}`,
+      ["pair", endpoint],
+      parseAdbPairResult,
+      signal,
+      { input: `${pairingCode}\n` },
+    );
+  }
+
   #serverArguments(): string[] {
     return [
       ...(this.#options.host === undefined ? [] : ["-H", this.#options.host]),
@@ -118,11 +186,14 @@ export class AdbClient {
     args: string[],
     parse: (output: string) => T,
     signal: AbortSignal | undefined,
-    useServerArguments = true,
+    options: { input?: string | Uint8Array; useServerArguments?: boolean } = {},
   ): Promise<AdbObservation<T>> {
     const operationId = this.#idFactory();
     const correlation = { commandId: this.#options.correlation.commandId, operationId };
-    const finalArgs = [...(useServerArguments ? this.#serverArguments() : []), ...args];
+    const finalArgs = [
+      ...(options.useServerArguments === false ? [] : this.#serverArguments()),
+      ...args,
+    ];
 
     this.#options.bus.emit({
       type: "operation.started",
@@ -138,6 +209,7 @@ export class AdbClient {
       args: finalArgs,
       ...(this.#options.timeoutMs === undefined ? {} : { timeoutMs: this.#options.timeoutMs }),
       ...(signal === undefined ? {} : { signal }),
+      ...(options.input === undefined ? {} : { input: options.input }),
     };
     const result = await this.#runner(request);
     const succeeded =

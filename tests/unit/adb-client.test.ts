@@ -126,4 +126,68 @@ describe("AdbClient", () => {
 
     expect(events).toEqual(["operation.started", "operation.failed"]);
   });
+
+  test("passes pairing codes over stdin and never exposes them in event arguments", async () => {
+    const requests: ProcessRequest[] = [];
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events: unknown[] = [];
+    bus.subscribe((event) => events.push(event));
+    const runner: ProcessRunner = async (request) => {
+      requests.push(request);
+      return processResult({
+        args: [...(request.args ?? [])],
+        stdout: "Enter pairing code: Successfully paired to 192.168.1.8:37123\n",
+      });
+    };
+    const client = new AdbClient({
+      executable: "adb",
+      bus,
+      correlation: { commandId: "command-1" },
+      runner,
+      idFactory: () => "operation-1",
+    });
+
+    const observation = await client.pair("192.168.1.8:37123", "739201");
+
+    expect(requests[0]?.args).toEqual(["pair", "192.168.1.8:37123"]);
+    expect(requests[0]?.input).toBe("739201\n");
+    expect(observation.value).toMatchObject({ paired: true, endpoint: "192.168.1.8:37123" });
+    expect(JSON.stringify(events)).not.toContain("739201");
+    expect(JSON.stringify(observation.process)).not.toContain("739201");
+  });
+
+  test("uses explicit target arguments for state and identity probes", async () => {
+    const requests: ProcessRequest[] = [];
+    const runner: ProcessRunner = async (request) => {
+      requests.push(request);
+      return processResult({ args: [...(request.args ?? [])], stdout: "R5CT-001\n" });
+    };
+    const client = new AdbClient({
+      executable: "adb",
+      host: "remote.example",
+      port: 5037,
+      bus: new EventBus(),
+      correlation: { commandId: "command-1" },
+      runner,
+      idFactory: () => "operation-1",
+    });
+
+    await client.getHardwareSerial("192.168.1.8:37123");
+    await client.getState("192.168.1.8:37123");
+
+    expect(requests.map(({ args }) => args)).toEqual([
+      [
+        "-H",
+        "remote.example",
+        "-P",
+        "5037",
+        "-s",
+        "192.168.1.8:37123",
+        "shell",
+        "getprop",
+        "ro.serialno",
+      ],
+      ["-H", "remote.example", "-P", "5037", "-s", "192.168.1.8:37123", "get-state"],
+    ]);
+  });
 });
