@@ -1,0 +1,120 @@
+import { describe, expect, test } from "bun:test";
+import { EventBus } from "../../src/core/event-bus.js";
+import { type ResultEnvelope, SCHEMA_VERSION } from "../../src/domain/contracts.js";
+import { NdjsonEventRenderer, renderResult } from "../../src/ui/result-renderer.js";
+import type { TextSink } from "../../src/ui/spinner.js";
+import type { TerminalCapabilities } from "../../src/ui/terminal.js";
+
+class MemorySink implements TextSink {
+  value = "";
+
+  write(chunk: string): void {
+    this.value += chunk;
+  }
+}
+
+const capabilities: TerminalCapabilities = {
+  interactive: false,
+  color: false,
+  unicode: false,
+  animation: false,
+  columns: 120,
+};
+
+const result: ResultEnvelope<{
+  adbPath: string;
+  devices: Array<{
+    serial: string;
+    state: "device";
+    model: string;
+    properties: Record<string, string>;
+    unparsed: string[];
+  }>;
+}> = {
+  schemaVersion: SCHEMA_VERSION,
+  command: "devices",
+  commandId: "command-1",
+  ok: true,
+  startedAt: "2026-09-09T10:00:00.000Z",
+  finishedAt: "2026-09-09T10:00:00.010Z",
+  durationMs: 10,
+  data: {
+    adbPath: "~/Android/sdk/platform-tools/adb",
+    devices: [
+      {
+        serial: "emulator-5554",
+        state: "device",
+        model: "Pixel 9",
+        properties: {},
+        unparsed: [],
+      },
+    ],
+  },
+  problems: [],
+};
+
+describe("result renderer", () => {
+  test("writes the complete envelope as uncontaminated JSON", () => {
+    const sink = new MemorySink();
+    renderResult(result, { format: "json", capabilities, sink });
+
+    expect(sink.value).not.toContain("\u001b");
+    expect(JSON.parse(sink.value)).toEqual(result);
+  });
+
+  test("renders a compact ASCII human target summary", () => {
+    const sink = new MemorySink();
+    renderResult(result, { format: "human", capabilities, sink });
+
+    expect(sink.value).toContain("ADB Ready · devices");
+    expect(sink.value).toContain("Targets (1)");
+    expect(sink.value).toContain("`- Pixel 9 · emulator-5554 · device");
+    expect(sink.value).not.toContain("\u001b");
+  });
+
+  test("plain output is stable, line-oriented, and free of terminal controls", () => {
+    const sink = new MemorySink();
+    renderResult(result, { format: "plain", capabilities, sink });
+
+    expect(sink.value).toBe(
+      "command=devices\nok=true\nduration_ms=10\ndevice_count=1\ndevice_0=Pixel 9 · emulator-5554 · device\n",
+    );
+    expect(sink.value).not.toContain("\u001b");
+  });
+
+  test("streams events and the final result as independently valid NDJSON records", () => {
+    const sink = new MemorySink();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events = new NdjsonEventRenderer(bus, sink);
+    bus.emit({
+      type: "operation.started",
+      source: "adb.devices",
+      severity: "info",
+      message: "Discovering targets",
+      correlation: { commandId: "command-1" },
+    });
+    events.dispose();
+    renderResult(result, { format: "ndjson", capabilities, sink });
+
+    const records = sink.value
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({ kind: "event", type: "operation.started" });
+    expect(records[1]).toMatchObject({ kind: "result", command: "devices", ok: true });
+  });
+
+  test("sanitizes terminal control characters from human-facing device fields", () => {
+    const sink = new MemorySink();
+    const unsafe = structuredClone(result);
+    const device = unsafe.data?.devices[0];
+    if (device !== undefined) {
+      device.model = "Pixel\u001b[31m\nspoofed";
+    }
+    renderResult(unsafe, { format: "human", capabilities, sink });
+
+    expect(sink.value).toContain("Pixel spoofed");
+    expect(sink.value).not.toContain("\u001b");
+  });
+});

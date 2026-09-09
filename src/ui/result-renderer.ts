@@ -1,0 +1,156 @@
+import type { AdbDevice } from "../adb/parsers.js";
+import type { DevicesData, DoctorData } from "../app/commands.js";
+import type { OutputFormat } from "../cli/arguments.js";
+import type { EventBus } from "../core/event-bus.js";
+import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
+import type { TextSink } from "./spinner.js";
+import { sanitizeTerminalText, style, symbols } from "./style.js";
+import type { TerminalCapabilities } from "./terminal.js";
+
+export type CommandResult = ResultEnvelope<DevicesData | DoctorData>;
+
+export interface ResultRenderOptions {
+  format: OutputFormat;
+  capabilities: TerminalCapabilities;
+  sink: TextSink;
+  verbose?: boolean;
+}
+
+function clean(value: unknown): string {
+  return sanitizeTerminalText(String(value));
+}
+
+function deviceLabel(device: AdbDevice): string {
+  const identity = device.model ?? device.product ?? device.device;
+  return identity === undefined
+    ? `${clean(device.serial)} · ${clean(device.state)}`
+    : `${clean(identity)} · ${clean(device.serial)} · ${clean(device.state)}`;
+}
+
+function problemLines(
+  problem: Problem,
+  capabilities: TerminalCapabilities,
+  verbose: boolean,
+): string[] {
+  const glyphs = symbols(capabilities);
+  const marker =
+    problem.severity === "error"
+      ? style.failure(glyphs.failure, capabilities)
+      : style.warning(glyphs.warning, capabilities);
+  const lines = [
+    `${marker} ${style.strong(clean(problem.summary), capabilities)}`,
+    `  ${clean(problem.detail)}`,
+  ];
+  const action = problem.actions[0];
+  if (action !== undefined) {
+    lines.push(`  ${style.accent("Next:", capabilities)} ${clean(action.title)}`);
+  }
+  if (verbose) {
+    for (const evidence of problem.evidence) {
+      const field =
+        evidence.field === undefined ? evidence.source : `${evidence.source}.${evidence.field}`;
+      lines.push(
+        `  ${style.dim(`${clean(field)}: ${clean(JSON.stringify(evidence.value))}`, capabilities)}`,
+      );
+    }
+  }
+  return lines;
+}
+
+function renderHuman(result: CommandResult, options: ResultRenderOptions): void {
+  const { capabilities, sink } = options;
+  const glyphs = symbols(capabilities);
+  const lines: string[] = [];
+  lines.push(
+    `${style.strong("ADB Ready", capabilities)} ${style.dim(`· ${clean(result.command)}`, capabilities)}`,
+    "",
+  );
+
+  if (result.command === "doctor" && result.data !== null && "runtime" in result.data) {
+    const data = result.data as DoctorData;
+    const runtime = `${data.runtime.name} ${data.runtime.version}`;
+    const adbVersion = data.adb.version.platformToolsVersion ?? "unknown version";
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Runtime  ${clean(runtime)} · ${clean(data.runtime.platform)}/${clean(data.runtime.architecture)}`,
+      `${style.success(glyphs.success, capabilities)} ADB      Platform-Tools ${clean(adbVersion)}`,
+      `${style.success(glyphs.success, capabilities)} Path     ${clean(data.adb.path)}`,
+      `${style.success(glyphs.success, capabilities)} Features ${String(data.adb.hostFeatures.length)} detected`,
+      "",
+    );
+  }
+
+  if (result.data !== null && "devices" in result.data) {
+    const devices = result.data.devices;
+    lines.push(style.strong(`Targets (${String(devices.length)})`, capabilities));
+    if (devices.length === 0) {
+      lines.push(`${style.dim(glyphs.end, capabilities)} None visible`);
+    } else {
+      devices.forEach((device, index) => {
+        const branch = index === devices.length - 1 ? glyphs.end : glyphs.branch;
+        lines.push(`${style.dim(branch, capabilities)} ${deviceLabel(device)}`);
+      });
+    }
+  }
+
+  if (result.problems.length > 0) {
+    lines.push("", style.strong("Diagnostics", capabilities));
+    for (const problem of result.problems) {
+      lines.push(...problemLines(problem, capabilities, options.verbose ?? false));
+    }
+  }
+
+  const status = result.ok
+    ? `${style.success(glyphs.success, capabilities)} Completed in ${String(result.durationMs)}ms`
+    : `${style.failure(glyphs.failure, capabilities)} Failed in ${String(result.durationMs)}ms`;
+  lines.push("", status);
+  sink.write(`${lines.join("\n")}\n`);
+}
+
+function renderPlain(result: CommandResult, sink: TextSink): void {
+  sink.write(`command=${clean(result.command)}\n`);
+  sink.write(`ok=${String(result.ok)}\n`);
+  sink.write(`duration_ms=${String(result.durationMs)}\n`);
+  if (result.data !== null && "runtime" in result.data) {
+    const data = result.data as DoctorData;
+    sink.write(`runtime=${clean(data.runtime.name)}\n`);
+    sink.write(`runtime_version=${clean(data.runtime.version)}\n`);
+    sink.write(`adb_version=${clean(data.adb.version.platformToolsVersion ?? "unknown")}\n`);
+  }
+  if (result.data !== null && "devices" in result.data) {
+    sink.write(`device_count=${String(result.data.devices.length)}\n`);
+    result.data.devices.forEach((device, index) => {
+      sink.write(`device_${String(index)}=${deviceLabel(device)}\n`);
+    });
+  }
+  for (const problem of result.problems) {
+    sink.write(`problem=${clean(problem.code)}:${clean(problem.summary)}\n`);
+  }
+}
+
+export function renderResult(result: CommandResult, options: ResultRenderOptions): void {
+  if (options.format === "json") {
+    options.sink.write(`${JSON.stringify(result)}\n`);
+  } else if (options.format === "ndjson") {
+    options.sink.write(`${JSON.stringify({ kind: "result", ...result })}\n`);
+  } else if (options.format === "plain") {
+    renderPlain(result, options.sink);
+  } else {
+    renderHuman(result, options);
+  }
+}
+
+export class NdjsonEventRenderer {
+  readonly #unsubscribe: () => void;
+
+  constructor(bus: EventBus, sink: TextSink) {
+    this.#unsubscribe = bus.subscribe((event) => this.write(event, sink));
+  }
+
+  dispose(): void {
+    this.#unsubscribe();
+  }
+
+  private write(event: AdbReadyEvent, sink: TextSink): void {
+    sink.write(`${JSON.stringify({ kind: "event", ...event })}\n`);
+  }
+}
