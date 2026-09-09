@@ -178,16 +178,23 @@ export function defaultUserConfigPath(
   env: NodeJS.ProcessEnv,
   homeDirectory: string,
 ): string {
+  const platformPath = platform === "win32" ? path.win32 : path.posix;
   if (env.XDG_CONFIG_HOME !== undefined && env.XDG_CONFIG_HOME.trim() !== "") {
-    return path.join(env.XDG_CONFIG_HOME, "adb-ready", "config.json");
+    return platformPath.join(env.XDG_CONFIG_HOME, "adb-ready", "config.json");
   }
   if (platform === "win32" && env.APPDATA !== undefined && env.APPDATA.trim() !== "") {
-    return path.win32.join(env.APPDATA, "adb-ready", "config.json");
+    return platformPath.join(env.APPDATA, "adb-ready", "config.json");
   }
   if (platform === "darwin") {
-    return path.join(homeDirectory, "Library", "Application Support", "adb-ready", "config.json");
+    return platformPath.join(
+      homeDirectory,
+      "Library",
+      "Application Support",
+      "adb-ready",
+      "config.json",
+    );
   }
-  return path.join(homeDirectory, ".config", "adb-ready", "config.json");
+  return platformPath.join(homeDirectory, ".config", "adb-ready", "config.json");
 }
 
 export async function findProjectConfig(startDirectory: string): Promise<string | undefined> {
