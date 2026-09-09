@@ -34,6 +34,7 @@ function processResult(
     timedOut: false,
     aborted: false,
     stoppedAfterIdle: false,
+    killEscalated: false,
     ...overrides,
   };
 }

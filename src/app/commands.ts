@@ -134,6 +134,7 @@ interface CommandContext {
 function processSucceeded(result: ProcessResult): boolean {
   return (
     result.spawnError === undefined &&
+    result.streamError === undefined &&
     (result.exitCode === 0 || result.stoppedAfterIdle) &&
     !result.timedOut &&
     !result.aborted

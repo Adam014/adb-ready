@@ -76,6 +76,7 @@ function result(request: ProcessRequest, stdout: string): ProcessResult {
     timedOut: false,
     aborted: false,
     stoppedAfterIdle: false,
+    killEscalated: false,
   };
 }
 

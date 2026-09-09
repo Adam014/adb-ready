@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -8,6 +8,7 @@ import { runProcess } from "../../src/platform/process-runner.js";
 import { detectRuntime } from "../../src/platform/runtime.js";
 
 const temporaryDirectories: string[] = [];
+const testOnUnix = process.platform === "win32" ? test.skip : test;
 
 afterEach(async () => {
   await Promise.all(
@@ -106,6 +107,83 @@ describe("runProcess", () => {
     expect(result.aborted).toBe(false);
   });
 
+  test("streams raw chunks while preserving split UTF-8 and malformed bytes in capture", async () => {
+    const streamed: Uint8Array[] = [];
+    const result = await runProcess({
+      executable: process.execPath,
+      args: [
+        "-e",
+        "const chunks=[[0x41,0xf0],[0x9f,0x98],[0x80,0xc3]]; let i=0; const next=()=>{ if(i===chunks.length) return; process.stdout.write(Buffer.from(chunks[i++])); setTimeout(next,5); }; next();",
+      ],
+      onStdoutChunk: (chunk) => streamed.push(chunk),
+    });
+    const merged = new Uint8Array(streamed.reduce((size, chunk) => size + chunk.byteLength, 0));
+    let offset = 0;
+    for (const chunk of streamed) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+
+    expect(result.stdout).toBe("A😀�");
+    expect(new TextDecoder().decode(merged)).toBe(result.stdout);
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("contains stream callback failures and terminates the owned child", async () => {
+    const result = await runProcess({
+      executable: process.execPath,
+      args: ["-e", 'process.stdout.write("ready"); setTimeout(() => {}, 10_000)'],
+      onStdoutChunk: () => {
+        throw new Error("fixture consumer failed");
+      },
+      killGraceMs: 50,
+      timeoutMs: 1_000,
+    });
+
+    expect(result.streamError).toEqual({
+      stream: "stdout",
+      message: "fixture consumer failed",
+    });
+    expect(result.timedOut).toBe(false);
+    expect(result.signal).not.toBeNull();
+  });
+
+  testOnUnix("escalates termination when an owned child ignores SIGTERM", async () => {
+    const result = await runProcess({
+      executable: process.execPath,
+      args: [
+        "-e",
+        'process.on("SIGTERM", () => {}); process.stdout.write("ready"); setInterval(() => {}, 1000)',
+      ],
+      stopAfterIdleMs: 20,
+      killGraceMs: 20,
+      timeoutMs: 1_000,
+    });
+
+    expect(result.stoppedAfterIdle).toBe(true);
+    expect(result.killEscalated).toBe(true);
+    expect(result.signal).toBe("SIGKILL");
+    expect(result.timedOut).toBe(false);
+  });
+
+  test("applies an explicit working directory and environment overlay", async () => {
+    const directory = await temporaryDirectory();
+    const result = await runProcess({
+      executable: process.execPath,
+      args: [
+        "-e",
+        "process.stdout.write(JSON.stringify({cwd: process.cwd(), value: process.env.ADB_READY_FIXTURE}))",
+      ],
+      cwd: directory,
+      env: { ADB_READY_FIXTURE: "portable" },
+    });
+
+    expect(JSON.parse(result.stdout)).toEqual({
+      cwd: await realpath(directory),
+      value: "portable",
+    });
+  });
+
   test("bounds captured output while continuing to drain the child", async () => {
     const result = await runProcess({
       executable: process.execPath,
@@ -134,6 +212,9 @@ describe("runProcess", () => {
     ).rejects.toBeInstanceOf(RangeError);
     await expect(
       runProcess({ executable: process.execPath, stopAfterIdleMs: 0 }),
+    ).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      runProcess({ executable: process.execPath, killGraceMs: -1 }),
     ).rejects.toBeInstanceOf(RangeError);
     await expect(
       runProcess({ executable: process.execPath, stdio: "inherit", input: "secret" }),

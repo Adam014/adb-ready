@@ -49,6 +49,8 @@ function processMetadata(result: ProcessResult): Record<string, JsonValue> {
     timedOut: result.timedOut,
     aborted: result.aborted,
     stoppedAfterIdle: result.stoppedAfterIdle,
+    killEscalated: result.killEscalated,
+    ...(result.streamError === undefined ? {} : { streamError: result.streamError }),
     stdoutTruncated: result.stdoutTruncated,
     stderrTruncated: result.stderrTruncated,
     ...(result.spawnError === undefined
@@ -244,6 +246,7 @@ export class AdbClient {
     const result = await this.#runner(request);
     const succeeded =
       result.spawnError === undefined &&
+      result.streamError === undefined &&
       !result.timedOut &&
       !result.aborted &&
       (result.exitCode === 0 || (options.acceptIdleStop === true && result.stoppedAfterIdle));

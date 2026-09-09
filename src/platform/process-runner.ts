@@ -11,9 +11,12 @@ export interface ProcessRequest {
   signal?: AbortSignal;
   timeoutMs?: number;
   killSignal?: NodeJS.Signals;
+  killGraceMs?: number;
   stdio?: ProcessStdio;
   maxBufferBytes?: number;
   stopAfterIdleMs?: number;
+  onStdoutChunk?: (chunk: Uint8Array) => void;
+  onStderrChunk?: (chunk: Uint8Array) => void;
   input?: string | Uint8Array;
 }
 
@@ -32,8 +35,13 @@ export interface ProcessResult {
   timedOut: boolean;
   aborted: boolean;
   stoppedAfterIdle: boolean;
+  killEscalated: boolean;
   spawnError?: {
     code?: string;
+    message: string;
+  };
+  streamError?: {
+    stream: "stderr" | "stdout";
     message: string;
   };
 }
@@ -41,6 +49,7 @@ export interface ProcessResult {
 export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
 
 const DEFAULT_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+const DEFAULT_KILL_GRACE_MS = 1_000;
 
 interface BoundedCapture {
   append(chunk: Uint8Array): void;
@@ -88,6 +97,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   const started = new Date();
   const startedAt = started.toISOString();
   const maxBufferBytes = request.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES;
+  const killGraceMs = request.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
 
   if (!Number.isSafeInteger(maxBufferBytes) || maxBufferBytes < 0) {
     throw new RangeError("maxBufferBytes must be a non-negative safe integer");
@@ -97,6 +107,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
     (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 0)
   ) {
     throw new RangeError("timeoutMs must be a non-negative safe integer");
+  }
+  if (!Number.isSafeInteger(killGraceMs) || killGraceMs < 0) {
+    throw new RangeError("killGraceMs must be a non-negative safe integer");
   }
   if (
     request.stopAfterIdleMs !== undefined &&
@@ -110,6 +123,12 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   if (request.stdio === "inherit" && request.stopAfterIdleMs !== undefined) {
     throw new RangeError("stopAfterIdleMs cannot be combined with inherited stdio");
   }
+  if (
+    request.stdio === "inherit" &&
+    (request.onStdoutChunk !== undefined || request.onStderrChunk !== undefined)
+  ) {
+    throw new RangeError("stream callbacks cannot be combined with inherited stdio");
+  }
 
   const stdout = createBoundedCapture(maxBufferBytes);
   const stderr = createBoundedCapture(maxBufferBytes);
@@ -117,7 +136,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   let timedOut = false;
   let aborted = request.signal?.aborted ?? false;
   let stoppedAfterIdle = false;
+  let killEscalated = false;
   let spawnError: ProcessResult["spawnError"];
+  let streamError: ProcessResult["streamError"];
 
   return await new Promise<ProcessResult>((resolve) => {
     const child = spawn(request.executable, args, {
@@ -133,6 +154,21 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
 
     const killSignal = request.killSignal ?? "SIGTERM";
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let escalationTimer: ReturnType<typeof setTimeout> | undefined;
+    const terminate = () => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+      }
+      child.kill(killSignal);
+      if (killSignal !== "SIGKILL" && escalationTimer === undefined) {
+        escalationTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) {
+            killEscalated = true;
+            child.kill("SIGKILL");
+          }
+        }, killGraceMs);
+      }
+    };
     const touchIdleTimer = () => {
       if (request.stopAfterIdleMs === undefined || stoppedAfterIdle) {
         return;
@@ -142,20 +178,40 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
       }
       idleTimer = setTimeout(() => {
         stoppedAfterIdle = true;
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill(killSignal);
-        }
+        terminate();
       }, request.stopAfterIdleMs);
     };
 
     if (stdio === "capture") {
       child.stdout?.on("data", (chunk: Uint8Array) => {
         stdout.append(chunk);
-        touchIdleTimer();
+        try {
+          request.onStdoutChunk?.(new Uint8Array(chunk));
+        } catch (caught) {
+          streamError ??= {
+            stream: "stdout",
+            message: caught instanceof Error ? caught.message : String(caught),
+          };
+          terminate();
+        }
+        if (streamError === undefined) {
+          touchIdleTimer();
+        }
       });
       child.stderr?.on("data", (chunk: Uint8Array) => {
         stderr.append(chunk);
-        touchIdleTimer();
+        try {
+          request.onStderrChunk?.(new Uint8Array(chunk));
+        } catch (caught) {
+          streamError ??= {
+            stream: "stderr",
+            message: caught instanceof Error ? caught.message : String(caught),
+          };
+          terminate();
+        }
+        if (streamError === undefined) {
+          touchIdleTimer();
+        }
       });
       if (request.input !== undefined) {
         child.stdin?.on("error", () => {
@@ -168,9 +224,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
 
     const abort = () => {
       aborted = true;
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill(killSignal);
-      }
+      terminate();
     };
 
     request.signal?.addEventListener("abort", abort, { once: true });
@@ -186,9 +240,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
             if (idleTimer !== undefined) {
               clearTimeout(idleTimer);
             }
-            if (child.exitCode === null && child.signalCode === null) {
-              child.kill(killSignal);
-            }
+            terminate();
           }, request.timeoutMs);
 
     child.once("error", (error: NodeJS.ErrnoException) => {
@@ -204,6 +256,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
       }
       if (idleTimer !== undefined) {
         clearTimeout(idleTimer);
+      }
+      if (escalationTimer !== undefined) {
+        clearTimeout(escalationTimer);
       }
       request.signal?.removeEventListener("abort", abort);
 
@@ -223,7 +278,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
         timedOut,
         aborted,
         stoppedAfterIdle,
+        killEscalated,
         ...(spawnError === undefined ? {} : { spawnError }),
+        ...(streamError === undefined ? {} : { streamError }),
       });
     });
   });
