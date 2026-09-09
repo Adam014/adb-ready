@@ -67,6 +67,7 @@ Execution:
   --adb-host HOST        Use an explicit ADB server host
   --adb-port PORT        Use an explicit ADB server port
   --config PATH          Use an explicit project configuration file
+  --profile NAME         Use a named configuration profile
   --select               Interactively select from listed devices
   -s, --device SELECTOR  Select an exact serial or configured alias
   --transport-id ID      Select an exact ADB transport ID
@@ -452,6 +453,7 @@ async function runCliInternal(
     env: io.env,
     ...(options.configPath === undefined ? {} : { projectConfigPath: options.configPath }),
     explicitProjectConfig: options.configPath !== undefined,
+    ...(options.profileName === undefined ? {} : { profileName: options.profileName }),
     cli: cliConfig(options),
   });
   if (!loaded.ok) {

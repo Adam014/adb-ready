@@ -16,6 +16,7 @@ export interface CliOptions {
   adbHost?: string;
   adbPort?: number;
   configPath?: string;
+  profileName?: string;
   select: boolean;
   device?: string;
   transportId?: string;
@@ -100,6 +101,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let adbHost: string | undefined;
   let adbPort: number | undefined;
   let configPath: string | undefined;
+  let profileName: string | undefined;
   let select = false;
   let device: string | undefined;
   let transportId: string | undefined;
@@ -279,6 +281,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         return failure("CLI_INVALID_VALUE", "--config cannot be empty.", option);
       }
       configPath = value;
+    } else if (option === "--profile") {
+      const value = readValue();
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid profile name: ${value}.`, option);
+      }
+      profileName = value;
     } else {
       return failure("CLI_INVALID_OPTION", `Unknown option: ${option}`, option);
     }
@@ -344,6 +355,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(adbHost === undefined ? {} : { adbHost }),
       ...(adbPort === undefined ? {} : { adbPort }),
       ...(configPath === undefined ? {} : { configPath }),
+      ...(profileName === undefined ? {} : { profileName }),
       select,
       ...(device === undefined ? {} : { device }),
       ...(transportId === undefined ? {} : { transportId }),

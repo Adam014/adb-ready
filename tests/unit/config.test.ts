@@ -214,6 +214,147 @@ describe("loadConfig", () => {
       },
     });
   });
+
+  test("applies a default named profile after project values with explicit inheritance", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "profiles.json");
+    await writeJson(projectFile, {
+      version: 1,
+      timeoutMs: 1_000,
+      defaultProfile: "office",
+      profiles: {
+        base: {
+          timeoutMs: 2_000,
+          output: { animation: false },
+          targets: { aliases: { phone: "USB-BASE" } },
+        },
+        office: {
+          extends: "base",
+          timeoutMs: 3_000,
+          adb: { host: "office-adb" },
+        },
+      },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      config: {
+        values: {
+          timeoutMs: 3_000,
+          animation: false,
+          adbHost: "office-adb",
+          targetAliases: { phone: "USB-BASE" },
+        },
+        profile: { name: "office", source: "project", chain: ["base", "office"] },
+        provenance: {
+          timeoutMs: { source: "profile", location: `${projectFile}#profiles.office` },
+          animation: { source: "profile", location: `${projectFile}#profiles.base` },
+        },
+      },
+    });
+  });
+
+  test("uses CLI then environment profile selection precedence and preserves value precedence", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "profiles.json");
+    await writeJson(projectFile, {
+      version: 1,
+      defaultProfile: "default",
+      profiles: {
+        default: { timeoutMs: 1_000 },
+        environment: { timeoutMs: 2_000 },
+        cli: { timeoutMs: 3_000 },
+      },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: { ADB_READY_PROFILE: "environment", ADB_READY_TIMEOUT_MS: "4000" },
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+      profileName: "cli",
+      cli: { timeoutMs: 5_000 },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      config: {
+        values: { timeoutMs: 5_000 },
+        profile: { name: "cli" },
+        provenance: { timeoutMs: { source: "cli" } },
+      },
+    });
+  });
+
+  test("returns missing references, inheritance cycles, and unknown selections together", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "invalid-profiles.json");
+    await writeJson(projectFile, {
+      version: 1,
+      profiles: {
+        first: { extends: "second" },
+        second: { extends: "first" },
+        orphan: { extends: "missing" },
+      },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+      profileName: "unknown",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.map(({ path: errorPath }) => errorPath)).toContainAllValues([
+        "profiles.second.extends",
+        "profiles.orphan.extends",
+        "profile",
+      ]);
+    }
+  });
+
+  test("never hangs while reporting a selected inheritance cycle", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "cycle.json");
+    await writeJson(projectFile, {
+      version: 1,
+      defaultProfile: "first",
+      profiles: {
+        first: { extends: "second", timeoutMs: 1_000 },
+        second: { extends: "first", timeoutMs: 2_000 },
+      },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errors: [{ path: "profiles.second.extends" }],
+    });
+  });
 });
 
 describe("configuration paths", () => {

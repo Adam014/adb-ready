@@ -1,4 +1,4 @@
-export type ConfigSource = "cli" | "default" | "environment" | "project" | "user";
+export type ConfigSource = "cli" | "default" | "environment" | "profile" | "project" | "user";
 
 export interface ConfigProvenance {
   source: ConfigSource;
@@ -34,6 +34,11 @@ export interface ConfigError {
 export interface LoadedConfig {
   values: ResolvedConfig;
   provenance: Partial<Record<ConfigKey, ConfigProvenance | undefined>>;
+  profile?: {
+    name: string;
+    source: "project" | "user";
+    chain: string[];
+  };
   files: {
     user?: string;
     project?: string;

@@ -14,6 +14,8 @@ describe("parseArguments", () => {
       "--adb=/path with spaces/adb",
       "--timeout",
       "1.5s",
+      "--profile",
+      "android-dev",
       "--no-animation",
     ]);
 
@@ -27,6 +29,7 @@ describe("parseArguments", () => {
         nonInteractive: false,
         animation: false,
         timeoutMs: 1_500,
+        profileName: "android-dev",
         adbPath: "/path with spaces/adb",
         select: true,
         pairingCodeStdin: false,
@@ -138,6 +141,11 @@ describe("parseArguments", () => {
     expect(parseArguments(["doctor", "--adb-port=65536"])).toMatchObject({
       ok: false,
       code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["doctor", "--profile=bad/name"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+      option: "--profile",
     });
   });
 

@@ -20,14 +20,38 @@ export interface LoadConfigOptions {
   userConfigPath?: string;
   projectConfigPath?: string;
   explicitProjectConfig?: boolean;
+  profileName?: string;
   cli?: ConfigValues;
 }
 
+interface ConfigProfile {
+  extends?: string;
+  values: ConfigValues;
+}
+
+interface ValidatedDocument {
+  values: ConfigValues;
+  profiles: Record<string, ConfigProfile>;
+  defaultProfile?: string;
+  errors: ConfigError[];
+}
+
 const DEFAULTS: Required<Pick<ConfigValues, "timeoutMs">> = { timeoutMs: 5_000 };
-const ROOT_KEYS = new Set(["$schema", "version", "adb", "timeoutMs", "output", "targets"]);
+const ROOT_KEYS = new Set([
+  "$schema",
+  "version",
+  "adb",
+  "timeoutMs",
+  "output",
+  "targets",
+  "defaultProfile",
+  "profiles",
+]);
+const PROFILE_KEYS = new Set(["extends", "adb", "timeoutMs", "output", "targets"]);
 const ADB_KEYS = new Set(["path", "host", "port"]);
 const OUTPUT_KEYS = new Set(["color", "unicode", "animation", "interactive"]);
 const TARGET_KEYS = new Set(["aliases"]);
+const PROFILE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -70,12 +94,14 @@ function validateDocument(
   document: unknown,
   source: Extract<ConfigSource, "project" | "user">,
   location: string,
-): { values: ConfigValues; errors: ConfigError[] } {
+): ValidatedDocument {
   const errors: ConfigError[] = [];
   const values: ConfigValues = {};
+  const profiles: Record<string, ConfigProfile> = {};
   if (!isObject(document)) {
     return {
       values,
+      profiles,
       errors: [error(source, location, "$", "Configuration must be a JSON object.")],
     };
   }
@@ -204,7 +230,139 @@ function validateDocument(
     }
   }
 
-  return { values, errors };
+  let defaultProfile: string | undefined;
+  if (document.defaultProfile !== undefined) {
+    if (
+      typeof document.defaultProfile !== "string" ||
+      !PROFILE_NAME.test(document.defaultProfile)
+    ) {
+      errors.push(
+        error(
+          source,
+          location,
+          "defaultProfile",
+          "defaultProfile must be a valid profile name of 1-64 letters, numbers, dots, underscores, or hyphens.",
+        ),
+      );
+    } else {
+      defaultProfile = document.defaultProfile;
+    }
+  }
+
+  if (document.profiles !== undefined) {
+    if (!isObject(document.profiles)) {
+      errors.push(error(source, location, "profiles", "profiles must be an object."));
+    } else {
+      for (const [name, candidate] of Object.entries(document.profiles)) {
+        const prefix = `profiles.${name}.`;
+        if (!PROFILE_NAME.test(name)) {
+          errors.push(
+            error(
+              source,
+              location,
+              `profiles.${name}`,
+              "Profile name must be 1-64 letters, numbers, dots, underscores, or hyphens.",
+            ),
+          );
+          continue;
+        }
+        if (!isObject(candidate)) {
+          errors.push(
+            error(source, location, `profiles.${name}`, "Profile definition must be an object."),
+          );
+          continue;
+        }
+        validateUnknownKeys(candidate, PROFILE_KEYS, prefix, source, location, errors);
+        let parent: string | undefined;
+        if (candidate.extends !== undefined) {
+          if (typeof candidate.extends !== "string" || !PROFILE_NAME.test(candidate.extends)) {
+            errors.push(
+              error(source, location, `${prefix}extends`, "extends must be a valid profile name."),
+            );
+          } else {
+            parent = candidate.extends;
+          }
+        }
+        const profileDocument: Record<string, unknown> = { version: 1 };
+        for (const key of ["adb", "timeoutMs", "output", "targets"] as const) {
+          if (candidate[key] !== undefined) {
+            profileDocument[key] = candidate[key];
+          }
+        }
+        const validated = validateDocument(profileDocument, source, location);
+        errors.push(
+          ...validated.errors.map((item) => ({
+            ...item,
+            path: `${prefix}${item.path}`,
+          })),
+        );
+        profiles[name] = {
+          ...(parent === undefined ? {} : { extends: parent }),
+          values: validated.values,
+        };
+      }
+    }
+  }
+
+  if (defaultProfile !== undefined && profiles[defaultProfile] === undefined) {
+    errors.push(
+      error(
+        source,
+        location,
+        "defaultProfile",
+        `defaultProfile references an unknown profile: ${defaultProfile}`,
+      ),
+    );
+  }
+
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = (name: string): void => {
+    if (visited.has(name)) {
+      return;
+    }
+    const profile = profiles[name];
+    if (profile === undefined) {
+      return;
+    }
+    visiting.add(name);
+    const parent = profile.extends;
+    if (parent !== undefined) {
+      if (profiles[parent] === undefined) {
+        errors.push(
+          error(
+            source,
+            location,
+            `profiles.${name}.extends`,
+            `Profile ${name} extends an unknown profile: ${parent}`,
+          ),
+        );
+      } else if (visiting.has(parent)) {
+        errors.push(
+          error(
+            source,
+            location,
+            `profiles.${name}.extends`,
+            `Profile inheritance cycle detected through ${parent}.`,
+          ),
+        );
+      } else {
+        visit(parent);
+      }
+    }
+    visiting.delete(name);
+    visited.add(name);
+  };
+  for (const name of Object.keys(profiles)) {
+    visit(name);
+  }
+
+  return {
+    values,
+    profiles,
+    ...(defaultProfile === undefined ? {} : { defaultProfile }),
+    errors,
+  };
 }
 
 async function fileExists(file: string): Promise<boolean> {
@@ -258,17 +416,18 @@ async function readConfigDocument(
   file: string,
   source: Extract<ConfigSource, "project" | "user">,
   required: boolean,
-): Promise<{ values: ConfigValues; errors: ConfigError[]; loaded: boolean }> {
+): Promise<ValidatedDocument & { loaded: boolean }> {
   let raw: string;
   try {
     raw = await readFile(file, "utf8");
   } catch (caught) {
     const code = (caught as NodeJS.ErrnoException).code;
     if (!required && code === "ENOENT") {
-      return { values: {}, errors: [], loaded: false };
+      return { values: {}, profiles: {}, errors: [], loaded: false };
     }
     return {
       values: {},
+      profiles: {},
       errors: [
         error(
           source,
@@ -288,6 +447,7 @@ async function readConfigDocument(
   } catch (caught) {
     return {
       values: {},
+      profiles: {},
       errors: [
         error(
           source,
@@ -382,6 +542,28 @@ function applyValues(
   }
 }
 
+function resolveProfile(
+  name: string,
+  profiles: Readonly<Record<string, ConfigProfile>>,
+): Array<{ name: string; values: ConfigValues }> {
+  const chain: Array<{ name: string; values: ConfigValues }> = [];
+  const seen = new Set<string>();
+  let current: string | undefined = name;
+  while (current !== undefined) {
+    if (seen.has(current)) {
+      break;
+    }
+    seen.add(current);
+    const profile: ConfigProfile | undefined = profiles[current];
+    if (profile === undefined) {
+      break;
+    }
+    chain.unshift({ name: current, values: profile.values });
+    current = profile.extends;
+  }
+  return chain;
+}
+
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<ConfigLoadResult> {
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
@@ -413,8 +595,14 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Confi
     applyValues(values, provenance, user.values, "user", userFile);
   }
 
+  let project: ValidatedDocument & { loaded: boolean } = {
+    values: {},
+    profiles: {},
+    errors: [],
+    loaded: false,
+  };
   if (projectFile !== undefined) {
-    const project = await readConfigDocument(projectFile, "project", projectRequired);
+    project = await readConfigDocument(projectFile, "project", projectRequired);
     errors.push(...project.errors);
     if (project.loaded) {
       files.project = projectFile;
@@ -432,6 +620,71 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Confi
     );
   }
 
+  const environmentProfile = env.ADB_READY_PROFILE;
+  const validEnvironmentProfile =
+    environmentProfile !== undefined && PROFILE_NAME.test(environmentProfile)
+      ? environmentProfile
+      : undefined;
+  if (
+    environmentProfile !== undefined &&
+    (environmentProfile.trim() === "" || !PROFILE_NAME.test(environmentProfile))
+  ) {
+    errors.push(
+      error(
+        "environment",
+        "ADB_READY_PROFILE",
+        "ADB_READY_PROFILE",
+        "ADB_READY_PROFILE must be a valid profile name.",
+      ),
+    );
+  }
+  const selectedProfile =
+    options.profileName ?? validEnvironmentProfile ?? project.defaultProfile ?? user.defaultProfile;
+  let loadedProfile: LoadedConfig["profile"];
+  if (selectedProfile !== undefined) {
+    const profileSource =
+      project.profiles[selectedProfile] !== undefined
+        ? { document: project, source: "project" as const, file: projectFile }
+        : user.profiles[selectedProfile] !== undefined
+          ? { document: user, source: "user" as const, file: userFile }
+          : undefined;
+    if (profileSource === undefined) {
+      const selectionSource =
+        options.profileName !== undefined
+          ? { source: "cli" as const, location: "--profile" }
+          : validEnvironmentProfile !== undefined
+            ? { source: "environment" as const, location: "ADB_READY_PROFILE" }
+            : ({
+                source: project.defaultProfile === selectedProfile ? "project" : "user",
+                location: project.defaultProfile === selectedProfile ? projectFile : userFile,
+              } as const);
+      errors.push(
+        error(
+          selectionSource.source,
+          selectionSource.location,
+          "profile",
+          `Unknown configuration profile: ${selectedProfile}`,
+        ),
+      );
+    } else {
+      const chain = resolveProfile(selectedProfile, profileSource.document.profiles);
+      for (const item of chain) {
+        applyValues(
+          values,
+          provenance,
+          item.values,
+          "profile",
+          `${profileSource.file ?? "configuration"}#profiles.${item.name}`,
+        );
+      }
+      loadedProfile = {
+        name: selectedProfile,
+        source: profileSource.source,
+        chain: chain.map(({ name }) => name),
+      };
+    }
+  }
+
   const environment = parseEnvironment(env);
   errors.push(...environment.errors);
   applyValues(values, provenance, environment.values, "environment");
@@ -446,6 +699,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Confi
     config: {
       values: values as LoadedConfig["values"],
       provenance,
+      ...(loadedProfile === undefined ? {} : { profile: loadedProfile }),
       files,
     },
   };

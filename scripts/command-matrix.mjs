@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -138,6 +138,20 @@ try {
     XDG_CONFIG_HOME: path.join(temp, "config"),
     NO_COLOR: "1",
   };
+  const profileConfig = path.join(consumer, "profile-config.json");
+  await writeFile(
+    profileConfig,
+    `${JSON.stringify(
+      {
+        version: 1,
+        profiles: {
+          desk: { targets: { aliases: { pixel: "fixture-usb" } } },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
   let assertions = 0;
 
   for (const alias of ["adb-ready", "adbr"]) {
@@ -167,6 +181,18 @@ try {
     const connectPayload = parseJson(connect.stdout, `${alias} connect JSON`);
     if (connectPayload.data?.serial !== "192.0.2.10:37123") {
       throw new Error(`${alias} connect: final serial was not verified`);
+    }
+    assertions += 1;
+
+    const profileSelection = command(
+      alias,
+      ["devices", "--config", profileConfig, "--profile", "desk", "--device", "pixel", "--json"],
+      env,
+    );
+    expectStatus(profileSelection, 0, `${alias} named profile`);
+    const profilePayload = parseJson(profileSelection.stdout, `${alias} named profile`);
+    if (profilePayload.data?.selected?.transport?.serial !== "fixture-usb") {
+      throw new Error(`${alias} named profile: configured alias was not selected`);
     }
     assertions += 1;
 
