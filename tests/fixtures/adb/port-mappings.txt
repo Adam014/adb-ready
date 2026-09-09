@@ -1,0 +1,4 @@
+R5CT-001 tcp:8081 tcp:8081
+emulator-5554 tcp:9229 localabstract:chrome_devtools_remote
+host tcp:3000 tcp:3000
+malformed line

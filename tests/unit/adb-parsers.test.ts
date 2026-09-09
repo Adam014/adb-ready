@@ -2,9 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import {
   parseAdbDevices,
+  parseAdbPortMappings,
   parseAdbVersion,
+  parseAndroidPackages,
   parseFeatureList,
   parseKeyValueLines,
+  parseLogcatThreadtimeLine,
 } from "../../src/adb/parsers.js";
 
 async function fixture(name: string): Promise<string> {
@@ -86,5 +89,47 @@ describe("supporting parsers", () => {
       "USB backend": "libusb",
       "mDNS backend": "Bonjour: native",
     });
+  });
+});
+
+describe("future command boundary parsers", () => {
+  test("parses the documented forward and reverse list shape", async () => {
+    expect(parseAdbPortMappings(await fixture("port-mappings.txt"))).toEqual([
+      { serial: "R5CT-001", local: "tcp:8081", remote: "tcp:8081" },
+      {
+        serial: "emulator-5554",
+        local: "tcp:9229",
+        remote: "localabstract:chrome_devtools_remote",
+      },
+      { serial: "host", local: "tcp:3000", remote: "tcp:3000" },
+    ]);
+  });
+
+  test("parses package names with and without source paths", async () => {
+    expect(parseAndroidPackages(await fixture("packages.txt"))).toEqual([
+      { name: "com.example.alpha" },
+      {
+        name: "com.example.beta",
+        sourcePath: "/data/app/~~token/com.example.beta/base.apk",
+      },
+    ]);
+  });
+
+  test("parses threadtime log records while preserving unmatched raw lines", async () => {
+    const lines = (await fixture("logcat-threadtime.txt")).trimEnd().split("\n");
+    expect(parseLogcatThreadtimeLine(lines[0] ?? "")).toMatchObject({
+      timestamp: "09-10 08:15:30.123",
+      pid: 1234,
+      tid: 1250,
+      priority: "I",
+      tag: "ActivityManager",
+      message: "Start proc com.example.alpha",
+    });
+    expect(parseLogcatThreadtimeLine(lines[1] ?? "")).toMatchObject({
+      timestamp: "2026-09-10 08:15:31.456",
+      priority: "E",
+      tag: "ReactNativeJS",
+    });
+    expect(parseLogcatThreadtimeLine(lines[2] ?? "")).toBeUndefined();
   });
 });

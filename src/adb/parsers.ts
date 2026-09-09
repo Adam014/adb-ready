@@ -57,6 +57,29 @@ export interface AdbPairResult {
   message: string;
 }
 
+export interface AdbPortMapping {
+  serial: string;
+  local: string;
+  remote: string;
+}
+
+export interface AndroidPackage {
+  name: string;
+  sourcePath?: string;
+}
+
+export type AndroidLogPriority = "A" | "D" | "E" | "F" | "I" | "V" | "W";
+
+export interface LogcatThreadtimeLine {
+  timestamp: string;
+  pid: number;
+  tid: number;
+  priority: AndroidLogPriority;
+  tag: string;
+  message: string;
+  raw: string;
+}
+
 const KNOWN_STATES = new Set<AdbDeviceState>([
   "bootloader",
   "device",
@@ -307,4 +330,64 @@ export function parseSingleLine(output: string): string | undefined {
     .split("\n")
     .map((line) => line.trim())
     .find(Boolean);
+}
+
+export function parseAdbPortMappings(output: string): AdbPortMapping[] {
+  const mappings: AdbPortMapping[] = [];
+  for (const rawLine of output.replaceAll("\r\n", "\n").split("\n")) {
+    const fields = rawLine.trim().split(/\s+/u);
+    if (fields.length !== 3) {
+      continue;
+    }
+    const [serial, local, remote] = fields;
+    if (serial !== undefined && local !== undefined && remote !== undefined) {
+      mappings.push({ serial, local, remote });
+    }
+  }
+  return mappings;
+}
+
+export function parseAndroidPackages(output: string): AndroidPackage[] {
+  const packages: AndroidPackage[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of output.replaceAll("\r\n", "\n").split("\n")) {
+    const match = rawLine
+      .trim()
+      .match(/^package:(?:(\S+)=)?([a-zA-Z0-9_][a-zA-Z0-9_.]*)(?:\s+.*)?$/u);
+    const name = match?.[2];
+    if (name === undefined || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    packages.push({ name, ...(match?.[1] === undefined ? {} : { sourcePath: match[1] }) });
+  }
+  return packages.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function parseLogcatThreadtimeLine(raw: string): LogcatThreadtimeLine | undefined {
+  const line = raw.replace(/\r?\n$/u, "");
+  const match = line.match(
+    /^((?:\d{4}-)?\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.+?)\s*:\s(.*)$/u,
+  );
+  if (match === null) {
+    return undefined;
+  }
+  const pid = Number(match[2]);
+  const tid = Number(match[3]);
+  const timestamp = match[1];
+  const priority = match[4] as AndroidLogPriority | undefined;
+  const tag = match[5]?.trim();
+  const message = match[6];
+  if (
+    timestamp === undefined ||
+    priority === undefined ||
+    tag === undefined ||
+    tag === "" ||
+    message === undefined ||
+    !Number.isSafeInteger(pid) ||
+    !Number.isSafeInteger(tid)
+  ) {
+    return undefined;
+  }
+  return { timestamp, pid, tid, priority, tag, message, raw: line };
 }

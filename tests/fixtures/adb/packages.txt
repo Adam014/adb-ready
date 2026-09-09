@@ -1,0 +1,4 @@
+package:com.example.alpha
+package:/data/app/~~token/com.example.beta/base.apk=com.example.beta
+package:com.example.alpha
+noise that must remain unparsed
