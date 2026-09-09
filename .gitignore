@@ -1,3 +1,9 @@
 # Local-only project guidance, research, and product notes.
 /AGENTS.md
 /context/
+
+# Generated and local development files.
+/coverage/
+/dist/
+/node_modules/
+*.log
