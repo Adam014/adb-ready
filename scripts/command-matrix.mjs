@@ -178,6 +178,21 @@ try {
     }
     assertions += 1;
 
+    const pairPlan = command(
+      alias,
+      ["pair", "192.0.2.10:41234", "--dry-run", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(pairPlan, 0, `${alias} pair dry-run`);
+    const planPayload = parseJson(pairPlan.stdout, `${alias} pair dry-run`);
+    if (
+      planPayload.data?.plan?.dryRun !== true ||
+      planPayload.data.plan.steps?.[0]?.id !== "pair"
+    ) {
+      throw new Error(`${alias} pair: invalid dry-run plan`);
+    }
+    assertions += 1;
+
     for (const publicCommand of ["doctor", "devices"]) {
       const execution = command(alias, [publicCommand, "--json"], env);
       expectStatus(execution, 0, `${alias} ${publicCommand} JSON`);

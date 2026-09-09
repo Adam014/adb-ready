@@ -71,6 +71,7 @@ Execution:
   --transport-id ID      Select an exact ADB transport ID
   --last                 Select the last successfully verified target
   --pairing-code-stdin   Read the pairing code from stdin without echoing it
+  --dry-run              Show connect/pair operations without changing state
 
 Other:
   -h, --help             Show help
@@ -498,7 +499,7 @@ async function runCliInternal(
     }
   }
   let pairingCode: string | undefined;
-  if (options.command === "pair") {
+  if (options.command === "pair" && !options.dryRun) {
     if (!errorCapabilities.interactive && !options.pairingCodeStdin) {
       const failure = failureResult(
         "pair",
@@ -561,6 +562,7 @@ async function runCliInternal(
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
     ...(lastSerial === undefined ? {} : { rememberedSerial: lastSerial }),
     ...(options.remembered ? { rememberedOnly: true } : {}),
+    ...(options.dryRun ? { dryRun: true } : {}),
   };
 
   let execution:
@@ -607,7 +609,7 @@ async function runCliInternal(
 
   if (options.command === "connect" && execution.result.ok && execution.result.data !== null) {
     const data = execution.result.data as Awaited<ReturnType<typeof runConnect>>["result"]["data"];
-    if (data !== null) {
+    if (data !== null && "serial" in data) {
       const stored = await (dependencies.writeRememberedTarget ?? writeRememberedTarget)(
         {
           serial: data.serial,

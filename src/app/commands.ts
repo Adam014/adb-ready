@@ -10,6 +10,7 @@ import { EventBus } from "../core/event-bus.js";
 import { redactText } from "../core/redaction.js";
 import {
   ExitCode,
+  type OperationPlan,
   type Problem,
   type ResultEnvelope,
   SCHEMA_VERSION,
@@ -40,6 +41,7 @@ export interface CommandConfig {
   targetAliases?: Readonly<Record<string, string>>;
   rememberedSerial?: string;
   rememberedOnly?: boolean;
+  dryRun?: boolean;
 }
 
 export interface CommandDependencies {
@@ -88,7 +90,7 @@ export interface TargetDiscoveryData {
   };
 }
 
-export interface ConnectData {
+export interface ConnectedData {
   adbPath: string;
   endpoint: string;
   status: "already-connected" | "connected";
@@ -98,12 +100,21 @@ export interface ConnectData {
   discovered: boolean;
 }
 
-export interface PairData {
+export interface PairedData {
   adbPath: string;
   endpoint: string;
   paired: true;
   discovered: boolean;
 }
+
+export interface WirelessPlanData {
+  endpoint: string;
+  discovered: boolean;
+  plan: OperationPlan;
+}
+
+export type ConnectData = ConnectedData | WirelessPlanData;
+export type PairData = PairedData | WirelessPlanData;
 
 interface CommandContext {
   bus: EventBus;
@@ -637,6 +648,36 @@ export async function runConnect(
     }
     return finish<ConnectData>(context, null, problems);
   }
+  if (config.dryRun) {
+    return finish(
+      context,
+      {
+        endpoint: resolution.endpoint,
+        discovered: resolution.discovered,
+        plan: {
+          schemaVersion: SCHEMA_VERSION,
+          dryRun: true,
+          steps: [
+            {
+              id: "connect",
+              title: `Connect wireless target ${resolution.endpoint}`,
+              risk: "local-additive",
+              executable: redactedPath(executable),
+              args: ["connect", resolution.endpoint],
+            },
+            {
+              id: "verify",
+              title: "Verify the exact target reports device state",
+              risk: "read-only",
+              executable: redactedPath(executable),
+              args: ["-s", resolution.endpoint, "get-state"],
+            },
+          ],
+        },
+      },
+      problems,
+    );
+  }
 
   const connection = await client.connect(resolution.endpoint, signal);
   if (!processSucceeded(connection.process)) {
@@ -708,7 +749,7 @@ export async function runPair(
 ): Promise<CommandExecution<PairData>> {
   const context = createContext("pair", dependencies);
   const problems: Problem[] = [];
-  if (!/^\d{6}$/u.test(pairingCode)) {
+  if (!config.dryRun && !/^\d{6}$/u.test(pairingCode)) {
     problems.push(
       commandProblem(
         ProblemCode.InvalidPairingCode,
@@ -751,6 +792,29 @@ export async function runPair(
       problems.push(resolution.problem);
     }
     return finish<PairData>(context, null, problems);
+  }
+  if (config.dryRun) {
+    return finish(
+      context,
+      {
+        endpoint: resolution.endpoint,
+        discovered: resolution.discovered,
+        plan: {
+          schemaVersion: SCHEMA_VERSION,
+          dryRun: true,
+          steps: [
+            {
+              id: "pair",
+              title: `Pair wireless target ${resolution.endpoint}`,
+              risk: "device-reversible",
+              executable: redactedPath(executable),
+              args: ["pair", resolution.endpoint],
+            },
+          ],
+        },
+      },
+      problems,
+    );
   }
 
   const pairing = await client.pair(resolution.endpoint, pairingCode, signal);

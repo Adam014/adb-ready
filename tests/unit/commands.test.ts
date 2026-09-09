@@ -393,4 +393,22 @@ describe("wireless target commands", () => {
     expect(pairing.exitCode).toBe(ExitCode.InvalidInput);
     expect(pairing.result.problems[0]?.code).toBe(ProblemCode.InvalidPairingCode);
   });
+
+  test("plans connect and pair without invoking a mutating ADB command", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = deterministicDependencies(fixtureRunner({}, requests));
+    const connection = await runConnect("192.168.1.20:37123", { dryRun: true }, deps);
+    const pairing = await runPair("192.168.1.20:41234", "", { dryRun: true }, deps);
+
+    expect(connection.result.data).toMatchObject({
+      endpoint: "192.168.1.20:37123",
+      plan: { dryRun: true, steps: [{ id: "connect" }, { id: "verify" }] },
+    });
+    expect(pairing.result.data).toMatchObject({
+      endpoint: "192.168.1.20:41234",
+      plan: { dryRun: true, steps: [{ id: "pair" }] },
+    });
+    expect(requests).toEqual([]);
+    expect(JSON.stringify(pairing.result)).not.toMatch(/\b\d{6}\b/u);
+  });
 });

@@ -22,6 +22,7 @@ export interface CliOptions {
   endpoint?: string;
   pairingCodeStdin: boolean;
   remembered: boolean;
+  dryRun: boolean;
 }
 
 export interface CliParseFailure {
@@ -57,6 +58,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--select",
   "--pairing-code-stdin",
   "--last",
+  "--dry-run",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -104,6 +106,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let endpoint: string | undefined;
   let pairingCodeStdin = false;
   let remembered = false;
+  let dryRun = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -224,6 +227,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       pairingCodeStdin = true;
     } else if (option === "--last") {
       remembered = true;
+    } else if (option === "--dry-run") {
+      dryRun = true;
     } else if (option === "--timeout") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -318,6 +323,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (remembered && (select || device !== undefined || transportId !== undefined)) {
     return failure("CLI_USAGE", "--last cannot be combined with another target selector.");
   }
+  if (dryRun && command !== "connect" && command !== "pair") {
+    return failure("CLI_USAGE", "--dry-run can only be used with connect or pair.", "--dry-run");
+  }
 
   return {
     ok: true,
@@ -342,6 +350,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(endpoint === undefined ? {} : { endpoint }),
       pairingCodeStdin,
       remembered,
+      dryRun,
     },
   };
 }

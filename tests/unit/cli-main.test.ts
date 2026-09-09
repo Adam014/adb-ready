@@ -371,4 +371,26 @@ describe("runCli", () => {
       transport: { serial: "USB-2" },
     });
   });
+
+  test("dry-runs pairing without prompting, pairing, or storing state", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.runner = async () => {
+      throw new Error("dry-run must not invoke ADB for an explicit endpoint");
+    };
+    fixture.writeRememberedTarget = async () => {
+      throw new Error("pairing plans must not update remembered state");
+    };
+
+    const exitCode = await runCli(
+      ["pair", "192.168.1.20:41234", "--dry-run", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    const payload = JSON.parse(streams.output.value);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload.data.plan).toMatchObject({ dryRun: true, steps: [{ id: "pair" }] });
+    expect(streams.error.value).toBe("");
+  });
 });

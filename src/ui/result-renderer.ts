@@ -1,8 +1,8 @@
 import type { AdbDevice } from "../adb/parsers.js";
-import type { ConnectData, DevicesData, DoctorData, PairData } from "../app/commands.js";
+import type { ConnectedData, DevicesData, DoctorData, PairedData } from "../app/commands.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
-import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
+import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
 import type { AndroidTarget } from "../target/model.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
@@ -42,12 +42,16 @@ function hasTargets(value: unknown): value is DoctorData | DevicesData {
   return isRecord(value) && Array.isArray(value.targets);
 }
 
-function isConnectData(value: unknown): value is ConnectData {
+function isConnectData(value: unknown): value is ConnectedData {
   return isRecord(value) && value.state === "device" && typeof value.serial === "string";
 }
 
-function isPairData(value: unknown): value is PairData {
+function isPairData(value: unknown): value is PairedData {
   return isRecord(value) && value.paired === true && typeof value.endpoint === "string";
+}
+
+function hasPlan(value: unknown): value is { plan: OperationPlan } {
+  return isRecord(value) && isRecord(value.plan) && Array.isArray(value.plan.steps);
 }
 
 function deviceLabel(device: AdbDevice): string {
@@ -133,6 +137,14 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       style.dim("Run adb-ready connect to verify the final device transport.", capabilities),
     );
   }
+  if (hasPlan(result.data)) {
+    const steps = result.data.plan.steps;
+    lines.push(style.strong("Dry-run plan", capabilities));
+    steps.forEach((step, index) => {
+      const branch = index === steps.length - 1 ? glyphs.end : glyphs.branch;
+      lines.push(`${style.dim(branch, capabilities)} ${clean(step.title)} · ${clean(step.risk)}`);
+    });
+  }
 
   if (hasTargets(result.data)) {
     const targets = result.data.targets;
@@ -194,6 +206,13 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
   if (isPairData(result.data)) {
     sink.write(`endpoint=${clean(result.data.endpoint)}\n`);
     sink.write("paired=true\n");
+  }
+  if (hasPlan(result.data)) {
+    sink.write("dry_run=true\n");
+    sink.write(`step_count=${String(result.data.plan.steps.length)}\n`);
+    result.data.plan.steps.forEach((step, index) => {
+      sink.write(`step_${String(index)}=${clean(step.id)}:${clean(step.title)}\n`);
+    });
   }
   if (hasTargets(result.data)) {
     sink.write(`target_count=${String(result.data.targets.length)}\n`);

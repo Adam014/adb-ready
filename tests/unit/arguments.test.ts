@@ -31,6 +31,7 @@ describe("parseArguments", () => {
         select: true,
         pairingCodeStdin: false,
         remembered: false,
+        dryRun: false,
       },
     });
   });
@@ -103,6 +104,10 @@ describe("parseArguments", () => {
       ok: true,
       options: { command: "pair", endpoint: "[fd00::20]:41234", pairingCodeStdin: true },
     });
+    expect(parseArguments(["pair", "192.168.1.20:41234", "--dry-run", "--json"])).toMatchObject({
+      ok: true,
+      options: { command: "pair", dryRun: true },
+    });
   });
 
   test("rejects unknown commands and options", () => {
@@ -167,6 +172,10 @@ describe("parseArguments", () => {
     expect(parseArguments(["devices", "--last", "--select"])).toMatchObject({
       ok: false,
       code: "CLI_USAGE",
+    });
+    expect(parseArguments(["devices", "--dry-run"])).toMatchObject({
+      ok: false,
+      option: "--dry-run",
     });
   });
 });
