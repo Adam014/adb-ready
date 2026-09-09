@@ -6,6 +6,7 @@ import type { Correlation, Evidence, Problem, SuggestedAction } from "./contract
 export const ProblemCode = {
   AdbCommandFailed: "ADB_COMMAND_FAILED",
   AdbNotFound: "ADB_NOT_FOUND",
+  AdbOptionalProbeFailed: "ADB_OPTIONAL_PROBE_FAILED",
   AdbServerUnavailable: "ADB_SERVER_UNAVAILABLE",
   AdbTimeout: "ADB_TIMEOUT",
   MultipleTargets: "MULTIPLE_TARGETS",
@@ -116,6 +117,24 @@ export function adbProcessProblem(
   };
 }
 
+export function adbOptionalProbeProblem(
+  operation: string,
+  result: ProcessResult,
+  correlation: Correlation,
+): Problem {
+  const failure = adbProcessProblem(operation, result, correlation);
+
+  return {
+    ...failure,
+    code: ProblemCode.AdbOptionalProbeFailed,
+    category: "adb.capability",
+    severity: "warning",
+    summary: `Optional ADB ${operation} probe failed.`,
+    detail:
+      "Core diagnostics can continue, but this ADB capability could not be inspected reliably.",
+  };
+}
+
 function targetEvidence(device: AdbDevice): Evidence[] {
   return [
     { source: "adb.devices", field: "serial", value: device.serial },
@@ -126,6 +145,7 @@ function targetEvidence(device: AdbDevice): Evidence[] {
 export function problemsForDevices(
   devices: readonly AdbDevice[],
   correlation: Correlation,
+  severity: Problem["severity"] = "error",
 ): Problem[] {
   const problems: Problem[] = [];
 
@@ -134,7 +154,7 @@ export function problemsForDevices(
       problems.push({
         code: ProblemCode.TargetUnauthorized,
         category: "target.authorization",
-        severity: "error",
+        severity,
         summary: "An Android target has not authorized this computer.",
         detail: "Accept the RSA authorization prompt on the target, then retry the probe.",
         retryable: true,
@@ -155,7 +175,7 @@ export function problemsForDevices(
       problems.push({
         code: ProblemCode.TargetOffline,
         category: "target.transport",
-        severity: "error",
+        severity,
         summary: "An Android target is offline.",
         detail: "ADB knows this transport, but it cannot currently communicate with the target.",
         retryable: true,
@@ -167,7 +187,7 @@ export function problemsForDevices(
       problems.push({
         code: ProblemCode.TargetNoPermissions,
         category: "target.permissions",
-        severity: "error",
+        severity,
         summary: "The host does not have permission to use an Android target.",
         detail: "Check the host USB permissions and Android developer authorization setup.",
         retryable: true,

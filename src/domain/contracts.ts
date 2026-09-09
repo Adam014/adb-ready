@@ -85,7 +85,7 @@ export interface TargetReference {
   transport: "emulator" | "tcp" | "tls-mdns" | "usb" | "unknown";
 }
 
-export interface ResultEnvelope<T extends JsonValue = JsonValue> {
+export interface ResultEnvelope<T = JsonValue> {
   schemaVersion: typeof SCHEMA_VERSION;
   command: string;
   commandId: string;
