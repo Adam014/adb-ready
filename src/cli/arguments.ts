@@ -17,6 +17,8 @@ export interface CliOptions {
   adbPort?: number;
   configPath?: string;
   select: boolean;
+  device?: string;
+  transportId?: string;
 }
 
 export interface CliParseFailure {
@@ -92,6 +94,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let adbPort: number | undefined;
   let configPath: string | undefined;
   let select = false;
+  let device: string | undefined;
+  let transportId: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -173,6 +177,24 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       animation = false;
     } else if (option === "--select") {
       select = true;
+    } else if (option === "--device" || option === "--serial" || option === "-s") {
+      const value = readValue();
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (value.trim() === "") {
+        return failure("CLI_INVALID_VALUE", `${option} cannot be empty.`, option);
+      }
+      device = value;
+    } else if (option === "--transport-id") {
+      const value = readValue();
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (!/^\d+$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid transport ID: ${value}.`, option);
+      }
+      transportId = value;
     } else if (option === "--timeout") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -236,11 +258,23 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (select && command !== "devices") {
     return failure("CLI_USAGE", "--select can only be used with the devices command.", "--select");
   }
+  if ((device !== undefined || transportId !== undefined) && command !== "devices") {
+    return failure(
+      "CLI_USAGE",
+      "Target selection options can only be used with the devices command.",
+    );
+  }
   if (select && nonInteractive) {
     return failure("CLI_USAGE", "--select cannot be combined with --non-interactive.", "--select");
   }
   if (select && format !== "human") {
     return failure("CLI_USAGE", "--select can only be used with human output.", "--select");
+  }
+  if (select && (device !== undefined || transportId !== undefined)) {
+    return failure("CLI_USAGE", "--select cannot be combined with an explicit target selector.");
+  }
+  if (device !== undefined && transportId !== undefined) {
+    return failure("CLI_USAGE", "--device and --transport-id cannot be combined.");
   }
 
   return {
@@ -261,6 +295,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(adbPort === undefined ? {} : { adbPort }),
       ...(configPath === undefined ? {} : { configPath }),
       select,
+      ...(device === undefined ? {} : { device }),
+      ...(transportId === undefined ? {} : { transportId }),
     },
   };
 }

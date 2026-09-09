@@ -61,6 +61,8 @@ Execution:
   --adb-port PORT        Use an explicit ADB server port
   --config PATH          Use an explicit project configuration file
   --select               Interactively select from listed devices
+  -s, --device SELECTOR  Select an exact serial or configured alias
+  --transport-id ID      Select an exact ADB transport ID
 
 Other:
   -h, --help             Show help
@@ -453,6 +455,9 @@ async function runCliInternal(
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
     ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
     timeoutMs: values.timeoutMs,
+    ...(options.device === undefined ? {} : { targetSelector: options.device }),
+    ...(options.transportId === undefined ? {} : { targetTransportId: options.transportId }),
+    ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
   };
 
   let execution: CommandExecution<DevicesData> | Awaited<ReturnType<typeof runDoctor>>;

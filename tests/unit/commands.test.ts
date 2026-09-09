@@ -242,6 +242,39 @@ describe("runDevices", () => {
     });
   });
 
+  test("selects an exact configured alias without relying on list order", async () => {
+    const execution = await runDevices(
+      { targetSelector: "desk", targetAliases: { desk: "USB-2" } },
+      deterministicDependencies(
+        fixtureRunner({
+          devices:
+            "List of devices attached\n" +
+            "USB-1 device model:Pixel_8 transport_id:1\n" +
+            "USB-2 device model:Pixel_9 transport_id:2\n",
+          "hardware-serial:USB-1": "USB-1\n",
+          "hardware-serial:USB-2": "USB-2\n",
+          "mdns-services": "List of discovered mdns services\n",
+        }),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.selected).toMatchObject({
+      reason: "alias",
+      transport: { serial: "USB-2", transportId: "2" },
+    });
+  });
+
+  test("returns a stable target error when an explicit selector is absent", async () => {
+    const execution = await runDevices(
+      { targetSelector: "missing" },
+      deterministicDependencies(fixtureRunner({ devices: "List of devices attached\n" })),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Target);
+    expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.TargetNotFound);
+  });
+
   test("uses exit code 130 for an interrupted ADB inventory", async () => {
     const runner: ProcessRunner = async (request) =>
       processResult(request, { exitCode: null, signal: "SIGTERM", aborted: true });

@@ -1,6 +1,7 @@
 import type { AdbDevice } from "../adb/parsers.js";
 import { redactText } from "../core/redaction.js";
 import type { ProcessResult } from "../platform/process-runner.js";
+import type { TargetSelectionResult } from "../target/selection.js";
 import type { Correlation, Evidence, Problem, SuggestedAction } from "./contracts.js";
 
 export const ProblemCode = {
@@ -19,6 +20,7 @@ export const ProblemCode = {
   TargetOffline: "TARGET_OFFLINE",
   TargetUnauthorized: "TARGET_UNAUTHORIZED",
   TargetUnknownState: "TARGET_UNKNOWN_STATE",
+  TargetNotFound: "TARGET_NOT_FOUND",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {
@@ -30,6 +32,72 @@ function retryDevicesAction(): SuggestedAction {
     automatic: true,
     idempotent: true,
     command: { executable: "adb", args: ["devices", "-l"] },
+  };
+}
+
+export function targetSelectionProblem(
+  result: Exclude<TargetSelectionResult, { kind: "selected" }>,
+  correlation: Correlation,
+): Problem {
+  if (result.kind === "ambiguous") {
+    return {
+      code: ProblemCode.MultipleTargets,
+      category: "target.selection",
+      severity: "error",
+      summary: "Multiple ready Android targets require an explicit selection.",
+      detail: "Choose one with --device, --transport-id, or the interactive --select picker.",
+      retryable: true,
+      evidence: [
+        {
+          source: "target.inventory",
+          field: "serials",
+          value: result.candidates.map(({ serial }) => serial),
+        },
+      ],
+      actions: [],
+      correlation,
+    };
+  }
+  if (result.kind === "not-found") {
+    return {
+      code: ProblemCode.TargetNotFound,
+      category: "target.selection",
+      severity: "error",
+      summary: "The requested Android target was not found.",
+      detail:
+        "Check the selector with adb-ready devices, then retry with an exact serial or alias.",
+      retryable: true,
+      evidence: [{ source: "target.selector", field: "value", value: result.selector }],
+      actions: [],
+      correlation,
+    };
+  }
+  if (result.kind === "unavailable") {
+    return {
+      code: ProblemCode.NoSelectableTarget,
+      category: "target.selection",
+      severity: "error",
+      summary: "The requested Android target is not ready.",
+      detail: `ADB reports ${result.target.state}; recover or authorize the target before retrying.`,
+      retryable: true,
+      evidence: [
+        { source: "target.inventory", field: "serial", value: result.target.serial },
+        { source: "target.inventory", field: "state", value: result.target.state },
+      ],
+      actions: [retryDevicesAction()],
+      correlation,
+    };
+  }
+  return {
+    code: ProblemCode.NoSelectableTarget,
+    category: "target.selection",
+    severity: "error",
+    summary: "No ready Android target is available.",
+    detail: "Connect a target, start an emulator, or enable Wireless debugging, then retry.",
+    retryable: true,
+    evidence: [],
+    actions: [retryDevicesAction()],
+    correlation,
   };
 }
 

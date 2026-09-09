@@ -75,6 +75,17 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses exact serial, alias, and transport selectors", () => {
+    expect(parseArguments(["devices", "-s", "desk-phone", "--json"])).toMatchObject({
+      ok: true,
+      options: { command: "devices", device: "desk-phone", format: "json" },
+    });
+    expect(parseArguments(["devices", "--transport-id=42"])).toMatchObject({
+      ok: true,
+      options: { command: "devices", transportId: "42" },
+    });
+  });
+
   test("rejects unknown commands and options", () => {
     expect(parseArguments(["pair"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
     expect(parseArguments(["doctor", "--magical"])).toEqual({
@@ -125,6 +136,14 @@ describe("parseArguments", () => {
       ok: false,
       code: "CLI_USAGE",
       option: "--select",
+    });
+    expect(parseArguments(["devices", "--select", "--device", "usb-1"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["devices", "--device", "usb-1", "--transport-id", "1"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
     });
   });
 });

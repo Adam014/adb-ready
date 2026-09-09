@@ -24,9 +24,10 @@ export interface LoadConfigOptions {
 }
 
 const DEFAULTS: Required<Pick<ConfigValues, "timeoutMs">> = { timeoutMs: 5_000 };
-const ROOT_KEYS = new Set(["$schema", "version", "adb", "timeoutMs", "output"]);
+const ROOT_KEYS = new Set(["$schema", "version", "adb", "timeoutMs", "output", "targets"]);
 const ADB_KEYS = new Set(["path", "host", "port"]);
 const OUTPUT_KEYS = new Set(["color", "unicode", "animation", "interactive"]);
+const TARGET_KEYS = new Set(["aliases"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -157,6 +158,47 @@ function validateDocument(
           } else {
             values[configKey] = candidate;
           }
+        }
+      }
+    }
+  }
+
+  if (document.targets !== undefined) {
+    if (!isObject(document.targets)) {
+      errors.push(error(source, location, "targets", "targets must be an object."));
+    } else {
+      validateUnknownKeys(document.targets, TARGET_KEYS, "targets.", source, location, errors);
+      if (document.targets.aliases !== undefined) {
+        if (!isObject(document.targets.aliases)) {
+          errors.push(
+            error(source, location, "targets.aliases", "targets.aliases must be an object."),
+          );
+        } else {
+          const aliases: Record<string, string> = {};
+          for (const [alias, selector] of Object.entries(document.targets.aliases)) {
+            if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u.test(alias)) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `targets.aliases.${alias}`,
+                  "Target alias must be 1-64 letters, numbers, dots, underscores, or hyphens.",
+                ),
+              );
+            } else if (typeof selector !== "string" || selector.trim() === "") {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `targets.aliases.${alias}`,
+                  "Target alias value must be a non-empty selector.",
+                ),
+              );
+            } else {
+              aliases[alias] = selector;
+            }
+          }
+          values.targetAliases = aliases;
         }
       }
     }
@@ -326,7 +368,7 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
 
 function applyValues(
   target: ConfigValues,
-  provenance: Record<ConfigKey, ConfigProvenance | undefined>,
+  provenance: Partial<Record<ConfigKey, ConfigProvenance | undefined>>,
   values: ConfigValues,
   source: ConfigSource,
   location?: string,
@@ -359,7 +401,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Confi
     (environmentProjectFile !== undefined && environmentProjectFile !== "");
   const errors: ConfigError[] = [];
   const values: ConfigValues = {};
-  const provenance = {} as Record<ConfigKey, ConfigProvenance | undefined>;
+  const provenance: Partial<Record<ConfigKey, ConfigProvenance | undefined>> = {};
   const files: LoadedConfig["files"] = {};
 
   applyValues(values, provenance, DEFAULTS, "default");

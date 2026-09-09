@@ -14,6 +14,7 @@ export interface ConfigValues {
   unicode?: boolean;
   animation?: boolean;
   interactive?: boolean;
+  targetAliases?: Record<string, string>;
 }
 
 export interface ResolvedConfig extends ConfigValues {
@@ -32,7 +33,7 @@ export interface ConfigError {
 
 export interface LoadedConfig {
   values: ResolvedConfig;
-  provenance: Record<ConfigKey, ConfigProvenance | undefined>;
+  provenance: Partial<Record<ConfigKey, ConfigProvenance | undefined>>;
   files: {
     user?: string;
     project?: string;

@@ -16,18 +16,22 @@ import {
   noTargetsProblem,
   ProblemCode,
   problemsForDevices,
+  targetSelectionProblem,
 } from "../domain/problems.js";
 import { locateAdb } from "../platform/executable.js";
 import type { ProcessResult, ProcessRunner } from "../platform/process-runner.js";
 import { detectRuntime, type RuntimeInfo } from "../platform/runtime.js";
 import { type AndroidTarget, buildTargetInventory, isStableAdbSerial } from "../target/model.js";
-import type { SelectedTarget } from "../target/selection.js";
+import { type SelectedTarget, selectTarget } from "../target/selection.js";
 
 export interface CommandConfig {
   adbPath?: string;
   adbHost?: string;
   adbPort?: number;
   timeoutMs?: number;
+  targetSelector?: string;
+  targetTransportId?: string;
+  targetAliases?: Readonly<Record<string, string>>;
 }
 
 export interface CommandDependencies {
@@ -436,6 +440,20 @@ export async function runDevices(
     return finish<DevicesData>(context, null, problems);
   }
 
+  let selected: SelectedTarget | undefined;
+  if (config.targetSelector !== undefined || config.targetTransportId !== undefined) {
+    const selection = selectTarget(inspection.targets, {
+      ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
+      ...(config.targetTransportId === undefined ? {} : { transportId: config.targetTransportId }),
+      ...(config.targetAliases === undefined ? {} : { aliases: config.targetAliases }),
+    });
+    if (selection.kind !== "selected") {
+      problems.push(targetSelectionProblem(selection, { commandId: context.commandId }));
+    } else {
+      selected = selection.selection;
+    }
+  }
+
   return finish(
     context,
     {
@@ -443,6 +461,7 @@ export async function runDevices(
       devices: devices.value,
       targets: inspection.targets,
       discovery: inspection.discovery,
+      ...(selected === undefined ? {} : { selected }),
     },
     problems,
   );

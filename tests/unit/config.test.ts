@@ -41,6 +41,7 @@ describe("loadConfig", () => {
       timeoutMs: 2_000,
       adb: { host: "project-host" },
       output: { unicode: true },
+      targets: { aliases: { desk: "USB-123" } },
     });
 
     const result = await loadConfig({
@@ -67,6 +68,7 @@ describe("loadConfig", () => {
           color: false,
           unicode: true,
           animation: false,
+          targetAliases: { desk: "USB-123" },
         },
         provenance: {
           adbHost: { source: "cli" },
@@ -76,6 +78,31 @@ describe("loadConfig", () => {
         },
       },
     });
+  });
+
+  test("validates target aliases instead of accepting ambiguous config", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "aliases.json");
+    await writeJson(projectFile, {
+      version: 1,
+      targets: { aliases: { "bad alias": "", desk: "USB-123" } },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) {
+      expect(result.errors.map(({ path: errorPath }) => errorPath)).toEqual([
+        "targets.aliases.bad alias",
+      ]);
+    }
   });
 
   test("returns every validation error instead of stopping at the first", async () => {
