@@ -14,6 +14,7 @@ const steps = [
   ["static UI scenarios", "bun", ["run", "scripts/ui-playground.ts", "--all", "--non-interactive"]],
   ["packaged command matrix", "bun", ["run", "scripts/command-matrix.mjs"]],
   ["Node, Bun, and Deno runtime smoke", "bun", ["run", "scripts/runtime-smoke.mjs"]],
+  ["available package-manager consumers", "bun", ["run", "scripts/package-manager-smoke.mjs"]],
   ["npm package allowlist", "bun", ["run", "scripts/package-check.mjs"]],
   ["package manifest lint", "bun", ["x", "--bun", "publint"]],
   ["package type-resolution audit", "bun", ["x", "--bun", "attw", "--pack", "."]],
