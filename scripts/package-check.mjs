@@ -1,6 +1,6 @@
-import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { xSync } from "tinyexec";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -9,17 +9,15 @@ if (manifest.bin?.["adb-ready"] !== "dist/cli.js" || manifest.bin?.adbr !== "dis
   throw new Error("adb-ready and adbr must resolve to the same dist/cli.js entrypoint");
 }
 
-const packed = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-  cwd: root,
-  encoding: "utf8",
-  shell: false,
-  windowsHide: true,
+const packed = xSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+  nodeOptions: {
+    cwd: root,
+    shell: false,
+    windowsHide: true,
+  },
 });
 
-if (packed.error !== undefined) {
-  throw packed.error;
-}
-if (packed.status !== 0) {
+if (packed.exitCode !== 0) {
   throw new Error(`npm pack failed: ${packed.stderr.trim()}`);
 }
 

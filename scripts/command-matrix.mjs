@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { xSync } from "tinyexec";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const temp = await mkdtemp(path.join(tmpdir(), "adb-ready-command-matrix-"));
@@ -17,17 +17,15 @@ const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf
  * @param {{ cwd?: string, env?: NodeJS.ProcessEnv }} options
  */
 function run(executable, args, options = {}) {
-  const result = spawnSync(executable, args, {
-    cwd: options.cwd ?? root,
-    env: options.env ?? process.env,
-    encoding: "utf8",
-    shell: false,
-    windowsHide: true,
+  const result = xSync(executable, args, {
+    nodeOptions: {
+      cwd: options.cwd ?? root,
+      env: options.env ?? process.env,
+      shell: false,
+      windowsHide: true,
+    },
   });
-  if (result.error !== undefined) {
-    throw result.error;
-  }
-  return result;
+  return { ...result, status: result.exitCode ?? null };
 }
 
 /**
@@ -51,23 +49,8 @@ function checked(executable, args, options = {}) {
  * @param {NodeJS.ProcessEnv} env
  */
 function command(alias, args, env) {
-  const binary = path.join(
-    consumer,
-    "node_modules",
-    ".bin",
-    process.platform === "win32" ? `${alias}.cmd` : alias,
-  );
-  if (process.platform !== "win32") {
-    return run(binary, args, { cwd: consumer, env });
-  }
-
-  /** @param {string} value */
-  const quote = (value) => `"${value.replaceAll('"', '""')}"`;
-  const line = `"${quote(binary)} ${args.map(quote).join(" ")}"`;
-  return run(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", line], {
-    cwd: consumer,
-    env,
-  });
+  const binary = path.join(consumer, "node_modules", ".bin", alias);
+  return run(binary, args, { cwd: consumer, env });
 }
 
 /**

@@ -15,8 +15,8 @@ const steps = [
   ["packaged command matrix", "bun", ["run", "scripts/command-matrix.mjs"]],
   ["Node, Bun, and Deno runtime smoke", "bun", ["run", "scripts/runtime-smoke.mjs"]],
   ["npm package allowlist", "bun", ["run", "scripts/package-check.mjs"]],
-  ["package manifest lint", "bunx", ["--bun", "publint"]],
-  ["package type-resolution audit", "bunx", ["--bun", "attw", "--pack", "."]],
+  ["package manifest lint", "bun", ["x", "--bun", "publint"]],
+  ["package type-resolution audit", "bun", ["x", "--bun", "attw", "--pack", "."]],
 ];
 
 const started = performance.now();
