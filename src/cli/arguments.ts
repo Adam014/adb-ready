@@ -21,6 +21,7 @@ export interface CliOptions {
   transportId?: string;
   endpoint?: string;
   pairingCodeStdin: boolean;
+  remembered: boolean;
 }
 
 export interface CliParseFailure {
@@ -55,6 +56,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--no-animation",
   "--select",
   "--pairing-code-stdin",
+  "--last",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -101,6 +103,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let transportId: string | undefined;
   let endpoint: string | undefined;
   let pairingCodeStdin = false;
+  let remembered = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -219,6 +222,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       transportId = value;
     } else if (option === "--pairing-code-stdin") {
       pairingCodeStdin = true;
+    } else if (option === "--last") {
+      remembered = true;
     } else if (option === "--timeout") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -307,6 +312,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       "--pairing-code-stdin",
     );
   }
+  if (remembered && command !== "devices") {
+    return failure("CLI_USAGE", "--last can only be used with the devices command.", "--last");
+  }
+  if (remembered && (select || device !== undefined || transportId !== undefined)) {
+    return failure("CLI_USAGE", "--last cannot be combined with another target selector.");
+  }
 
   return {
     ok: true,
@@ -330,6 +341,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(transportId === undefined ? {} : { transportId }),
       ...(endpoint === undefined ? {} : { endpoint }),
       pairingCodeStdin,
+      remembered,
     },
   };
 }

@@ -21,6 +21,7 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import { readTargetState, rememberedTarget, writeRememberedTarget } from "../state/target-state.js";
 import type { AndroidTarget } from "../target/model.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
@@ -68,6 +69,7 @@ Execution:
   --select               Interactively select from listed devices
   -s, --device SELECTOR  Select an exact serial or configured alias
   --transport-id ID      Select an exact ADB transport ID
+  --last                 Select the last successfully verified target
   --pairing-code-stdin   Read the pairing code from stdin without echoing it
 
 Other:
@@ -115,6 +117,8 @@ export interface CliIo {
 
 export interface CliDependencies extends CommandDependencies {
   loadConfig?: typeof loadConfig;
+  readTargetState?: typeof readTargetState;
+  writeRememberedTarget?: typeof writeRememberedTarget;
 }
 
 function inferredFormat(argv: readonly string[]): OutputFormat {
@@ -330,6 +334,7 @@ async function selectDevice(
   execution: CommandExecution<DevicesData>,
   io: CliIo,
   terminal: TerminalCapabilities,
+  rememberedSerial?: string,
   signal?: AbortSignal,
 ): Promise<CommandExecution<DevicesData>> {
   const data = execution.result.data;
@@ -359,7 +364,9 @@ async function selectDevice(
       label: target.name,
       description: targetDescription(target),
       disabled: !target.transports.some(({ stable, state }) => stable && state === "device"),
-      recommended: selectable.length === 1 && target.id === selectable[0]?.id,
+      recommended:
+        target.transports.some(({ serial }) => serial === rememberedSerial) ||
+        (selectable.length === 1 && target.id === selectable[0]?.id),
     })),
     input: io.input,
     sink: io.error,
@@ -454,6 +461,42 @@ async function runCliInternal(
   const values = loaded.config.values;
   const errorCapabilities = capabilities(options, values, io, "error", options.format);
   const outputCapabilities = capabilities(options, values, io, "output", options.format);
+  let lastSerial: string | undefined;
+  let stateWarning: Problem | undefined;
+  if (options.command === "devices" && (options.select || options.remembered)) {
+    const state = await (dependencies.readTargetState ?? readTargetState)({
+      env: io.env,
+      ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
+      ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
+    });
+    if (!state.ok) {
+      const problem: Problem = {
+        code: state.code,
+        category: options.remembered ? "environment.state" : "state.persistence",
+        severity: options.remembered ? "error" : "warning",
+        summary: state.message,
+        detail: options.remembered
+          ? "Fix or remove the per-user state file, then retry."
+          : "Selection can continue, but no remembered recommendation is available.",
+        retryable: true,
+        evidence: [{ source: "state", field: "path", value: redactText(state.path).value }],
+        actions: [],
+        correlation: { commandId: "state" },
+      };
+      if (options.remembered) {
+        const failure = failureResult("devices", [problem], dependencies);
+        renderFailure(failure, options.format, io);
+        return ExitCode.Environment;
+      }
+      stateWarning = problem;
+    }
+    if (state.ok) {
+      lastSerial = rememberedTarget(state.document, {
+        ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
+        ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
+      })?.serial;
+    }
+  }
   let pairingCode: string | undefined;
   if (options.command === "pair") {
     if (!errorCapabilities.interactive && !options.pairingCodeStdin) {
@@ -516,6 +559,8 @@ async function runCliInternal(
     ...(options.device === undefined ? {} : { targetSelector: options.device }),
     ...(options.transportId === undefined ? {} : { targetTransportId: options.transportId }),
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
+    ...(lastSerial === undefined ? {} : { rememberedSerial: lastSerial }),
+    ...(options.remembered ? { rememberedOnly: true } : {}),
   };
 
   let execution:
@@ -549,8 +594,46 @@ async function runCliInternal(
       execution as CommandExecution<DevicesData>,
       io,
       errorCapabilities,
+      lastSerial,
       signal,
     );
+  }
+  if (stateWarning !== undefined) {
+    execution.result.problems.push({
+      ...stateWarning,
+      correlation: { commandId: execution.result.commandId },
+    });
+  }
+
+  if (options.command === "connect" && execution.result.ok && execution.result.data !== null) {
+    const data = execution.result.data as Awaited<ReturnType<typeof runConnect>>["result"]["data"];
+    if (data !== null) {
+      const stored = await (dependencies.writeRememberedTarget ?? writeRememberedTarget)(
+        {
+          serial: data.serial,
+          ...(data.hardwareSerial === undefined ? {} : { hardwareSerial: data.hardwareSerial }),
+          updatedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
+        },
+        {
+          env: io.env,
+          ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
+          ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
+        },
+      );
+      if (!stored.ok) {
+        execution.result.problems.push({
+          code: stored.code,
+          category: "state.persistence",
+          severity: "warning",
+          summary: stored.message,
+          detail: "The connection is ready, but ADB Ready could not remember it for --last.",
+          retryable: true,
+          evidence: [{ source: "state", field: "path", value: redactText(stored.path).value }],
+          actions: [],
+          correlation: { commandId: execution.result.commandId },
+        });
+      }
+    }
   }
 
   if (options.format !== "human" || !options.quiet || !execution.result.ok) {

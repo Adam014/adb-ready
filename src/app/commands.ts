@@ -21,6 +21,7 @@ import {
   noTargetsProblem,
   ProblemCode,
   problemsForDevices,
+  targetInventoryProblems,
   targetSelectionProblem,
 } from "../domain/problems.js";
 import { locateAdb } from "../platform/executable.js";
@@ -37,6 +38,8 @@ export interface CommandConfig {
   targetSelector?: string;
   targetTransportId?: string;
   targetAliases?: Readonly<Record<string, string>>;
+  rememberedSerial?: string;
+  rememberedOnly?: boolean;
 }
 
 export interface CommandDependencies {
@@ -423,6 +426,7 @@ export async function runDoctor(
     problems.push(inspection.interruption);
     return finish<DoctorData>(context, null, problems);
   }
+  problems.push(...targetInventoryProblems(inspection.targets, { commandId: context.commandId }));
   problems.push(...inspection.optionalProblems);
 
   const versionData: Omit<AdbVersion, "raw"> = {
@@ -485,13 +489,22 @@ export async function runDevices(
     problems.push(inspection.interruption);
     return finish<DevicesData>(context, null, problems);
   }
+  problems.push(...targetInventoryProblems(inspection.targets, { commandId: context.commandId }));
 
   let selected: SelectedTarget | undefined;
-  if (config.targetSelector !== undefined || config.targetTransportId !== undefined) {
+  if (
+    config.targetSelector !== undefined ||
+    config.targetTransportId !== undefined ||
+    config.rememberedOnly === true
+  ) {
     const selection = selectTarget(inspection.targets, {
       ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
       ...(config.targetTransportId === undefined ? {} : { transportId: config.targetTransportId }),
       ...(config.targetAliases === undefined ? {} : { aliases: config.targetAliases }),
+      ...(config.rememberedSerial === undefined
+        ? {}
+        : { rememberedSerial: config.rememberedSerial }),
+      ...(config.rememberedOnly === undefined ? {} : { rememberedOnly: config.rememberedOnly }),
     });
     if (selection.kind !== "selected") {
       problems.push(targetSelectionProblem(selection, { commandId: context.commandId }));

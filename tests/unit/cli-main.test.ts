@@ -307,4 +307,68 @@ describe("runCli", () => {
     expect(streams.output.value).not.toContain("123456");
     expect(streams.error.value).toBe("");
   });
+
+  test("remembers only a successfully verified connected serial", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.runner = async (request) => {
+      if (request.args?.includes("connect")) {
+        return result(request, "connected to 192.168.1.20:37123\n");
+      }
+      if (request.args?.includes("get-state")) {
+        return result(request, "device\n");
+      }
+      if (request.args?.includes("ro.serialno")) {
+        return result(request, "PHONE-1\n");
+      }
+      return result(request, "");
+    };
+    let remembered: { serial: string; hardwareSerial?: string } | undefined;
+    fixture.writeRememberedTarget = async (target) => {
+      remembered = target;
+      return { ok: true, path: "/state.json" };
+    };
+
+    const exitCode = await runCli(
+      ["connect", "192.168.1.20:37123", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(remembered).toMatchObject({
+      serial: "192.168.1.20:37123",
+      hardwareSerial: "PHONE-1",
+    });
+  });
+
+  test("resolves --last without falling back to list order", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_8\nUSB-2 device model:Pixel_9\n",
+    );
+    fixture.readTargetState = async () => ({
+      ok: true,
+      path: "/state.json",
+      document: {
+        version: 1,
+        targets: {
+          "local:5037": { serial: "USB-2", updatedAt: "2026-09-09T10:00:00.000Z" },
+        },
+      },
+    });
+
+    const exitCode = await runCli(
+      ["devices", "--last", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    const payload = JSON.parse(streams.output.value);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload.data.selected).toMatchObject({
+      reason: "remembered",
+      transport: { serial: "USB-2" },
+    });
+  });
 });

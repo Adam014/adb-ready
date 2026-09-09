@@ -1,6 +1,7 @@
 import type { AdbDevice } from "../adb/parsers.js";
 import { redactText } from "../core/redaction.js";
 import type { ProcessResult } from "../platform/process-runner.js";
+import type { AndroidTarget } from "../target/model.js";
 import type { TargetSelectionResult } from "../target/selection.js";
 import type { Correlation, Evidence, Problem, SuggestedAction } from "./contracts.js";
 
@@ -27,6 +28,8 @@ export const ProblemCode = {
   MultipleWirelessEndpoints: "MULTIPLE_WIRELESS_ENDPOINTS",
   WirelessConnectionFailed: "WIRELESS_CONNECTION_FAILED",
   WirelessPairingFailed: "WIRELESS_PAIRING_FAILED",
+  DuplicateTargetTransport: "DUPLICATE_TARGET_TRANSPORT",
+  UnstableTargetSerial: "UNSTABLE_TARGET_SERIAL",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {
@@ -58,6 +61,26 @@ export function targetSelectionProblem(
           source: "target.inventory",
           field: "serials",
           value: result.candidates.map(({ serial }) => serial),
+        },
+      ],
+      actions: [],
+      correlation,
+    };
+  }
+  if (result.kind === "duplicate") {
+    return {
+      code: ProblemCode.DuplicateTargetTransport,
+      category: "target.selection",
+      severity: "error",
+      summary: "The target serial identifies multiple ADB transports.",
+      detail: "Select the intended transport explicitly with --transport-id.",
+      retryable: true,
+      evidence: [
+        { source: "target.inventory", field: "serial", value: result.target.serial },
+        {
+          source: "target.inventory",
+          field: "transportIds",
+          value: result.transports.map(({ transportId }) => transportId ?? null),
         },
       ],
       actions: [],
@@ -105,6 +128,51 @@ export function targetSelectionProblem(
     actions: [retryDevicesAction()],
     correlation,
   };
+}
+
+export function targetInventoryProblems(
+  targets: readonly AndroidTarget[],
+  correlation: Correlation,
+): Problem[] {
+  const problems: Problem[] = [];
+  for (const target of targets) {
+    const serialCounts = new Map<string, number>();
+    for (const transport of target.transports) {
+      serialCounts.set(transport.serial, (serialCounts.get(transport.serial) ?? 0) + 1);
+      if (!transport.stable) {
+        problems.push({
+          code: ProblemCode.UnstableTargetSerial,
+          category: "target.identity",
+          severity: "warning",
+          summary: "ADB reported an unstable target identifier.",
+          detail: "A transient mDNS service name cannot be used as a reliable final device serial.",
+          retryable: true,
+          evidence: [{ source: "adb.devices", field: "serial", value: transport.serial }],
+          actions: [retryDevicesAction()],
+          correlation,
+        });
+      }
+    }
+    for (const [serial, count] of serialCounts) {
+      if (count > 1) {
+        problems.push({
+          code: ProblemCode.DuplicateTargetTransport,
+          category: "target.identity",
+          severity: "warning",
+          summary: "ADB reported duplicate transports for one serial.",
+          detail: "Use an explicit transport ID for operations until the duplicate disappears.",
+          retryable: true,
+          evidence: [
+            { source: "adb.devices", field: "serial", value: serial },
+            { source: "adb.devices", field: "count", value: count },
+          ],
+          actions: [retryDevicesAction()],
+          correlation,
+        });
+      }
+    }
+  }
+  return problems;
 }
 
 export function adbNotFoundProblem(correlation: Correlation, requestedPath?: string): Problem {

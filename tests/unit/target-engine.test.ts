@@ -127,4 +127,32 @@ describe("target selection", () => {
     const unstable = buildTargetInventory([{ device: device("adb-123._adb-tls-connect._tcp.") }]);
     expect(selectTarget(unstable.targets).kind).toBe("none");
   });
+
+  test("never falls back when remembered-only selection cannot be satisfied", () => {
+    expect(
+      selectTarget(inventory.targets, {
+        rememberedSerial: "missing",
+        rememberedOnly: true,
+      }),
+    ).toMatchObject({ kind: "not-found", selector: "remembered target" });
+    expect(selectTarget(inventory.targets, { rememberedOnly: true })).toMatchObject({
+      kind: "not-found",
+    });
+  });
+
+  test("requires transport ID when one serial has duplicate ready transports", () => {
+    const duplicate = buildTargetInventory([
+      { device: device("USB-1", { transportId: "7" }) },
+      { device: device("USB-1", { transportId: "9" }) },
+    ]);
+
+    expect(selectTarget(duplicate.targets)).toMatchObject({ kind: "duplicate" });
+    expect(selectTarget(duplicate.targets, { selector: "USB-1" })).toMatchObject({
+      kind: "duplicate",
+    });
+    expect(selectTarget(duplicate.targets, { transportId: "9" })).toMatchObject({
+      kind: "selected",
+      selection: { transport: { transportId: "9" } },
+    });
+  });
 });

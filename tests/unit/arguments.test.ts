@@ -30,6 +30,7 @@ describe("parseArguments", () => {
         adbPath: "/path with spaces/adb",
         select: true,
         pairingCodeStdin: false,
+        remembered: false,
       },
     });
   });
@@ -84,6 +85,10 @@ describe("parseArguments", () => {
     expect(parseArguments(["devices", "--transport-id=42"])).toMatchObject({
       ok: true,
       options: { command: "devices", transportId: "42" },
+    });
+    expect(parseArguments(["devices", "--last", "--json"])).toMatchObject({
+      ok: true,
+      options: { command: "devices", remembered: true },
     });
   });
 
@@ -156,6 +161,10 @@ describe("parseArguments", () => {
       code: "CLI_USAGE",
     });
     expect(parseArguments(["devices", "--device", "usb-1", "--transport-id", "1"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["devices", "--last", "--select"])).toMatchObject({
       ok: false,
       code: "CLI_USAGE",
     });
