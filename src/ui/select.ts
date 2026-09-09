@@ -1,0 +1,192 @@
+import type { TextSink } from "./spinner.js";
+import { sanitizeTerminalText, style, symbols } from "./style.js";
+import type { TerminalCapabilities } from "./terminal.js";
+
+export interface SelectOption<T> {
+  value: T;
+  label: string;
+  description?: string;
+  recommended?: boolean;
+  disabled?: boolean;
+}
+
+export type SelectResult<T> =
+  | { kind: "selected"; value: T }
+  | { kind: "cancelled"; reason: "escape" | "interrupt" | "signal" }
+  | { kind: "unavailable" };
+
+export interface SelectInput {
+  isRaw?: boolean;
+  setRawMode?(enabled: boolean): unknown;
+  resume(): unknown;
+  pause(): unknown;
+  on(event: "data", listener: (chunk: Uint8Array | string) => void): unknown;
+  off(event: "data", listener: (chunk: Uint8Array | string) => void): unknown;
+}
+
+export interface SelectOptions<T> {
+  title: string;
+  options: readonly SelectOption<T>[];
+  input: SelectInput;
+  sink: TextSink;
+  capabilities: TerminalCapabilities;
+  signal?: AbortSignal;
+}
+
+function nextEnabled<T>(
+  options: readonly SelectOption<T>[],
+  current: number,
+  direction: -1 | 1,
+): number {
+  for (let offset = 1; offset <= options.length; offset += 1) {
+    const candidate = (current + direction * offset + options.length) % options.length;
+    if (options[candidate]?.disabled !== true) {
+      return candidate;
+    }
+  }
+  return current;
+}
+
+function initialIndex<T>(options: readonly SelectOption<T>[]): number {
+  const recommended = options.findIndex(
+    (option) => option.recommended === true && option.disabled !== true,
+  );
+  if (recommended !== -1) {
+    return recommended;
+  }
+  return options.findIndex((option) => option.disabled !== true);
+}
+
+function renderMenu<T>(
+  options: SelectOptions<T>,
+  selected: number,
+  previousLineCount: number,
+): number {
+  const { capabilities, sink } = options;
+  const glyphs = symbols(capabilities);
+  if (previousLineCount > 0) {
+    sink.write(`\u001B[${String(previousLineCount)}F`);
+  }
+  const lines = [style.strong(sanitizeTerminalText(options.title), capabilities)];
+  options.options.forEach((option, index) => {
+    const isSelected = index === selected;
+    const pointer = isSelected ? style.accent(glyphs.active, capabilities) : " ";
+    const number = `${String(index + 1)}.`;
+    const disabled = option.disabled === true ? " (unavailable)" : "";
+    const recommended = option.recommended === true ? " (recommended)" : "";
+    const label = `${sanitizeTerminalText(option.label)}${disabled}${recommended}`;
+    const styledLabel =
+      option.disabled === true
+        ? style.dim(label, capabilities)
+        : isSelected
+          ? style.strong(label, capabilities)
+          : label;
+    lines.push(`${pointer} ${number} ${styledLabel}`);
+    if (option.description !== undefined) {
+      lines.push(`     ${style.dim(sanitizeTerminalText(option.description), capabilities)}`);
+    }
+  });
+  lines.push(style.dim("↑/↓ move · 1-9 jump · Enter confirm · Esc cancel", capabilities));
+
+  for (const line of lines) {
+    sink.write(`\u001B[2K${line}\n`);
+  }
+  return lines.length;
+}
+
+export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectResult<T>> {
+  if (!options.capabilities.interactive || options.input.setRawMode === undefined) {
+    return { kind: "unavailable" };
+  }
+  let selected = initialIndex(options.options);
+  if (selected === -1) {
+    return { kind: "unavailable" };
+  }
+
+  return await new Promise<SelectResult<T>>((resolve) => {
+    const wasRaw = options.input.isRaw === true;
+    let lineCount = 0;
+    let settled = false;
+
+    const attempt = (operation: () => unknown) => {
+      try {
+        operation();
+      } catch {
+        // Terminal cleanup is best-effort; every independent restoration must still run.
+      }
+    };
+    const cleanup = () => {
+      attempt(() => options.input.off("data", onData));
+      attempt(() => options.signal?.removeEventListener("abort", onAbort));
+      if (!wasRaw) {
+        attempt(() => options.input.setRawMode?.(false));
+      }
+      attempt(() => options.input.pause());
+      attempt(() => options.sink.write("\u001B[?25h"));
+    };
+    const settle = (result: SelectResult<T>) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    const draw = () => {
+      lineCount = renderMenu(options, selected, lineCount);
+    };
+    const onAbort = () => settle({ kind: "cancelled", reason: "signal" });
+    const onData = (chunk: Uint8Array | string) => {
+      const input = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+      if (input.includes("\u0003")) {
+        settle({ kind: "cancelled", reason: "interrupt" });
+        return;
+      }
+      if (input === "\u001B") {
+        settle({ kind: "cancelled", reason: "escape" });
+        return;
+      }
+      if (input.includes("\u001B[A")) {
+        selected = nextEnabled(options.options, selected, -1);
+        draw();
+        return;
+      }
+      if (input.includes("\u001B[B")) {
+        selected = nextEnabled(options.options, selected, 1);
+        draw();
+        return;
+      }
+      const shortcut = input.match(/^[1-9]$/u);
+      if (shortcut !== null) {
+        const index = Number(shortcut[0]) - 1;
+        if (options.options[index] !== undefined && options.options[index]?.disabled !== true) {
+          selected = index;
+          draw();
+        }
+        return;
+      }
+      if (input.includes("\r") || input.includes("\n")) {
+        const selectedOption = options.options[selected];
+        if (selectedOption !== undefined && selectedOption.disabled !== true) {
+          settle({ kind: "selected", value: selectedOption.value });
+        }
+      }
+    };
+
+    try {
+      options.sink.write("\u001B[?25l");
+      options.input.setRawMode?.(true);
+      options.input.resume();
+      options.input.on("data", onData);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      draw();
+    } catch {
+      settle({ kind: "unavailable" });
+      return;
+    }
+
+    if (options.signal?.aborted) {
+      onAbort();
+    }
+  });
+}
