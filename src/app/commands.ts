@@ -56,6 +56,7 @@ export interface DoctorData {
 export interface DevicesData {
   adbPath: string;
   devices: AdbDevice[];
+  selected?: AdbDevice;
 }
 
 interface CommandContext {

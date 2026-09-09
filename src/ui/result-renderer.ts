@@ -7,7 +7,7 @@ import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
 import type { TerminalCapabilities } from "./terminal.js";
 
-export type CommandResult = ResultEnvelope<DevicesData | DoctorData>;
+export type CommandResult = ResultEnvelope<unknown>;
 
 export interface ResultRenderOptions {
   format: OutputFormat;
@@ -18,6 +18,23 @@ export interface ResultRenderOptions {
 
 function clean(value: unknown): string {
   return sanitizeTerminalText(String(value));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDoctorData(value: unknown): value is DoctorData {
+  return (
+    isRecord(value) &&
+    isRecord(value.runtime) &&
+    isRecord(value.adb) &&
+    Array.isArray(value.devices)
+  );
+}
+
+function hasDevices(value: unknown): value is DoctorData | DevicesData {
+  return isRecord(value) && Array.isArray(value.devices);
 }
 
 function deviceLabel(device: AdbDevice): string {
@@ -66,8 +83,8 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     "",
   );
 
-  if (result.command === "doctor" && result.data !== null && "runtime" in result.data) {
-    const data = result.data as DoctorData;
+  if (result.command === "doctor" && isDoctorData(result.data)) {
+    const data = result.data;
     const runtime = `${data.runtime.name} ${data.runtime.version}`;
     const adbVersion = data.adb.version.platformToolsVersion ?? "unknown version";
     lines.push(
@@ -79,7 +96,7 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     );
   }
 
-  if (result.data !== null && "devices" in result.data) {
+  if (hasDevices(result.data)) {
     const devices = result.data.devices;
     lines.push(style.strong(`Targets (${String(devices.length)})`, capabilities));
     if (devices.length === 0) {
@@ -89,6 +106,11 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
         const branch = index === devices.length - 1 ? glyphs.end : glyphs.branch;
         lines.push(`${style.dim(branch, capabilities)} ${deviceLabel(device)}`);
       });
+    }
+    if ("selected" in result.data && result.data.selected !== undefined) {
+      lines.push(
+        `${style.accent(glyphs.active, capabilities)} Selected ${deviceLabel(result.data.selected)}`,
+      );
     }
   }
 
@@ -110,17 +132,20 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
   sink.write(`command=${clean(result.command)}\n`);
   sink.write(`ok=${String(result.ok)}\n`);
   sink.write(`duration_ms=${String(result.durationMs)}\n`);
-  if (result.data !== null && "runtime" in result.data) {
-    const data = result.data as DoctorData;
+  if (isDoctorData(result.data)) {
+    const data = result.data;
     sink.write(`runtime=${clean(data.runtime.name)}\n`);
     sink.write(`runtime_version=${clean(data.runtime.version)}\n`);
     sink.write(`adb_version=${clean(data.adb.version.platformToolsVersion ?? "unknown")}\n`);
   }
-  if (result.data !== null && "devices" in result.data) {
+  if (hasDevices(result.data)) {
     sink.write(`device_count=${String(result.data.devices.length)}\n`);
     result.data.devices.forEach((device, index) => {
       sink.write(`device_${String(index)}=${deviceLabel(device)}\n`);
     });
+    if ("selected" in result.data && result.data.selected !== undefined) {
+      sink.write(`selected=${deviceLabel(result.data.selected)}\n`);
+    }
   }
   for (const problem of result.problems) {
     sink.write(`problem=${clean(problem.code)}:${clean(problem.summary)}\n`);

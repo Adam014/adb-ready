@@ -116,5 +116,15 @@ describe("parseArguments", () => {
       code: "CLI_USAGE",
       option: "--select",
     });
+    expect(parseArguments(["devices", "--select", "--non-interactive"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+      option: "--select",
+    });
+    expect(parseArguments(["devices", "--select", "--json"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+      option: "--select",
+    });
   });
 });

@@ -236,6 +236,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (select && command !== "devices") {
     return failure("CLI_USAGE", "--select can only be used with the devices command.", "--select");
   }
+  if (select && nonInteractive) {
+    return failure("CLI_USAGE", "--select cannot be combined with --non-interactive.", "--select");
+  }
+  if (select && format !== "human") {
+    return failure("CLI_USAGE", "--select can only be used with human output.", "--select");
+  }
 
   return {
     ok: true,

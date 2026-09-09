@@ -1,33 +1,16 @@
 #!/usr/bin/env node
 
 import process from "node:process";
+import { processIo, runCli } from "./cli/main.js";
 
-const VERSION = "0.0.0";
+const controller = new AbortController();
+const abort = () => controller.abort();
+process.once("SIGINT", abort);
+process.once("SIGTERM", abort);
 
-const HELP = `ADB Ready
-
-Make an Android target ready, then keep the development session working.
-
-Usage:
-  adb-ready [command] [options]
-  adbr [command] [options]
-
-Commands:
-  doctor       Inspect the local ADB environment
-  devices      List visible Android targets
-
-Options:
-  -h, --help       Show help
-  -V, --version    Show version
-`;
-
-const args = process.argv.slice(2);
-
-if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
-  process.stdout.write(HELP);
-} else if (args.includes("--version") || args.includes("-V")) {
-  process.stdout.write(`${VERSION}\n`);
-} else {
-  process.stderr.write(`Unknown command or option: ${args[0]}\nRun adb-ready --help for usage.\n`);
-  process.exitCode = 2;
+try {
+  process.exitCode = await runCli(process.argv.slice(2), processIo(), {}, controller.signal);
+} finally {
+  process.removeListener("SIGINT", abort);
+  process.removeListener("SIGTERM", abort);
 }
