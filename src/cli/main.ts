@@ -19,6 +19,7 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import type { AndroidTarget } from "../target/model.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
 import { NdjsonEventRenderer, renderResult } from "../ui/result-renderer.js";
@@ -302,6 +303,11 @@ async function runInteractiveSession(
   }
 }
 
+function targetDescription(target: AndroidTarget): string {
+  const transports = target.transports.map(({ kind }) => kind).join(", ");
+  return `${target.serial} · ${target.state} · ${transports}`;
+}
+
 async function selectDevice(
   execution: CommandExecution<DevicesData>,
   io: CliIo,
@@ -312,7 +318,9 @@ async function selectDevice(
   if (data === null) {
     return execution;
   }
-  const selectable = data.devices.filter(({ state }) => state === "device");
+  const selectable = data.targets.filter((target) =>
+    target.transports.some(({ stable, state }) => stable && state === "device"),
+  );
   if (selectable.length === 0) {
     const problem = inputProblem(
       ProblemCode.NoSelectableTarget,
@@ -328,12 +336,12 @@ async function selectDevice(
 
   const selection = await selectOne({
     title: "Select an Android target",
-    options: data.devices.map((device) => ({
-      value: device,
-      label: device.model ?? device.serial,
-      description: `${device.serial} · ${device.state}`,
-      disabled: device.state !== "device",
-      recommended: selectable.length === 1 && device.serial === selectable[0]?.serial,
+    options: data.targets.map((target) => ({
+      value: target,
+      label: target.name,
+      description: targetDescription(target),
+      disabled: !target.transports.some(({ stable, state }) => stable && state === "device"),
+      recommended: selectable.length === 1 && target.id === selectable[0]?.id,
     })),
     input: io.input,
     sink: io.error,
@@ -342,11 +350,20 @@ async function selectDevice(
   });
 
   if (selection.kind === "selected") {
+    const transport = selection.value.transports.find(
+      ({ stable, state }) => stable && state === "device",
+    );
+    if (transport === undefined) {
+      return execution;
+    }
     return {
       ...execution,
       result: {
         ...execution.result,
-        data: { ...data, selected: selection.value },
+        data: {
+          ...data,
+          selected: { target: selection.value, transport, reason: "explicit" },
+        },
       },
     };
   }

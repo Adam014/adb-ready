@@ -33,6 +33,12 @@ function processResult(
 
 function commandName(request: ProcessRequest): string {
   const args = request.args ?? [];
+  if (args.includes("mdns")) {
+    return "mdns-services";
+  }
+  if (args.includes("ro.serialno")) {
+    return `hardware-serial:${String(args[args.indexOf("-s") + 1])}`;
+  }
   if (args.includes("devices")) {
     return "devices";
   }
@@ -40,7 +46,7 @@ function commandName(request: ProcessRequest): string {
 }
 
 function fixtureRunner(
-  outputs: Partial<Record<"devices" | "host-features" | "server-status" | "version", string>>,
+  outputs: Partial<Record<string, string>>,
   requests: ProcessRequest[] = [],
 ): ProcessRunner {
   return async (request) => {
@@ -81,6 +87,8 @@ describe("runDoctor", () => {
           devices:
             "List of devices attached\n" +
             "emulator-5554 device product:sdk model:Pixel_9 device:emu transport_id:1\n",
+          "hardware-serial:emulator-5554": "EMULATOR-9\n",
+          "mdns-services": "List of discovered mdns services\n",
         }),
       ),
     );
@@ -102,6 +110,11 @@ describe("runDoctor", () => {
         },
       },
       devices: [{ serial: "emulator-5554", state: "device", model: "Pixel 9" }],
+      targets: [{ serial: "emulator-5554", name: "Pixel 9", hardwareSerial: "EMULATOR-9" }],
+      discovery: {
+        mdns: { available: true, services: [] },
+        identity: { probed: 1, resolved: 1 },
+      },
     });
     expect(execution.result.problems).toEqual([]);
   });
@@ -122,7 +135,12 @@ describe("runDoctor", () => {
       ),
     );
 
-    expect(requests.map(commandName)).toEqual(["version", "host-features", "devices"]);
+    expect(requests.map(commandName)).toEqual([
+      "version",
+      "host-features",
+      "devices",
+      "mdns-services",
+    ]);
     expect(execution.result.data?.adb.serverStatus).toBeNull();
     expect(execution.exitCode).toBe(ExitCode.Success);
   });
@@ -174,7 +192,33 @@ describe("runDevices", () => {
     expect(execution.exitCode).toBe(ExitCode.Success);
     expect(execution.result.ok).toBe(true);
     expect(execution.result.data?.devices).toEqual([]);
+    expect(execution.result.data?.targets).toEqual([]);
     expect(execution.result.problems[0]?.code).toBe(ProblemCode.NoTargets);
+  });
+
+  test("deduplicates USB and wireless transports only after observing the same identity", async () => {
+    const execution = await runDevices(
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          devices:
+            "List of devices attached\n" +
+            "USB-1 device model:Pixel_9 usb:1-1 transport_id:1\n" +
+            "192.168.1.20:37123 device model:Pixel_9 transport_id:2\n",
+          "hardware-serial:USB-1": "PHONE-1\n",
+          "hardware-serial:192.168.1.20:37123": "PHONE-1\n",
+          "mdns-services":
+            "List of discovered mdns services\n" +
+            "adb-PHONE-1-aBcD _adb-tls-connect._tcp 192.168.1.20:37123\n",
+        }),
+      ),
+    );
+
+    expect(execution.result.data?.targets).toHaveLength(1);
+    expect(execution.result.data?.targets[0]?.transports.map(({ kind }) => kind)).toEqual([
+      "usb",
+      "tls",
+    ]);
   });
 
   test("keeps an offline target visible without failing the inventory command", async () => {

@@ -172,7 +172,7 @@ try {
 
     const plain = command(alias, ["devices", "--format", "plain"], env);
     expectStatus(plain, 0, `${alias} devices plain`);
-    expectIncludes(plain.stdout, "device_count=1", `${alias} devices plain`);
+    expectIncludes(plain.stdout, "target_count=1", `${alias} devices plain`);
     assertMachineClean(plain, `${alias} devices plain`);
     assertions += 1;
 

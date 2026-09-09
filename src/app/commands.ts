@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AdbClient } from "../adb/client.js";
-import type { AdbDevice, AdbVersion } from "../adb/parsers.js";
+import type { AdbDevice, AdbMdnsService, AdbVersion } from "../adb/parsers.js";
 import { EventBus } from "../core/event-bus.js";
 import { redactText } from "../core/redaction.js";
 import {
@@ -20,6 +20,8 @@ import {
 import { locateAdb } from "../platform/executable.js";
 import type { ProcessResult, ProcessRunner } from "../platform/process-runner.js";
 import { detectRuntime, type RuntimeInfo } from "../platform/runtime.js";
+import { type AndroidTarget, buildTargetInventory, isStableAdbSerial } from "../target/model.js";
+import type { SelectedTarget } from "../target/selection.js";
 
 export interface CommandConfig {
   adbPath?: string;
@@ -51,12 +53,27 @@ export interface DoctorData {
     serverStatus: Record<string, string> | null;
   };
   devices: AdbDevice[];
+  targets: AndroidTarget[];
+  discovery: TargetDiscoveryData;
 }
 
 export interface DevicesData {
   adbPath: string;
   devices: AdbDevice[];
-  selected?: AdbDevice;
+  targets: AndroidTarget[];
+  discovery: TargetDiscoveryData;
+  selected?: SelectedTarget;
+}
+
+export interface TargetDiscoveryData {
+  mdns: {
+    available: boolean;
+    services: AdbMdnsService[];
+  };
+  identity: {
+    probed: number;
+    resolved: number;
+  };
 }
 
 interface CommandContext {
@@ -209,6 +226,91 @@ function operationProblem(
   });
 }
 
+interface TargetInspection {
+  targets: AndroidTarget[];
+  discovery: TargetDiscoveryData;
+  optionalProblems: Problem[];
+  interruption?: Problem;
+}
+
+function normalizedHardwareSerial(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized === undefined || normalized === "" || normalized.toLowerCase() === "unknown"
+    ? undefined
+    : normalized;
+}
+
+async function inspectTargets(
+  client: AdbClient,
+  devices: readonly AdbDevice[],
+  commandId: string,
+  signal: AbortSignal | undefined,
+): Promise<TargetInspection> {
+  const identityCandidates = devices.filter(
+    ({ serial, state }) => state === "device" && isStableAdbSerial(serial),
+  );
+  const [mdns, identities] = await Promise.all([
+    client.mdnsServices(signal),
+    Promise.all(identityCandidates.map(({ serial }) => client.getHardwareSerial(serial, signal))),
+  ]);
+  const optionalProblems: Problem[] = [];
+  const allObservations = [mdns, ...identities];
+  const interrupted = allObservations.find(({ process }) => process.aborted);
+  if (interrupted !== undefined) {
+    return {
+      targets: [],
+      discovery: {
+        mdns: { available: false, services: [] },
+        identity: { probed: identityCandidates.length, resolved: 0 },
+      },
+      optionalProblems,
+      interruption: operationProblem("target-discovery", interrupted, commandId),
+    };
+  }
+
+  const mdnsAvailable = processSucceeded(mdns.process);
+  if (!mdnsAvailable) {
+    optionalProblems.push(
+      adbOptionalProbeProblem("mdns-services", mdns.process, {
+        commandId,
+        operationId: mdns.operationId,
+      }),
+    );
+  }
+
+  const identityBySerial = new Map<string, string>();
+  identities.forEach((identity, index) => {
+    if (!processSucceeded(identity.process)) {
+      return;
+    }
+    const hardwareSerial = normalizedHardwareSerial(identity.value);
+    const candidate = identityCandidates[index];
+    if (hardwareSerial !== undefined && candidate !== undefined) {
+      identityBySerial.set(candidate.serial, hardwareSerial);
+    }
+  });
+  const services = mdnsAvailable ? mdns.value : [];
+  const inventory = buildTargetInventory(
+    devices.map((device) => {
+      const hardwareSerial = identityBySerial.get(device.serial);
+      return {
+        device,
+        ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
+      };
+    }),
+    services,
+  );
+
+  return {
+    targets: inventory.targets,
+    discovery: {
+      mdns: { available: mdnsAvailable, services: inventory.services },
+      identity: { probed: identityCandidates.length, resolved: identityBySerial.size },
+    },
+    optionalProblems,
+  };
+}
+
 export async function runDoctor(
   config: CommandConfig = {},
   dependencies: CommandDependencies = {},
@@ -266,6 +368,12 @@ export async function runDoctor(
   if (devices.value.length === 0) {
     problems.push(noTargetsProblem({ commandId: context.commandId }));
   }
+  const inspection = await inspectTargets(client, devices.value, context.commandId, signal);
+  if (inspection.interruption !== undefined) {
+    problems.push(inspection.interruption);
+    return finish<DoctorData>(context, null, problems);
+  }
+  problems.push(...inspection.optionalProblems);
 
   const versionData: Omit<AdbVersion, "raw"> = {
     ...(version.value.protocolVersion === undefined
@@ -290,6 +398,8 @@ export async function runDoctor(
         serverStatus,
       },
       devices: devices.value,
+      targets: inspection.targets,
+      discovery: inspection.discovery,
     },
     problems,
   );
@@ -320,5 +430,20 @@ export async function runDevices(
     problems.push(noTargetsProblem({ commandId: context.commandId }));
   }
 
-  return finish(context, { adbPath: redactedPath(executable), devices: devices.value }, problems);
+  const inspection = await inspectTargets(client, devices.value, context.commandId, signal);
+  if (inspection.interruption !== undefined) {
+    problems.push(inspection.interruption);
+    return finish<DevicesData>(context, null, problems);
+  }
+
+  return finish(
+    context,
+    {
+      adbPath: redactedPath(executable),
+      devices: devices.value,
+      targets: inspection.targets,
+      discovery: inspection.discovery,
+    },
+    problems,
+  );
 }

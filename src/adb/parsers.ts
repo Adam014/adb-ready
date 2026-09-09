@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 export type AdbDeviceState =
   | "bootloader"
   | "device"
@@ -182,7 +184,7 @@ export function parseAdbNetworkEndpoint(value: string): AdbNetworkEndpoint | und
     host === "" ||
     (!bracketed &&
       (host.includes(":") || host.includes("[") || host.includes("]") || /\s/u.test(host))) ||
-    (bracketed && (host.includes("[") || host.includes("]"))) ||
+    (bracketed && (host.includes("[") || host.includes("]") || /\s/u.test(host))) ||
     !/^\d+$/u.test(portText) ||
     host === "0.0.0.0" ||
     host === "::" ||
@@ -194,7 +196,7 @@ export function parseAdbNetworkEndpoint(value: string): AdbNetworkEndpoint | und
   }
 
   const version = bracketed ? 6 : /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(host) ? 4 : "hostname";
-  if (version === 4 && host.split(".").some((part) => Number(part) > 255)) {
+  if ((version === 6 && isIP(host) !== 6) || (version === 4 && isIP(host) !== 4)) {
     return undefined;
   }
 

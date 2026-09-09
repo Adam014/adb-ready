@@ -3,6 +3,7 @@ import type { DevicesData, DoctorData } from "../app/commands.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
+import type { AndroidTarget } from "../target/model.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
 import type { TerminalCapabilities } from "./terminal.js";
@@ -37,11 +38,21 @@ function hasDevices(value: unknown): value is DoctorData | DevicesData {
   return isRecord(value) && Array.isArray(value.devices);
 }
 
+function hasTargets(value: unknown): value is DoctorData | DevicesData {
+  return isRecord(value) && Array.isArray(value.targets);
+}
+
 function deviceLabel(device: AdbDevice): string {
   const identity = device.model ?? device.product ?? device.device;
   return identity === undefined
     ? `${clean(device.serial)} · ${clean(device.state)}`
     : `${clean(identity)} · ${clean(device.serial)} · ${clean(device.state)}`;
+}
+
+function targetLabel(target: AndroidTarget): string {
+  const transports = target.transports.map(({ kind }) => kind).join("+");
+  const transportSummary = target.transports.length > 1 ? ` · ${transports}` : "";
+  return `${clean(target.name)} · ${clean(target.serial)} · ${clean(target.state)}${clean(transportSummary)}`;
 }
 
 function problemLines(
@@ -96,22 +107,29 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     );
   }
 
-  if (hasDevices(result.data)) {
-    const devices = result.data.devices;
-    lines.push(style.strong(`Targets (${String(devices.length)})`, capabilities));
-    if (devices.length === 0) {
+  if (hasTargets(result.data)) {
+    const targets = result.data.targets;
+    lines.push(style.strong(`Targets (${String(targets.length)})`, capabilities));
+    if (targets.length === 0) {
       lines.push(`${style.dim(glyphs.end, capabilities)} None visible`);
     } else {
-      devices.forEach((device, index) => {
-        const branch = index === devices.length - 1 ? glyphs.end : glyphs.branch;
-        lines.push(`${style.dim(branch, capabilities)} ${deviceLabel(device)}`);
+      targets.forEach((target, index) => {
+        const branch = index === targets.length - 1 ? glyphs.end : glyphs.branch;
+        lines.push(`${style.dim(branch, capabilities)} ${targetLabel(target)}`);
       });
     }
     if ("selected" in result.data && result.data.selected !== undefined) {
       lines.push(
-        `${style.accent(glyphs.active, capabilities)} Selected ${deviceLabel(result.data.selected)}`,
+        `${style.accent(glyphs.active, capabilities)} Selected ${targetLabel(result.data.selected.target)}`,
       );
     }
+  } else if (hasDevices(result.data)) {
+    const devices = result.data.devices;
+    lines.push(style.strong(`Targets (${String(devices.length)})`, capabilities));
+    devices.forEach((device, index) => {
+      const branch = index === devices.length - 1 ? glyphs.end : glyphs.branch;
+      lines.push(`${style.dim(branch, capabilities)} ${deviceLabel(device)}`);
+    });
   }
 
   if (result.problems.length > 0) {
@@ -138,14 +156,19 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`runtime_version=${clean(data.runtime.version)}\n`);
     sink.write(`adb_version=${clean(data.adb.version.platformToolsVersion ?? "unknown")}\n`);
   }
-  if (hasDevices(result.data)) {
+  if (hasTargets(result.data)) {
+    sink.write(`target_count=${String(result.data.targets.length)}\n`);
+    result.data.targets.forEach((target, index) => {
+      sink.write(`target_${String(index)}=${targetLabel(target)}\n`);
+    });
+    if ("selected" in result.data && result.data.selected !== undefined) {
+      sink.write(`selected=${targetLabel(result.data.selected.target)}\n`);
+    }
+  } else if (hasDevices(result.data)) {
     sink.write(`device_count=${String(result.data.devices.length)}\n`);
     result.data.devices.forEach((device, index) => {
       sink.write(`device_${String(index)}=${deviceLabel(device)}\n`);
     });
-    if ("selected" in result.data && result.data.selected !== undefined) {
-      sink.write(`selected=${deviceLabel(result.data.selected)}\n`);
-    }
   }
   for (const problem of result.problems) {
     sink.write(`problem=${clean(problem.code)}:${clean(problem.summary)}\n`);

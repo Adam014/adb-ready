@@ -38,6 +38,8 @@ describe("ADB network discovery", () => {
     expect(parseAdbNetworkEndpoint("[::]:1234")).toBeUndefined();
     expect(parseAdbNetworkEndpoint("192.168.1.300:1234")).toBeUndefined();
     expect(parseAdbNetworkEndpoint("192.168.1.2:70000")).toBeUndefined();
+    expect(parseAdbNetworkEndpoint("[not-an-ipv6-address]:1234")).toBeUndefined();
+    expect(parseAdbNetworkEndpoint("[fd00::1 value]:1234")).toBeUndefined();
     expect(parseAdbNetworkEndpoint("pixel.local:37123")).toEqual({
       host: "pixel.local",
       port: 37123,

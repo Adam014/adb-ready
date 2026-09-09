@@ -1,9 +1,14 @@
 import process from "node:process";
 
 const args = process.argv.slice(2);
-const command = ["version", "host-features", "server-status", "devices"].find((candidate) =>
-  args.includes(candidate),
-);
+const command = [
+  "version",
+  "host-features",
+  "server-status",
+  "devices",
+  "mdns",
+  "ro.serialno",
+].find((candidate) => args.includes(candidate));
 const scenario = process.env.ADB_READY_FAKE_SCENARIO ?? "ready";
 
 if (scenario === "failure") {
@@ -27,6 +32,10 @@ if (scenario === "failure") {
         ? "fixture-usb unauthorized model:Pixel_9 transport_id:1\nfixture-wifi offline model:Pixel_8 transport_id:2\n"
         : "fixture-usb device product:komodo model:Pixel_9 device:komodo transport_id:1\n";
   process.stdout.write(`List of devices attached\n${body}`);
+} else if (command === "mdns") {
+  process.stdout.write("List of discovered mdns services\n");
+} else if (command === "ro.serialno") {
+  process.stdout.write("fixture-hardware-serial\n");
 } else {
   process.stderr.write(`unsupported fake ADB arguments: ${args.join(" ")}\n`);
   process.exitCode = 1;
