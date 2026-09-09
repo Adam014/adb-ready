@@ -143,7 +143,7 @@ try {
     cwd: consumer,
   });
 
-  if (manifest.bin?.["adb-ready"] !== "./dist/cli.js" || manifest.bin?.adbr !== "./dist/cli.js") {
+  if (manifest.bin?.["adb-ready"] !== "dist/cli.js" || manifest.bin?.adbr !== "dist/cli.js") {
     throw new Error("both public command aliases must resolve to dist/cli.js");
   }
 

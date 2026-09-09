@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
+import manifest from "../../package.json" with { type: "json" };
 import {
   type CommandDependencies,
   type CommandExecution,
@@ -26,7 +27,7 @@ import type { TextSink } from "../ui/spinner.js";
 import { resolveTerminalCapabilities, type TerminalCapabilities } from "../ui/terminal.js";
 import { type CliOptions, type OutputFormat, parseArguments } from "./arguments.js";
 
-export const VERSION = "0.0.0";
+export const VERSION = manifest.version;
 
 export const HELP = `ADB Ready
 

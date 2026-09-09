@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
-if (manifest.bin?.["adb-ready"] !== "./dist/cli.js" || manifest.bin?.adbr !== "./dist/cli.js") {
+if (manifest.bin?.["adb-ready"] !== "dist/cli.js" || manifest.bin?.adbr !== "dist/cli.js") {
   throw new Error("adb-ready and adbr must resolve to the same dist/cli.js entrypoint");
 }
 

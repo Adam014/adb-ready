@@ -1,67 +1,65 @@
 # ADB Ready
 
-> Connect Android. Reverse localhost. Start developing.
+> Make an Android target ready, then keep the development session working.
 
-ADB Ready is a planned open-source CLI for the complete everyday Android ADB
-development workflow.
+ADB Ready is an early-alpha, Android-only developer CLI built around the real
+`adb` executable. This release establishes the portable and scriptable
+foundation for the broader development-session workflow.
 
-The product is intentionally Android-only. It is framework-agnostic and should
-work in projects using Node, Bun, or Deno and npm, pnpm, Yarn, or Bun without
-forcing the project's package manager to change.
+## Try the alpha
 
-The intended experience is one command:
-
-```bash
-adb-ready dev
-```
-
-That command should discover or recover a target, select it deterministically,
-configure required reverse ports, export the same target through
-`ANDROID_SERIAL`, launch Expo, React Native, or a custom command, and explain
-failures in actionable language.
-
-ADB Ready is broader than a wireless pairing utility. The planned product also
-covers device management, pairing, forward/reverse ports, app lifecycle,
-logcat, diagnostics, screenshots and recordings, file transfer, shell access,
-and scriptable automation.
-
-This repository is currently in product-definition and initial architecture
-stage. Public installation and usage documentation will be added with the first
-usable implementation.
-
-## Planned Runtime and Distribution Support
-
-ADB Ready is developed with Bun and TypeScript, but Bun is not intended to be a
-required end-user runtime. The published CLI will use the portable
-Node-compatible API subset shared by Node, Bun, and Deno.
-
-Planned entry points:
+ADB Ready currently requires Node.js 22 or newer and an installed Android SDK
+Platform-Tools `adb` executable.
 
 ```bash
-npx adb-ready dev
-pnpm dlx adb-ready dev
-yarn dlx adb-ready dev
-bunx adb-ready dev
-
-# Explicit alternative runtimes
-bunx --bun adb-ready dev
-deno run -A npm:adb-ready dev
+npx adb-ready@alpha
+npx adb-ready@alpha doctor
+npx adb-ready@alpha devices
 ```
 
-Runtime support is a tested contract, not a best-effort claim. A public release
-must pass the CLI contract on Node, Bun, and Deno across the supported operating
-systems.
+The package also exposes the shorter `adbr` command. Both names invoke the same
+CLI entrypoint.
 
-## Planned CLI
+## Available now
 
-```text
-adb-ready dev
-adb-ready devices
-adb-ready connect
-adb-ready pair
-adb-ready ports
-adb-ready apps
-adb-ready logs
-adb-ready doctor
-adb-ready shell
+- Interactive keyboard-driven home screen.
+- Read-only environment and ADB diagnostics with `doctor`.
+- Read-only Android target discovery with `devices`.
+- Deterministic target selection through `--select`.
+- Human, plain, JSON, and NDJSON output.
+- Explicit ADB executable, server host, server port, timeout, and presentation
+  controls.
+- Portable execution through Node, Bun, and Deno.
+
+Run `npx adb-ready@alpha --help` for the complete command reference.
+
+## Runtime and package-manager entrypoints
+
+The same npm package can be launched through the common JavaScript package
+managers:
+
+```bash
+npx adb-ready@alpha doctor
+pnpm dlx adb-ready@alpha doctor
+yarn dlx adb-ready@alpha doctor
+bunx adb-ready@alpha doctor
 ```
+
+Explicit alternative runtimes are also supported:
+
+```bash
+bunx --bun adb-ready@alpha doctor
+deno run -A npm:adb-ready@alpha doctor
+```
+
+## Alpha scope
+
+Wireless pairing and recovery, reverse and forward ports, Expo and React Native
+presets, and the flagship `adb-ready dev` session are not included yet. The
+current commands are intentionally read-only and never restart the ADB server
+or mutate a connected device.
+
+This preview is published to validate the CLI foundation and reserve the
+canonical package name during active development. The source repository remains
+private during the early implementation phase, and this alpha is currently
+distributed as `UNLICENSED` software.

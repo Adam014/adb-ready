@@ -1,12 +1,11 @@
 {
   "name": "adb-ready",
-  "version": "0.0.0",
+  "version": "0.0.1-alpha.0",
   "description": "Make an Android target ready, then keep the development session working.",
-  "private": true,
   "type": "module",
   "bin": {
-    "adb-ready": "./dist/cli.js",
-    "adbr": "./dist/cli.js"
+    "adb-ready": "dist/cli.js",
+    "adbr": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -55,8 +54,7 @@
   ],
   "license": "UNLICENSED",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
