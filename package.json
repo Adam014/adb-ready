@@ -23,6 +23,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
+    "ui:playground": "bun run scripts/ui-playground.ts",
+    "ui:check": "bun run scripts/ui-playground.ts --all --non-interactive",
     "test": "bun test",
     "test:integration": "bun test tests/integration",
     "smoke": "bun run build && bun run scripts/runtime-smoke.mjs",
