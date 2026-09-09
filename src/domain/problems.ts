@@ -11,6 +11,7 @@ export const ProblemCode = {
   AdbTimeout: "ADB_TIMEOUT",
   MultipleTargets: "MULTIPLE_TARGETS",
   NoTargets: "NO_TARGETS",
+  OperationInterrupted: "OPERATION_INTERRUPTED",
   TargetNoPermissions: "TARGET_NO_PERMISSIONS",
   TargetOffline: "TARGET_OFFLINE",
   TargetUnauthorized: "TARGET_UNAUTHORIZED",
@@ -83,6 +84,20 @@ export function adbProcessProblem(
 ): Problem {
   if (result.spawnError?.code === "ENOENT") {
     return adbNotFoundProblem(correlation, result.executable);
+  }
+
+  if (result.aborted) {
+    return {
+      code: ProblemCode.OperationInterrupted,
+      category: "process.interrupted",
+      severity: "error",
+      summary: `ADB ${operation} was interrupted.`,
+      detail: "The operation stopped after receiving an interruption request.",
+      retryable: true,
+      evidence: processEvidence(result),
+      actions: [],
+      correlation,
+    };
   }
 
   if (result.timedOut) {

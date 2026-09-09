@@ -60,6 +60,17 @@ describe("problem classification", () => {
     });
   });
 
+  test("classifies an interrupted process before generic ADB failures", () => {
+    const problem = adbProcessProblem(
+      "devices",
+      failedProcess({ aborted: true, signal: "SIGTERM" }),
+      { commandId: "command-1", operationId: "operation-1" },
+    );
+
+    expect(problem.code).toBe(ProblemCode.OperationInterrupted);
+    expect(problem.category).toBe("process.interrupted");
+  });
+
   test("classifies a daemon failure without treating every stderr line as a category", () => {
     const daemon = adbProcessProblem(
       "devices",

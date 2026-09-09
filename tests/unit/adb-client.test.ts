@@ -108,4 +108,22 @@ describe("AdbClient", () => {
     expect(events.map((event) => event.type)).toEqual(["operation.started", "operation.failed"]);
     expect(events[1]?.data).toMatchObject({ exitCode: 1, timedOut: false });
   });
+
+  test("does not report an aborted process as completed even if it exits zero", async () => {
+    const runner: ProcessRunner = async () => processResult({ exitCode: 0, aborted: true });
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events: string[] = [];
+    bus.subscribe((event) => events.push(event.type));
+    const client = new AdbClient({
+      executable: "adb",
+      bus,
+      correlation: { commandId: "command-1" },
+      runner,
+      idFactory: () => "operation-1",
+    });
+
+    await client.devices();
+
+    expect(events).toEqual(["operation.started", "operation.failed"]);
+  });
 });

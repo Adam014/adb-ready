@@ -140,7 +140,11 @@ export class AdbClient {
       ...(signal === undefined ? {} : { signal }),
     };
     const result = await this.#runner(request);
-    const succeeded = result.spawnError === undefined && result.exitCode === 0 && !result.timedOut;
+    const succeeded =
+      result.spawnError === undefined &&
+      result.exitCode === 0 &&
+      !result.timedOut &&
+      !result.aborted;
 
     this.#options.bus.emit({
       type: succeeded ? "operation.completed" : "operation.failed",
