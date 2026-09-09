@@ -119,7 +119,8 @@ describe("home screen", () => {
     expect(selected).toEqual({ kind: "action", action: "exit" });
     expect(sink.value).toContain("TOOL SESSION ACTIVE");
     expect(sink.value).toContain("ACTIONS");
-    expect(sink.value).toMatch(/[#@%*]/u);
+    expect(sink.value).toMatch(/[◆━┃╱░▒▓]/u);
+    expect(sink.value).toStartWith("\u001B[?25l\u001B[2K\n");
     expect(sink.value).not.toContain("\u001B[2J\u001B[H");
     expect(sink.value).not.toContain("Android setup. No guesswork.");
     expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 40)).toBe(

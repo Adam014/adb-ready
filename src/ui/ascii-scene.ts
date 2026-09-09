@@ -5,6 +5,13 @@ export interface LinkCoreFrameOptions {
   height?: number;
 }
 
+export interface CoreShardFrameOptions {
+  angleY: number;
+  unicode: boolean;
+  width?: number;
+  height?: number;
+}
+
 interface Point3D {
   x: number;
   y: number;
@@ -54,6 +61,23 @@ function orientForLink(point: Point3D, link: 0 | 1, offset = true): Point3D {
 function normalize(point: Point3D): Point3D {
   const length = Math.hypot(point.x, point.y, point.z) || 1;
   return { x: point.x / length, y: point.y / length, z: point.z / length };
+}
+
+/** A tiny isometric core whose face lighting moves without collapsing its geometry. */
+export function renderCoreShardFrame(options: CoreShardFrameOptions): string[] {
+  const width = Math.max(7, Math.floor(options.width ?? 9));
+  const height = Math.max(5, Math.floor(options.height ?? 5));
+  const normalizedAngle = ((options.angleY % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  const phase = Math.floor((normalizedAngle / (Math.PI * 2)) * 12) % 3;
+  const shades = options.unicode ? ["░", "▒", "▓"] : [".", "+", "#"];
+  const top = shades[phase] ?? shades[0] ?? ".";
+  const side = shades[(phase + 1) % shades.length] ?? "+";
+  const front = shades[(phase + 2) % shades.length] ?? "#";
+  const sprite = options.unicode
+    ? ["  ◆━━◆", ` ╱${top}${top}╱┃`, `◆━━◆${side}┃`, `┃${front}${front}┃${side}◆`, "◆━━◆╱"]
+    : ["  +--+", ` /${top}${top}/|`, `+--+${side}|`, `|${front}${front}|${side}+`, "+--+/"];
+
+  return Array.from({ length: height }, (_, row) => (sprite[row] ?? "").slice(0, width));
 }
 
 function mix(

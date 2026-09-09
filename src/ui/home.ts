@@ -1,4 +1,4 @@
-import { renderLinkCoreFrame } from "./ascii-scene.js";
+import { renderCoreShardFrame, renderLinkCoreFrame } from "./ascii-scene.js";
 import { type SelectInput, selectOne } from "./select.js";
 import type { TextSink } from "./spinner.js";
 import { style } from "./style.js";
@@ -107,7 +107,7 @@ function compactSessionPreamble(
   const unicode = capabilities.unicode;
   const width = Math.max(20, Math.min(68, capabilities.columns));
   const inner = width - 4;
-  const coreWidth = capabilities.columns < 48 ? 10 : 12;
+  const coreWidth = 7;
   const gap = capabilities.columns < 30 ? 1 : 3;
   const textWidth = Math.max(4, inner - coreWidth - gap);
   const topLabel = " ADB READY ";
@@ -117,9 +117,9 @@ function compactSessionPreamble(
     : `+-${topLabel}${"-".repeat(Math.max(0, topFill - 1))}+`;
   const bottom = unicode ? `╰${"─".repeat(width - 2)}╯` : `+${"-".repeat(width - 2)}+`;
   const side = unicode ? "│" : "|";
-  const core = renderLinkCoreFrame({
-    angleX: 0.38 + Math.sin(frame * 0.035) * 0.12,
+  const core = renderCoreShardFrame({
     angleY: frame * 0.045,
+    unicode: capabilities.unicode,
     width: coreWidth,
     height: 5,
   });
@@ -131,7 +131,7 @@ function compactSessionPreamble(
     return `${style.dim(side, capabilities)} ${symbol}${" ".repeat(gap)}${text} ${style.dim(side, capabilities)}`;
   });
 
-  return [style.dim(top, capabilities), ...rows, style.dim(bottom, capabilities), ""];
+  return ["", style.dim(top, capabilities), ...rows, style.dim(bottom, capabilities), ""];
 }
 
 export function clearInteractiveScreen(sink: TextSink, capabilities: TerminalCapabilities): void {
