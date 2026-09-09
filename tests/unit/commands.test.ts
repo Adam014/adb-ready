@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
-import { runConnect, runDevices, runDoctor, runPair } from "../../src/app/commands.js";
+import {
+  runConnect,
+  runDevices,
+  runDoctor,
+  runPair,
+  runWirelessDiscovery,
+} from "../../src/app/commands.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import { ProblemCode } from "../../src/domain/problems.js";
 import type {
@@ -295,6 +301,29 @@ describe("runDevices", () => {
 });
 
 describe("wireless target commands", () => {
+  test("returns deterministic de-duplicated mDNS choices for interactive callers", async () => {
+    const execution = await runWirelessDiscovery(
+      "connect",
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          "mdns-services":
+            "List of discovered mdns services\n" +
+            "adb-A-x _adb-tls-connect._tcp 192.168.1.20:37123\n" +
+            "adb-A-x _adb-tls-connect._tcp 192.168.1.20:37123\n" +
+            "adb-B-y _adb-tls-connect._tcp 192.168.1.21:37124\n" +
+            "adb-C-z _adb-tls-pairing._tcp 192.168.1.22:41234\n",
+        }),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.services.map(({ endpoint }) => endpoint.serial)).toEqual([
+      "192.168.1.20:37123",
+      "192.168.1.21:37124",
+    ]);
+  });
+
   test("connects an explicit endpoint and verifies the final serial", async () => {
     const requests: ProcessRequest[] = [];
     const execution = await runConnect(

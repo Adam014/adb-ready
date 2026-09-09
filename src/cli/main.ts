@@ -9,6 +9,7 @@ import {
   runDevices,
   runDoctor,
   runPair,
+  runWirelessDiscovery,
 } from "../app/commands.js";
 import { loadConfig } from "../config/loader.js";
 import type { ConfigError, ConfigValues } from "../config/types.js";
@@ -498,6 +499,98 @@ async function runCliInternal(
       })?.serial;
     }
   }
+  const bus = dependencies.bus ?? new EventBus(dependencies.clock);
+  const commandDependencies = { ...dependencies, bus };
+  const config = {
+    ...(values.adbPath === undefined ? {} : { adbPath: values.adbPath }),
+    ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
+    ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
+    timeoutMs: values.timeoutMs,
+    ...(options.device === undefined ? {} : { targetSelector: options.device }),
+    ...(options.transportId === undefined ? {} : { targetTransportId: options.transportId }),
+    ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
+    ...(lastSerial === undefined ? {} : { rememberedSerial: lastSerial }),
+    ...(options.remembered ? { rememberedOnly: true } : {}),
+    ...(options.dryRun ? { dryRun: true } : {}),
+  };
+  let endpoint = options.endpoint;
+  if (
+    endpoint === undefined &&
+    errorCapabilities.interactive &&
+    (options.command === "connect" || options.command === "pair")
+  ) {
+    const discoveryProgress = options.quiet
+      ? undefined
+      : new ProgressRenderer({
+          bus,
+          sink: io.error,
+          capabilities: errorCapabilities,
+          verbose: options.verbose,
+        });
+    let discovery: Awaited<ReturnType<typeof runWirelessDiscovery>>;
+    try {
+      discovery = await runWirelessDiscovery(
+        options.command === "pair" ? "pairing" : "connect",
+        config,
+        commandDependencies,
+        signal,
+      );
+    } finally {
+      discoveryProgress?.dispose();
+    }
+    if (!discovery.result.ok || discovery.result.data === null) {
+      renderResult(
+        { ...discovery.result, command: options.command },
+        {
+          format: "human",
+          capabilities: errorCapabilities,
+          sink: io.error,
+          verbose: options.verbose,
+        },
+      );
+      return discovery.exitCode;
+    }
+    const services = discovery.result.data.services;
+    if (services.length === 1) {
+      endpoint = services[0]?.endpoint.serial;
+    } else {
+      const chosen = await selectOne({
+        title:
+          options.command === "pair" ? "Choose a pairing endpoint" : "Choose a wireless target",
+        options: services.map((service) => ({
+          value: service.endpoint.serial,
+          label: service.endpoint.serial,
+          description: `${service.instance} · ${service.rawServiceType}`,
+        })),
+        input: io.input,
+        sink: io.error,
+        capabilities: errorCapabilities,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (chosen.kind !== "selected") {
+        const failed = selectionProblem(
+          chosen.kind === "unavailable" ? "unavailable" : chosen.reason,
+          discovery.result.commandId,
+        );
+        renderResult(
+          {
+            ...discovery.result,
+            command: options.command,
+            ok: false,
+            problems: [...discovery.result.problems, failed.problem],
+          },
+          {
+            format: "human",
+            capabilities: errorCapabilities,
+            sink: io.error,
+            verbose: options.verbose,
+          },
+        );
+        return failed.exitCode;
+      }
+      endpoint = chosen.value;
+    }
+  }
   let pairingCode: string | undefined;
   if (options.command === "pair" && !options.dryRun) {
     if (!errorCapabilities.interactive && !options.pairingCodeStdin) {
@@ -540,7 +633,6 @@ async function runCliInternal(
     }
     pairingCode = input.value;
   }
-  const bus = dependencies.bus ?? new EventBus(dependencies.clock);
   const progress =
     options.format === "human" && !options.quiet
       ? new ProgressRenderer({
@@ -551,19 +643,6 @@ async function runCliInternal(
         })
       : undefined;
   const events = options.format === "ndjson" ? new NdjsonEventRenderer(bus, io.output) : undefined;
-  const commandDependencies = { ...dependencies, bus };
-  const config = {
-    ...(values.adbPath === undefined ? {} : { adbPath: values.adbPath }),
-    ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
-    ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
-    timeoutMs: values.timeoutMs,
-    ...(options.device === undefined ? {} : { targetSelector: options.device }),
-    ...(options.transportId === undefined ? {} : { targetTransportId: options.transportId }),
-    ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
-    ...(lastSerial === undefined ? {} : { rememberedSerial: lastSerial }),
-    ...(options.remembered ? { rememberedOnly: true } : {}),
-    ...(options.dryRun ? { dryRun: true } : {}),
-  };
 
   let execution:
     | CommandExecution<DevicesData>
@@ -576,15 +655,9 @@ async function runCliInternal(
     } else if (options.command === "devices") {
       execution = await runDevices(config, commandDependencies, signal);
     } else if (options.command === "connect") {
-      execution = await runConnect(options.endpoint, config, commandDependencies, signal);
+      execution = await runConnect(endpoint, config, commandDependencies, signal);
     } else {
-      execution = await runPair(
-        options.endpoint,
-        pairingCode ?? "",
-        config,
-        commandDependencies,
-        signal,
-      );
+      execution = await runPair(endpoint, pairingCode ?? "", config, commandDependencies, signal);
     }
   } finally {
     progress?.dispose();

@@ -116,6 +116,12 @@ export interface WirelessPlanData {
 export type ConnectData = ConnectedData | WirelessPlanData;
 export type PairData = PairedData | WirelessPlanData;
 
+export interface WirelessDiscoveryData {
+  adbPath: string;
+  kind: "connect" | "pairing";
+  services: AdbMdnsService[];
+}
+
 interface CommandContext {
   bus: EventBus;
   clock: () => Date;
@@ -606,6 +612,50 @@ async function resolveWirelessEndpoint(
   }
   const endpoint = endpoints[0];
   return endpoint === undefined ? { discovered: true } : { endpoint, discovered: true };
+}
+
+export async function runWirelessDiscovery(
+  kind: "connect" | "pairing",
+  config: CommandConfig = {},
+  dependencies: CommandDependencies = {},
+  signal?: AbortSignal,
+): Promise<CommandExecution<WirelessDiscoveryData>> {
+  const context = createContext("wireless-discovery", dependencies);
+  const problems: Problem[] = [];
+  const executable = await resolveAdb(context, config, dependencies);
+  if (executable === undefined) {
+    problems.push(adbNotFoundProblem({ commandId: context.commandId }, config.adbPath));
+    return finish<WirelessDiscoveryData>(context, null, problems);
+  }
+  const client = createClient(executable, context, config, dependencies);
+  const mdns = await client.mdnsServices(signal);
+  if (!processSucceeded(mdns.process)) {
+    problems.push(operationProblem("mdns-services", mdns, context.commandId));
+    return finish<WirelessDiscoveryData>(context, null, problems);
+  }
+  const accepted = kind === "connect" ? new Set(["connect", "legacy"]) : new Set(["pairing"]);
+  const seen = new Set<string>();
+  const services = mdns.value.filter((service) => {
+    if (!accepted.has(service.serviceType) || seen.has(service.endpoint.serial)) {
+      return false;
+    }
+    seen.add(service.endpoint.serial);
+    return true;
+  });
+  if (services.length === 0) {
+    problems.push(
+      commandProblem(
+        ProblemCode.WirelessEndpointNotFound,
+        "target.discovery",
+        `No wireless ${kind} endpoint was discovered.`,
+        kind === "pairing"
+          ? "Open Wireless debugging and choose Pair device with pairing code, or provide its displayed HOST:PORT explicitly."
+          : "Enable Wireless debugging, keep the target on a reachable network, or provide HOST:PORT explicitly.",
+        context.commandId,
+      ),
+    );
+  }
+  return finish(context, { adbPath: redactedPath(executable), kind, services }, problems);
 }
 
 export async function runConnect(

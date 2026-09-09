@@ -393,4 +393,35 @@ describe("runCli", () => {
     expect(payload.data.plan).toMatchObject({ dryRun: true, steps: [{ id: "pair" }] });
     expect(streams.error.value).toBe("");
   });
+
+  test("automatically uses one discovered endpoint in an interactive connect flow", async () => {
+    const streams = io({ inputTTY: true, errorTTY: true });
+    const fixture = dependencies();
+    fixture.runner = async (request) => {
+      if (request.args?.includes("mdns")) {
+        return result(
+          request,
+          "List of discovered mdns services\n" +
+            "adb-PHONE-x _adb-tls-connect._tcp 192.168.1.20:37123\n",
+        );
+      }
+      if (request.args?.includes("connect")) {
+        return result(request, "connected to 192.168.1.20:37123\n");
+      }
+      if (request.args?.includes("get-state")) {
+        return result(request, "device\n");
+      }
+      if (request.args?.includes("ro.serialno")) {
+        return result(request, "PHONE-1\n");
+      }
+      return result(request, "");
+    };
+    fixture.writeRememberedTarget = async () => ({ ok: true, path: "/state.json" });
+
+    const exitCode = await runCli(["connect", "--no-animation", "--no-color"], streams, fixture);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.error.value).toContain("Connected 192.168.1.20:37123");
+    expect(streams.error.value).toContain("Verified  192.168.1.20:37123 · device");
+  });
 });
