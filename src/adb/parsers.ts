@@ -43,6 +43,14 @@ export interface AdbMdnsService {
   rawServiceType: string;
   serviceType: AdbMdnsServiceType;
   endpoint: AdbNetworkEndpoint;
+  alternateEndpoints?: AdbNetworkEndpoint[];
+  deviceModel?: string;
+  buildVersionSdkFull?: string;
+  givenName?: string;
+  hardwareSerial?: string;
+  mdnsServiceVersion?: string;
+  hostname?: string;
+  knownDevice?: boolean;
 }
 
 export interface AdbConnectResult {
@@ -282,6 +290,146 @@ export function parseAdbMdnsServices(output: string): AdbMdnsService[] {
       endpoint,
     });
   }
+
+  return services.sort((left, right) =>
+    `${left.serviceType}\0${left.instance}\0${left.endpoint.serial}`.localeCompare(
+      `${right.serviceType}\0${right.instance}\0${right.endpoint.serial}`,
+    ),
+  );
+}
+
+function decodeTextProtoString(value: string): string | undefined {
+  if (!value.startsWith('"') || !value.endsWith('"')) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === "string" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseAdbMdnsTrackServices(output: string): AdbMdnsService[] {
+  const services: AdbMdnsService[] = [];
+  const seen = new Set<string>();
+  const stack: string[] = [];
+  let current:
+    | {
+        kind: "pair" | "tcp" | "tls";
+        fields: Map<string, string[]>;
+        knownDevice?: boolean;
+      }
+    | undefined;
+
+  const finish = () => {
+    if (current === undefined) {
+      return;
+    }
+    const first = (key: string) => current?.fields.get(key)?.[0];
+    const instance = first("instance");
+    const rawServiceType =
+      first("service") ??
+      (current.kind === "pair"
+        ? "_adb-tls-pairing._tcp"
+        : current.kind === "tls"
+          ? "_adb-tls-connect._tcp"
+          : "_adb._tcp");
+    const portText = first("port");
+    const port = portText === undefined ? undefined : Number(portText);
+    const hosts = [
+      ...(current.fields.get("ipv4") ?? []),
+      ...(current.fields.get("ipv6") ?? []),
+      ...(current.fields.get("hostname") ?? []),
+    ];
+    const endpoints =
+      port === undefined || !Number.isSafeInteger(port)
+        ? []
+        : [
+            ...new Map(
+              hosts
+                .map((host) =>
+                  parseAdbNetworkEndpoint(
+                    host.includes(":") ? `[${host}]:${String(port)}` : `${host}:${String(port)}`,
+                  ),
+                )
+                .filter((endpoint): endpoint is AdbNetworkEndpoint => endpoint !== undefined)
+                .map((endpoint) => [endpoint.serial, endpoint]),
+            ).values(),
+          ];
+    const endpoint = endpoints[0];
+    if (instance !== undefined && endpoint !== undefined) {
+      const key = `${rawServiceType}\0${instance}\0${endpoint.serial}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        const deviceModel = first("product_model") ?? first("device_model");
+        const buildVersionSdkFull = first("build_version_sdk_full");
+        const givenName = first("given_name");
+        const hardwareSerial = first("serial");
+        const mdnsServiceVersion = first("mdns_service_version");
+        const hostname = first("hostname");
+        services.push({
+          instance,
+          rawServiceType,
+          serviceType: mdnsServiceType(rawServiceType),
+          endpoint,
+          ...(endpoints.length < 2 ? {} : { alternateEndpoints: endpoints.slice(1) }),
+          ...(deviceModel === undefined ? {} : { deviceModel }),
+          ...(buildVersionSdkFull === undefined ? {} : { buildVersionSdkFull }),
+          ...(givenName === undefined ? {} : { givenName }),
+          ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
+          ...(mdnsServiceVersion === undefined ? {} : { mdnsServiceVersion }),
+          ...(hostname === undefined ? {} : { hostname }),
+          ...(current.knownDevice === undefined ? {} : { knownDevice: current.knownDevice }),
+        });
+      }
+    }
+    current = undefined;
+  };
+
+  for (const rawLine of output.replaceAll("\r\n", "\n").split("\n")) {
+    const line = rawLine.trim();
+    const opening = line.match(/^(\w+)\s*\{$/u)?.[1];
+    if (opening !== undefined) {
+      stack.push(opening);
+      if (opening === "pair" || opening === "tcp" || opening === "tls") {
+        current = { kind: opening, fields: new Map() };
+      }
+      continue;
+    }
+    if (line === "}") {
+      const closing = stack.pop();
+      if (closing === "pair" || closing === "tcp" || closing === "tls") {
+        finish();
+      }
+      continue;
+    }
+    if (current === undefined) {
+      continue;
+    }
+    const scalar = line.match(/^(\w+):\s*(.+)$/u);
+    const key = scalar?.[1];
+    const rawValue = scalar?.[2];
+    if (key === undefined || rawValue === undefined) {
+      continue;
+    }
+    if (key === "known_device" && stack.at(-1) !== "service") {
+      if (rawValue === "true" || rawValue === "false") {
+        current.knownDevice = rawValue === "true";
+      }
+      continue;
+    }
+    if (stack.at(-1) !== "service") {
+      continue;
+    }
+    const value = /^\d+$/u.test(rawValue) ? rawValue : decodeTextProtoString(rawValue);
+    if (value !== undefined) {
+      const values = current.fields.get(key) ?? [];
+      values.push(value);
+      current.fields.set(key, values);
+    }
+  }
+  finish();
 
   return services.sort((left, right) =>
     `${left.serviceType}\0${left.instance}\0${left.endpoint.serial}`.localeCompare(

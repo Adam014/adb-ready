@@ -18,6 +18,7 @@ function failedProcess(overrides: Partial<ProcessResult> = {}): ProcessResult {
     stderrTruncated: false,
     timedOut: false,
     aborted: false,
+    stoppedAfterIdle: false,
     ...overrides,
   };
 }

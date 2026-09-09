@@ -22,6 +22,7 @@ function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
     stderrTruncated: false,
     timedOut: false,
     aborted: false,
+    stoppedAfterIdle: false,
     ...overrides,
   };
 }
@@ -189,5 +190,38 @@ describe("AdbClient", () => {
       ],
       ["-H", "remote.example", "-P", "5037", "-s", "192.168.1.8:37123", "get-state"],
     ]);
+  });
+
+  test("treats an intentionally bounded mDNS track stream as a successful snapshot", async () => {
+    const requests: ProcessRequest[] = [];
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events: string[] = [];
+    bus.subscribe((event) => events.push(event.type));
+    const client = new AdbClient({
+      executable: "adb",
+      bus,
+      correlation: { commandId: "command-1" },
+      runner: async (request) => {
+        requests.push(request);
+        return processResult({
+          args: [...(request.args ?? [])],
+          exitCode: null,
+          signal: "SIGTERM",
+          stoppedAfterIdle: true,
+          stdout:
+            'tls {\n service {\n instance: "phone"\n service: "_adb-tls-connect._tcp"\n ipv4: "192.0.2.5"\n port: 37123\n }\n}\n',
+        });
+      },
+      idFactory: () => "operation-1",
+    });
+
+    const observation = await client.mdnsTrackServices();
+
+    expect(requests[0]).toMatchObject({
+      args: ["mdns", "track-services", "--proto-text"],
+      stopAfterIdleMs: 150,
+    });
+    expect(observation.value[0]?.endpoint.serial).toBe("192.0.2.5:37123");
+    expect(events).toEqual(["operation.started", "operation.completed"]);
   });
 });

@@ -82,6 +82,7 @@ export interface DevicesData {
 export interface TargetDiscoveryData {
   mdns: {
     available: boolean;
+    method: "legacy" | "legacy-fallback" | "track";
     services: AdbMdnsService[];
   };
   identity: {
@@ -132,7 +133,10 @@ interface CommandContext {
 
 function processSucceeded(result: ProcessResult): boolean {
   return (
-    result.spawnError === undefined && result.exitCode === 0 && !result.timedOut && !result.aborted
+    result.spawnError === undefined &&
+    (result.exitCode === 0 || result.stoppedAfterIdle) &&
+    !result.timedOut &&
+    !result.aborted
   );
 }
 
@@ -303,6 +307,41 @@ interface TargetInspection {
   interruption?: Problem;
 }
 
+interface MdnsDiscovery {
+  observation: Awaited<ReturnType<AdbClient["mdnsServices"]>>;
+  method: TargetDiscoveryData["mdns"]["method"];
+}
+
+async function discoverMdns(
+  client: AdbClient,
+  hostFeatures: readonly string[] | undefined,
+  signal: AbortSignal | undefined,
+): Promise<MdnsDiscovery> {
+  let features = hostFeatures;
+  if (features === undefined) {
+    const observation = await client.hostFeatures(signal);
+    if (observation.process.aborted) {
+      return {
+        observation: {
+          operationId: observation.operationId,
+          process: observation.process,
+          value: [],
+        },
+        method: "legacy",
+      };
+    }
+    features = processSucceeded(observation.process) ? observation.value : [];
+  }
+  if (features.includes("track_mdns")) {
+    const tracked = await client.mdnsTrackServices(signal);
+    if (processSucceeded(tracked.process) || tracked.process.aborted) {
+      return { observation: tracked, method: "track" };
+    }
+    return { observation: await client.mdnsServices(signal), method: "legacy-fallback" };
+  }
+  return { observation: await client.mdnsServices(signal), method: "legacy" };
+}
+
 function normalizedHardwareSerial(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized === undefined || normalized === "" || normalized.toLowerCase() === "unknown"
@@ -315,14 +354,16 @@ async function inspectTargets(
   devices: readonly AdbDevice[],
   commandId: string,
   signal: AbortSignal | undefined,
+  hostFeatures?: readonly string[],
 ): Promise<TargetInspection> {
   const identityCandidates = devices.filter(
     ({ serial, state }) => state === "device" && isStableAdbSerial(serial),
   );
-  const [mdns, identities] = await Promise.all([
-    client.mdnsServices(signal),
+  const [mdnsDiscovery, identities] = await Promise.all([
+    discoverMdns(client, hostFeatures, signal),
     Promise.all(identityCandidates.map(({ serial }) => client.getHardwareSerial(serial, signal))),
   ]);
+  const mdns = mdnsDiscovery.observation;
   const optionalProblems: Problem[] = [];
   const allObservations = [mdns, ...identities];
   const interrupted = allObservations.find(({ process }) => process.aborted);
@@ -330,7 +371,7 @@ async function inspectTargets(
     return {
       targets: [],
       discovery: {
-        mdns: { available: false, services: [] },
+        mdns: { available: false, method: mdnsDiscovery.method, services: [] },
         identity: { probed: identityCandidates.length, resolved: 0 },
       },
       optionalProblems,
@@ -374,7 +415,11 @@ async function inspectTargets(
   return {
     targets: inventory.targets,
     discovery: {
-      mdns: { available: mdnsAvailable, services: inventory.services },
+      mdns: {
+        available: mdnsAvailable,
+        method: mdnsDiscovery.method,
+        services: inventory.services,
+      },
       identity: { probed: identityCandidates.length, resolved: identityBySerial.size },
     },
     optionalProblems,
@@ -438,7 +483,13 @@ export async function runDoctor(
   if (devices.value.length === 0) {
     problems.push(noTargetsProblem({ commandId: context.commandId }));
   }
-  const inspection = await inspectTargets(client, devices.value, context.commandId, signal);
+  const inspection = await inspectTargets(
+    client,
+    devices.value,
+    context.commandId,
+    signal,
+    processSucceeded(hostFeatures.process) ? hostFeatures.value : [],
+  );
   if (inspection.interruption !== undefined) {
     problems.push(inspection.interruption);
     return finish<DoctorData>(context, null, problems);
@@ -567,7 +618,8 @@ async function resolveWirelessEndpoint(
       : { endpoint: endpoint.serial, discovered: false };
   }
 
-  const mdns = await client.mdnsServices(signal);
+  const mdnsDiscovery = await discoverMdns(client, undefined, signal);
+  const mdns = mdnsDiscovery.observation;
   if (!processSucceeded(mdns.process)) {
     return {
       discovered: true,
@@ -628,7 +680,8 @@ export async function runWirelessDiscovery(
     return finish<WirelessDiscoveryData>(context, null, problems);
   }
   const client = createClient(executable, context, config, dependencies);
-  const mdns = await client.mdnsServices(signal);
+  const mdnsDiscovery = await discoverMdns(client, undefined, signal);
+  const mdns = mdnsDiscovery.observation;
   if (!processSucceeded(mdns.process)) {
     problems.push(operationProblem("mdns-services", mdns, context.commandId));
     return finish<WirelessDiscoveryData>(context, null, problems);

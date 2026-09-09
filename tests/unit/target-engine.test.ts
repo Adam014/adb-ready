@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   type AdbDevice,
   parseAdbMdnsServices,
+  parseAdbMdnsTrackServices,
   parseAdbNetworkEndpoint,
 } from "../../src/adb/parsers.js";
 import { buildTargetInventory, isStableAdbSerial } from "../../src/target/model.js";
@@ -45,6 +46,30 @@ describe("ADB network discovery", () => {
       port: 37123,
       serial: "pixel.local:37123",
       version: "hostname",
+    });
+  });
+
+  test("parses ADB 37 textproto discovery metadata with IPv6 alternatives", async () => {
+    const services = parseAdbMdnsTrackServices(await fixture("mdns-track-services.txt"));
+
+    expect(services).toHaveLength(2);
+    expect(services[0]).toMatchObject({
+      serviceType: "connect",
+      endpoint: { serial: "192.168.84.23:37895" },
+      alternateEndpoints: [
+        { serial: "[fe80::fc7a:299d:8d38:6c1c]:37895" },
+        { serial: "Android_CXUKYJY1.local:37895" },
+      ],
+      deviceModel: "Pixel 8",
+      givenName: "Ada Pixel",
+      hardwareSerial: "35121FDJH000R8",
+      mdnsServiceVersion: "2.0",
+      knownDevice: true,
+    });
+    expect(services[1]).toMatchObject({
+      serviceType: "pairing",
+      endpoint: { serial: "[fd00::1234]:41234" },
+      deviceModel: "Pixel 8",
     });
   });
 });

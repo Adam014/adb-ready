@@ -13,6 +13,7 @@ export interface ProcessRequest {
   killSignal?: NodeJS.Signals;
   stdio?: ProcessStdio;
   maxBufferBytes?: number;
+  stopAfterIdleMs?: number;
   input?: string | Uint8Array;
 }
 
@@ -30,6 +31,7 @@ export interface ProcessResult {
   stderrTruncated: boolean;
   timedOut: boolean;
   aborted: boolean;
+  stoppedAfterIdle: boolean;
   spawnError?: {
     code?: string;
     message: string;
@@ -96,8 +98,17 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   ) {
     throw new RangeError("timeoutMs must be a non-negative safe integer");
   }
+  if (
+    request.stopAfterIdleMs !== undefined &&
+    (!Number.isSafeInteger(request.stopAfterIdleMs) || request.stopAfterIdleMs < 1)
+  ) {
+    throw new RangeError("stopAfterIdleMs must be a positive safe integer");
+  }
   if (request.stdio === "inherit" && request.input !== undefined) {
     throw new RangeError("input cannot be combined with inherited stdio");
+  }
+  if (request.stdio === "inherit" && request.stopAfterIdleMs !== undefined) {
+    throw new RangeError("stopAfterIdleMs cannot be combined with inherited stdio");
   }
 
   const stdout = createBoundedCapture(maxBufferBytes);
@@ -105,6 +116,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   const stdio = request.stdio ?? "capture";
   let timedOut = false;
   let aborted = request.signal?.aborted ?? false;
+  let stoppedAfterIdle = false;
   let spawnError: ProcessResult["spawnError"];
 
   return await new Promise<ProcessResult>((resolve) => {
@@ -119,9 +131,32 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
       windowsHide: true,
     });
 
+    const killSignal = request.killSignal ?? "SIGTERM";
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const touchIdleTimer = () => {
+      if (request.stopAfterIdleMs === undefined || stoppedAfterIdle) {
+        return;
+      }
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
+      }
+      idleTimer = setTimeout(() => {
+        stoppedAfterIdle = true;
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill(killSignal);
+        }
+      }, request.stopAfterIdleMs);
+    };
+
     if (stdio === "capture") {
-      child.stdout?.on("data", (chunk: Uint8Array) => stdout.append(chunk));
-      child.stderr?.on("data", (chunk: Uint8Array) => stderr.append(chunk));
+      child.stdout?.on("data", (chunk: Uint8Array) => {
+        stdout.append(chunk);
+        touchIdleTimer();
+      });
+      child.stderr?.on("data", (chunk: Uint8Array) => {
+        stderr.append(chunk);
+        touchIdleTimer();
+      });
       if (request.input !== undefined) {
         child.stdin?.on("error", () => {
           // A child may close stdin before consuming all input. Its exit state
@@ -131,7 +166,6 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
       }
     }
 
-    const killSignal = request.killSignal ?? "SIGTERM";
     const abort = () => {
       aborted = true;
       if (child.exitCode === null && child.signalCode === null) {
@@ -149,6 +183,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
         ? undefined
         : setTimeout(() => {
             timedOut = true;
+            if (idleTimer !== undefined) {
+              clearTimeout(idleTimer);
+            }
             if (child.exitCode === null && child.signalCode === null) {
               child.kill(killSignal);
             }
@@ -164,6 +201,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
     child.once("close", (exitCode, signal) => {
       if (timeout !== undefined) {
         clearTimeout(timeout);
+      }
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
       }
       request.signal?.removeEventListener("abort", abort);
 
@@ -182,6 +222,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
         stderrTruncated: stderr.truncated,
         timedOut,
         aborted,
+        stoppedAfterIdle,
         ...(spawnError === undefined ? {} : { spawnError }),
       });
     });

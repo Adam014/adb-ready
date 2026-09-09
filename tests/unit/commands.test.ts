@@ -33,12 +33,16 @@ function processResult(
     stderrTruncated: false,
     timedOut: false,
     aborted: false,
+    stoppedAfterIdle: false,
     ...overrides,
   };
 }
 
 function commandName(request: ProcessRequest): string {
   const args = request.args ?? [];
+  if (args.includes("track-services")) {
+    return "mdns-track-services";
+  }
   if (args.includes("mdns")) {
     return "mdns-services";
   }
@@ -158,6 +162,59 @@ describe("runDoctor", () => {
     ]);
     expect(execution.result.data?.adb.serverStatus).toBeNull();
     expect(execution.exitCode).toBe(ExitCode.Success);
+  });
+
+  test("feature-detects ADB 37 streaming mDNS discovery", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runDoctor(
+      {},
+      deterministicDependencies(
+        fixtureRunner(
+          {
+            version: "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n",
+            "host-features": "shell_v2,track_mdns\n",
+            devices: "List of devices attached\n",
+            "mdns-track-services":
+              'tls {\n service {\n instance: "phone"\n service: "_adb-tls-connect._tcp"\n ipv4: "192.0.2.5"\n port: 37123\n mdns_service_version: "2.0"\n }\n}\n',
+          },
+          requests,
+        ),
+      ),
+    );
+
+    expect(requests.map(commandName)).toContain("mdns-track-services");
+    expect(requests.map(commandName)).not.toContain("mdns-services");
+    expect(execution.result.data?.discovery.mdns).toMatchObject({
+      available: true,
+      method: "track",
+      services: [{ endpoint: { serial: "192.0.2.5:37123" }, mdnsServiceVersion: "2.0" }],
+    });
+  });
+
+  test("falls back to legacy discovery when the advertised stream cannot start", async () => {
+    const requests: ProcessRequest[] = [];
+    const runner: ProcessRunner = async (request) => {
+      requests.push(request);
+      if (commandName(request) === "mdns-track-services") {
+        return processResult(request, { exitCode: 1, stderr: "unknown mdns command" });
+      }
+      const outputs: Partial<Record<string, string>> = {
+        version: "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n",
+        "host-features": "track_mdns\n",
+        devices: "List of devices attached\n",
+        "mdns-services": "List of discovered mdns services\n",
+      };
+      return processResult(request, { stdout: outputs[commandName(request)] ?? "" });
+    };
+
+    const execution = await runDoctor({}, deterministicDependencies(runner));
+
+    expect(requests.map(commandName)).toContain("mdns-track-services");
+    expect(requests.map(commandName)).toContain("mdns-services");
+    expect(execution.result.data?.discovery.mdns).toMatchObject({
+      available: true,
+      method: "legacy-fallback",
+    });
   });
 
   test("continues after an unsupported optional host-features probe", async () => {

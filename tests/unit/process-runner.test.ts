@@ -89,6 +89,23 @@ describe("runProcess", () => {
     expect(result.signal).not.toBeNull();
   });
 
+  test("captures a streaming snapshot after output becomes idle", async () => {
+    const result = await runProcess({
+      executable: process.execPath,
+      args: [
+        "-e",
+        'process.stdout.write("first"); setTimeout(() => process.stdout.write("-second"), 10); setTimeout(() => {}, 10_000)',
+      ],
+      stopAfterIdleMs: 25,
+      timeoutMs: 1_000,
+    });
+
+    expect(result.stdout).toBe("first-second");
+    expect(result.stoppedAfterIdle).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.aborted).toBe(false);
+  });
+
   test("bounds captured output while continuing to drain the child", async () => {
     const result = await runProcess({
       executable: process.execPath,
@@ -114,6 +131,9 @@ describe("runProcess", () => {
     ).rejects.toBeInstanceOf(RangeError);
     await expect(
       runProcess({ executable: process.execPath, maxBufferBytes: -1 }),
+    ).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      runProcess({ executable: process.execPath, stopAfterIdleMs: 0 }),
     ).rejects.toBeInstanceOf(RangeError);
     await expect(
       runProcess({ executable: process.execPath, stdio: "inherit", input: "secret" }),

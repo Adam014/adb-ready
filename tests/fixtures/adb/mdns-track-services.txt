@@ -1,0 +1,27 @@
+Services {
+  tls {
+    service {
+      instance: "adb-35121FDJH000R8-xyMD0H"
+      service: "_adb-tls-connect._tcp"
+      ipv4: "192.168.84.23"
+      ipv6: "fe80::fc7a:299d:8d38:6c1c"
+      port: 37895
+      product_model: "Pixel 8"
+      build_version_sdk_full: "37.0"
+      given_name: "Ada Pixel"
+      serial: "35121FDJH000R8"
+      mdns_service_version: "2.0"
+      hostname: "Android_CXUKYJY1.local"
+    }
+    known_device: true
+  }
+  pair {
+    service {
+      instance: "adb-35121FDJH000R8-pair"
+      service: "_adb-tls-pairing._tcp"
+      ipv6: "fd00::1234"
+      port: 41234
+      device_model: "Pixel 8"
+    }
+  }
+}

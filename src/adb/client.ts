@@ -16,6 +16,7 @@ import {
   parseAdbConnectResult,
   parseAdbDevices,
   parseAdbMdnsServices,
+  parseAdbMdnsTrackServices,
   parseAdbPairResult,
   parseAdbVersion,
   parseFeatureList,
@@ -47,6 +48,7 @@ function processMetadata(result: ProcessResult): Record<string, JsonValue> {
     signal: result.signal,
     timedOut: result.timedOut,
     aborted: result.aborted,
+    stoppedAfterIdle: result.stoppedAfterIdle,
     stdoutTruncated: result.stdoutTruncated,
     stderrTruncated: result.stderrTruncated,
     ...(result.spawnError === undefined
@@ -122,6 +124,21 @@ export class AdbClient {
     );
   }
 
+  async mdnsTrackServices(signal?: AbortSignal): Promise<AdbObservation<AdbMdnsService[]>> {
+    return await this.#observe(
+      "mdns-track-services",
+      "Discovering wireless Android services",
+      ["mdns", "track-services", "--proto-text"],
+      parseAdbMdnsTrackServices,
+      signal,
+      {
+        stopAfterIdleMs: 150,
+        timeoutMs: Math.min(this.#options.timeoutMs ?? 1_000, 1_000),
+        acceptIdleStop: true,
+      },
+    );
+  }
+
   async getState(
     serial: string,
     signal?: AbortSignal,
@@ -186,7 +203,13 @@ export class AdbClient {
     args: string[],
     parse: (output: string) => T,
     signal: AbortSignal | undefined,
-    options: { input?: string | Uint8Array; useServerArguments?: boolean } = {},
+    options: {
+      input?: string | Uint8Array;
+      useServerArguments?: boolean;
+      stopAfterIdleMs?: number;
+      timeoutMs?: number;
+      acceptIdleStop?: boolean;
+    } = {},
   ): Promise<AdbObservation<T>> {
     const operationId = this.#idFactory();
     const correlation = { commandId: this.#options.correlation.commandId, operationId };
@@ -207,16 +230,23 @@ export class AdbClient {
     const request: ProcessRequest = {
       executable: this.#options.executable,
       args: finalArgs,
-      ...(this.#options.timeoutMs === undefined ? {} : { timeoutMs: this.#options.timeoutMs }),
+      ...(options.timeoutMs === undefined
+        ? this.#options.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: this.#options.timeoutMs }
+        : { timeoutMs: options.timeoutMs }),
       ...(signal === undefined ? {} : { signal }),
       ...(options.input === undefined ? {} : { input: options.input }),
+      ...(options.stopAfterIdleMs === undefined
+        ? {}
+        : { stopAfterIdleMs: options.stopAfterIdleMs }),
     };
     const result = await this.#runner(request);
     const succeeded =
       result.spawnError === undefined &&
-      result.exitCode === 0 &&
       !result.timedOut &&
-      !result.aborted;
+      !result.aborted &&
+      (result.exitCode === 0 || (options.acceptIdleStop === true && result.stoppedAfterIdle));
 
     this.#options.bus.emit({
       type: succeeded ? "operation.completed" : "operation.failed",
