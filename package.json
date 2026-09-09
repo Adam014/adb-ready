@@ -30,7 +30,10 @@
     "test:integration": "bun test tests/integration",
     "smoke": "bun run build && bun run scripts/runtime-smoke.mjs",
     "pack:check": "bun run build && bun run scripts/package-check.mjs",
-    "check": "bun run typecheck && bun run lint && bun test && bun run smoke && bun run pack:check",
+    "privacy:check": "bun run scripts/privacy-check.mjs",
+    "verify": "bun run scripts/verify.mjs",
+    "verify:real-adb": "bun run build && bun run scripts/real-adb-check.mjs",
+    "check": "bun run verify",
     "prepack": "bun run build"
   },
   "repository": {
