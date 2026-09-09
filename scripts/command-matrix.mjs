@@ -159,6 +159,7 @@ try {
 
   for (const alias of ["adb-ready", "adbr"]) {
     for (const [label, args, expected] of [
+      ["bare non-TTY", [], "ADB Ready"],
       ["help flag", ["--help"], "adb-ready [command]"],
       ["help command", ["help"], "ADB Ready"],
       ["doctor help", ["help", "doctor"], "adb-ready doctor"],

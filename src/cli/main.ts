@@ -18,6 +18,7 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import { showHomeScreen } from "../ui/home.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
 import { NdjsonEventRenderer, renderResult } from "../ui/result-renderer.js";
 import { type SelectInput, selectOne } from "../ui/select.js";
@@ -334,7 +335,30 @@ async function runCliInternal(
   signal?: AbortSignal,
 ): Promise<number> {
   const fallbackFormat = inferredFormat(argv);
-  const parsed = parseArguments(argv);
+  let effectiveArgv = argv;
+  if (argv.length === 0) {
+    const homeCapabilities = capabilities(undefined, {}, io, "error", "human");
+    if (homeCapabilities.interactive) {
+      const home = await showHomeScreen({
+        version: VERSION,
+        input: io.input,
+        sink: io.error,
+        capabilities: homeCapabilities,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (home.kind === "cancelled") {
+        return ExitCode.Interrupted;
+      }
+      if (home.kind === "action" && home.action === "exit") {
+        return ExitCode.Success;
+      }
+      effectiveArgv = home.kind === "action" ? [home.action] : ["help"];
+    } else {
+      effectiveArgv = ["help"];
+    }
+  }
+
+  const parsed = parseArguments(effectiveArgv);
   if (!parsed.ok) {
     const failure = failureResult(
       "cli",

@@ -98,13 +98,48 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
       },
     }),
     locateAdb: async () => "/sdk/platform-tools/adb",
-    runner: async (request) => result(request, devices),
+    runner: async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("version")) {
+        return result(request, "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n");
+      }
+      if (args.includes("host-features")) {
+        return result(request, "shell_v2,server_status\n");
+      }
+      if (args.includes("server-status")) {
+        return result(request, "USB backend: libusb\n");
+      }
+      return result(request, devices);
+    },
     idFactory: () => `id-${String(++id)}`,
     clock: () => new Date("2026-09-09T10:00:00.000Z"),
   };
 }
 
 describe("runCli", () => {
+  test("keeps bare non-TTY invocation script-safe by showing help without ANSI", async () => {
+    const streams = io();
+    const exitCode = await runCli([], streams, dependencies());
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.output.value).toContain("adb-ready [command]");
+    expect(streams.output.value).not.toContain("\u001B");
+    expect(streams.error.value).toBe("");
+  });
+
+  test("clears a bare interactive terminal and routes the home menu selection", async () => {
+    const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
+    streams.env.ADB_READY_REDUCED_MOTION = "1";
+    streams.input.autoInput = "\r";
+    const exitCode = await runCli([], streams, dependencies());
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.error.value).toStartWith("\u001B[2J\u001B[H");
+    expect(streams.error.value).toContain("ADB READY");
+    expect(streams.error.value).toContain("· doctor");
+    expect(streams.input.isRaw).toBe(false);
+  });
+
   test("renders help without loading configuration or ADB", async () => {
     const streams = io();
     const exitCode = await runCli(["--help"], streams, {
