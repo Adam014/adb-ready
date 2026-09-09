@@ -35,6 +35,8 @@ export interface ProcessResult {
   };
 }
 
+export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
+
 const DEFAULT_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 
 interface BoundedCapture {
