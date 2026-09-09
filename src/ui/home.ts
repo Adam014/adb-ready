@@ -17,6 +17,7 @@ export interface HomeScreenOptions {
   capabilities: TerminalCapabilities;
   signal?: AbortSignal;
   refreshIntervalMs?: number;
+  presentation?: "full" | "menu";
 }
 
 function fit(value: string, width: number): string {
@@ -109,9 +110,12 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     return { kind: "unavailable" };
   }
 
-  clearInteractiveScreen(options.sink, options.capabilities);
+  const presentation = options.presentation ?? "full";
+  if (presentation === "full") {
+    clearInteractiveScreen(options.sink, options.capabilities);
+  }
   const selection = await selectOne({
-    title: "WHAT DO YOU WANT TO DO?",
+    title: presentation === "full" ? "WHAT DO YOU WANT TO DO?" : "NEXT ACTION",
     options: [
       {
         value: "doctor" as const,
@@ -139,7 +143,9 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     input: options.input,
     sink: options.sink,
     capabilities: options.capabilities,
-    preamble: (frame) => homePreamble(frame, options.version, options.capabilities),
+    ...(presentation === "full"
+      ? { preamble: (frame: number) => homePreamble(frame, options.version, options.capabilities) }
+      : {}),
     ...(options.refreshIntervalMs === undefined
       ? {}
       : { refreshIntervalMs: options.refreshIntervalMs }),

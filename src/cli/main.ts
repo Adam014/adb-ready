@@ -18,7 +18,7 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
-import { showHomeScreen } from "../ui/home.js";
+import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
 import { NdjsonEventRenderer, renderResult } from "../ui/result-renderer.js";
 import { type SelectInput, selectOne } from "../ui/select.js";
@@ -265,6 +265,42 @@ function selectionProblem(
 
 type SelectResultKind = "escape" | "interrupt" | "signal" | "unavailable";
 
+async function runInteractiveSession(
+  io: CliIo,
+  dependencies: CliDependencies,
+  terminal: TerminalCapabilities,
+  signal?: AbortSignal,
+): Promise<number> {
+  let presentation: "full" | "menu" = "full";
+
+  while (true) {
+    const home = await showHomeScreen({
+      version: VERSION,
+      input: io.input,
+      sink: io.error,
+      capabilities: terminal,
+      presentation,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (home.kind === "cancelled") {
+      return ExitCode.Interrupted;
+    }
+    if (home.kind !== "action") {
+      return ExitCode.InvalidInput;
+    }
+    if (home.action === "exit") {
+      return ExitCode.Success;
+    }
+
+    clearInteractiveScreen(io.error, terminal);
+    await runCliInternal([home.action], io, dependencies, signal);
+    if (signal?.aborted === true) {
+      return ExitCode.Interrupted;
+    }
+    presentation = "menu";
+  }
+}
+
 async function selectDevice(
   execution: CommandExecution<DevicesData>,
   io: CliIo,
@@ -339,20 +375,7 @@ async function runCliInternal(
   if (argv.length === 0) {
     const homeCapabilities = capabilities(undefined, {}, io, "error", "human");
     if (homeCapabilities.interactive) {
-      const home = await showHomeScreen({
-        version: VERSION,
-        input: io.input,
-        sink: io.error,
-        capabilities: homeCapabilities,
-        ...(signal === undefined ? {} : { signal }),
-      });
-      if (home.kind === "cancelled") {
-        return ExitCode.Interrupted;
-      }
-      if (home.kind === "action" && home.action === "exit") {
-        return ExitCode.Success;
-      }
-      effectiveArgv = home.kind === "action" ? [home.action] : ["help"];
+      return await runInteractiveSession(io, dependencies, homeCapabilities, signal);
     } else {
       effectiveArgv = ["help"];
     }

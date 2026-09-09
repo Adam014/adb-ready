@@ -19,6 +19,7 @@ class FakeInput implements CliInput {
   isRaw = false;
   readonly #listeners = new Set<(chunk: Uint8Array | string) => void>();
   autoInput?: string;
+  autoInputs?: string[];
 
   setRawMode(enabled: boolean): void {
     this.isRaw = enabled;
@@ -30,8 +31,8 @@ class FakeInput implements CliInput {
 
   on(_event: "data", listener: (chunk: Uint8Array | string) => void): void {
     this.#listeners.add(listener);
-    if (this.autoInput !== undefined) {
-      const value = this.autoInput;
+    const value = this.autoInputs?.shift() ?? this.autoInput;
+    if (value !== undefined) {
       queueMicrotask(() => listener(value));
     }
   }
@@ -127,16 +128,18 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
-  test("clears a bare interactive terminal and routes the home menu selection", async () => {
+  test("keeps a bare interactive session open and returns to a compact menu", async () => {
     const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
     streams.env.ADB_READY_REDUCED_MOTION = "1";
-    streams.input.autoInput = "\r";
+    streams.input.autoInputs = ["\r", "\u001B"];
     const exitCode = await runCli([], streams, dependencies());
 
     expect(exitCode).toBe(ExitCode.Success);
     expect(streams.error.value).toStartWith("\u001B[2J\u001B[H");
     expect(streams.error.value).toContain("ADB READY");
     expect(streams.error.value).toContain("· doctor");
+    expect(streams.error.value).toContain("NEXT ACTION");
+    expect(streams.error.value.match(/Android setup\. No guesswork\./gu)).toHaveLength(1);
     expect(streams.input.isRaw).toBe(false);
   });
 

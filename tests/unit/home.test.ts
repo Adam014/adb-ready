@@ -79,6 +79,22 @@ describe("home screen", () => {
     expect(selected).toEqual({ kind: "action", action: "version" });
   });
 
+  test("renders only the compact action menu after command output", async () => {
+    const sink = new MemorySink();
+    const selected = await showHomeScreen({
+      version: "0.0.0",
+      input: new AutoInput("\u001B"),
+      sink,
+      capabilities: { ...interactive, animation: false },
+      presentation: "menu",
+    });
+
+    expect(selected).toEqual({ kind: "action", action: "exit" });
+    expect(sink.value).toContain("NEXT ACTION");
+    expect(sink.value).not.toContain("\u001B[2J\u001B[H");
+    expect(sink.value).not.toContain("Android setup. No guesswork.");
+  });
+
   test("uses a compact ASCII identity on narrow terminals", async () => {
     const sink = new MemorySink();
     await showHomeScreen({
