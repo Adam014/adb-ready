@@ -112,23 +112,22 @@ describe("home screen", () => {
       version: "0.0.0",
       input: new AutoInput("\u001B"),
       sink,
-      capabilities: { ...interactive, animation: false, columns: 40 },
+      capabilities: { ...interactive, animation: false, columns: 45 },
       presentation: "menu",
     });
 
     expect(selected).toEqual({ kind: "action", action: "exit" });
-    expect(sink.value).toContain("TOOL SESSION ACTIVE");
     expect(sink.value).toContain("ACTIONS");
-    expect(sink.value).toMatch(/[◆━┃╱░▒▓]/u);
+    expect(sink.value).toContain("####");
     expect(sink.value).toStartWith("\u001B[?25l\u001B[2K\n");
     expect(sink.value).not.toContain("\u001B[2J\u001B[H");
     expect(sink.value).not.toContain("Android setup. No guesswork.");
-    expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 40)).toBe(
+    expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 45)).toBe(
       true,
     );
   });
 
-  test("keeps the mini 3D scene moving inside the compact session header", async () => {
+  test("keeps the compact ASCII wordmark static", async () => {
     const sink = new MemorySink();
     const input = new ManualInput();
     const selection = showHomeScreen({
@@ -144,8 +143,8 @@ describe("home screen", () => {
     input.send("\u001B");
 
     await expect(selection).resolves.toEqual({ kind: "action", action: "exit" });
-    expect(sink.value.match(/TOOL SESSION ACTIVE/gu)?.length).toBeGreaterThan(1);
-    expect(sink.value).toMatch(/\[\d+F/u);
+    expect(sink.value.match(/ACTIONS/gu)).toHaveLength(1);
+    expect(sink.value).not.toMatch(/\[\d+F/u);
   });
 
   test("uses a compact ASCII identity on narrow terminals", async () => {

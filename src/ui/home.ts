@@ -1,4 +1,4 @@
-import { renderCoreShardFrame, renderLinkCoreFrame } from "./ascii-scene.js";
+import { renderLinkCoreFrame } from "./ascii-scene.js";
 import { type SelectInput, selectOne } from "./select.js";
 import type { TextSink } from "./spinner.js";
 import { style } from "./style.js";
@@ -99,36 +99,25 @@ function homePreamble(
     .concat("");
 }
 
-function compactSessionPreamble(
-  frame: number,
-  version: string,
-  capabilities: TerminalCapabilities,
-): string[] {
+const COMPACT_WORDMARK = [
+  " ##  ###  ###    ###  ####  ##  ###  #  #",
+  "#  # #  # #  #   #  # #    #  # #  # #  #",
+  "#### #  # ###    ###  ###  #### #  #  ## ",
+  "#  # #  # #  #   # #  #    #  # #  #  #  ",
+  "#  # ###  ###    #  # #### #  # ###   #  ",
+];
+
+function compactSessionPreamble(capabilities: TerminalCapabilities): string[] {
   const unicode = capabilities.unicode;
-  const width = Math.max(20, Math.min(68, capabilities.columns));
+  const width = Math.max(20, Math.min(45, capabilities.columns));
   const inner = width - 4;
-  const coreWidth = 7;
-  const gap = capabilities.columns < 30 ? 1 : 3;
-  const textWidth = Math.max(4, inner - coreWidth - gap);
-  const topLabel = " ADB READY ";
-  const topFill = Math.max(0, width - topLabel.length - 2);
-  const top = unicode
-    ? `╭─${topLabel}${"─".repeat(Math.max(0, topFill - 1))}╮`
-    : `+-${topLabel}${"-".repeat(Math.max(0, topFill - 1))}+`;
+  const top = unicode ? `╭${"─".repeat(width - 2)}╮` : `+${"-".repeat(width - 2)}+`;
   const bottom = unicode ? `╰${"─".repeat(width - 2)}╯` : `+${"-".repeat(width - 2)}+`;
   const side = unicode ? "│" : "|";
-  const core = renderCoreShardFrame({
-    angleY: frame * 0.045,
-    unicode: capabilities.unicode,
-    width: coreWidth,
-    height: 5,
-  });
-  const copy = ["TOOL SESSION ACTIVE", "Choose next action", "", `v${version}`, ""];
-  const rows = core.map((line, index) => {
-    const symbol = style.accent(line.padEnd(coreWidth), capabilities);
-    const value = fit(copy[index] ?? "", textWidth);
-    const text = index === 0 ? style.strong(value, capabilities) : style.dim(value, capabilities);
-    return `${style.dim(side, capabilities)} ${symbol}${" ".repeat(gap)}${text} ${style.dim(side, capabilities)}`;
+  const wordmark = width >= 45 ? COMPACT_WORDMARK : ["ADB READY"];
+  const rows = wordmark.map((line) => {
+    const content = fit(center(line, inner), inner);
+    return `${style.dim(side, capabilities)} ${style.accent(content, capabilities)} ${style.dim(side, capabilities)}`;
   });
 
   return ["", style.dim(top, capabilities), ...rows, style.dim(bottom, capabilities), ""];
@@ -177,11 +166,14 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     ],
     input: options.input,
     sink: options.sink,
-    capabilities: options.capabilities,
+    capabilities:
+      presentation === "full"
+        ? options.capabilities
+        : { ...options.capabilities, animation: false },
     preamble: (frame: number) =>
       presentation === "full"
         ? homePreamble(frame, options.version, options.capabilities)
-        : compactSessionPreamble(frame, options.version, options.capabilities),
+        : compactSessionPreamble(options.capabilities),
     ...(options.refreshIntervalMs === undefined
       ? {}
       : { refreshIntervalMs: options.refreshIntervalMs }),

@@ -138,7 +138,7 @@ describe("runCli", () => {
     expect(streams.error.value).toStartWith("\u001B[2J\u001B[H");
     expect(streams.error.value).toContain("ADB READY");
     expect(streams.error.value).toContain("· doctor");
-    expect(streams.error.value).toContain("TOOL SESSION ACTIVE");
+    expect(streams.error.value).toContain("####");
     expect(streams.error.value).toContain("ACTIONS");
     expect(streams.error.value.match(/Android setup\. No guesswork\./gu)).toHaveLength(1);
     expect(streams.input.isRaw).toBe(false);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { renderCoreShardFrame, renderLinkCoreFrame } from "../../src/ui/ascii-scene.js";
+import { renderLinkCoreFrame } from "../../src/ui/ascii-scene.js";
 
 describe("ASCII 3D scene", () => {
   test("renders a bounded, non-empty split-link core without terminal controls", () => {
@@ -26,22 +26,5 @@ describe("ASCII 3D scene", () => {
     expect(frame).toHaveLength(5);
     expect(frame.every((line) => line.length <= 10)).toBe(true);
     expect(frame.join("").replaceAll(" ", "").length).toBeGreaterThan(4);
-  });
-
-  test("renders a stable compact core with animated face lighting", () => {
-    const first = renderCoreShardFrame({ angleY: 0, unicode: true });
-    const second = renderCoreShardFrame({ angleY: 0.8, unicode: true });
-
-    expect(first).toHaveLength(5);
-    expect(first.every((line) => line.length <= 9)).toBe(true);
-    expect(first.join("\n")).toMatch(/[◆━┃╱░▒▓]/u);
-    expect(second).not.toEqual(first);
-  });
-
-  test("uses a portable ASCII-only compact core when Unicode is unavailable", () => {
-    const frame = renderCoreShardFrame({ angleY: 0.8, unicode: false });
-
-    expect(frame.join("\n")).toMatch(/[+|/.-]/u);
-    expect(frame.join("\n")).not.toMatch(/[◆━┃╱░▒▓]/u);
   });
 });
