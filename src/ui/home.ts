@@ -1,3 +1,4 @@
+import { renderLinkCoreFrame } from "./ascii-scene.js";
 import { type SelectInput, selectOne } from "./select.js";
 import type { TextSink } from "./spinner.js";
 import { style } from "./style.js";
@@ -15,69 +16,91 @@ export interface HomeScreenOptions {
   sink: TextSink;
   capabilities: TerminalCapabilities;
   signal?: AbortSignal;
-  sleep?: (milliseconds: number) => Promise<void>;
+  refreshIntervalMs?: number;
 }
 
-const WIDE_LOGO = [
-  "    _    ____  ____    ____  _____    _    ______   __",
-  "   / \\  |  _ \\| __ )  |  _ \\| ____|  / \\  |  _ \\ \\ / /",
-  "  / _ \\ | | | |  _ \\  | |_) |  _|   / _ \\ | | | | \\ V / ",
-  " / ___ \\| |_| | |_) | |  _ <| |___ / ___ \\| |_| |  | |  ",
-  "/_/   \\_\\____/|____/  |_| \\_\\_____/_/   \\_\\____/   |_|  ",
-];
+function fit(value: string, width: number): string {
+  if (value.length <= width) {
+    return value.padEnd(width);
+  }
+  return width <= 3 ? value.slice(0, width) : `${value.slice(0, width - 3)}...`;
+}
 
-const COMPACT_LOGO = [
-  "+----------------------+",
-  "|  [>]  ADB READY     |",
-  "|  ANDROID DEV LINK   |",
-  "+----------------------+",
-];
+function productPanel(version: string, capabilities: TerminalCapabilities): string[] {
+  const unicode = capabilities.unicode;
+  const width = 36;
+  const inner = width - 4;
+  const top = unicode ? `╭─${"─".repeat(width - 4)}╮` : `+-${"-".repeat(width - 4)}+`;
+  const bottom = unicode ? `╰${"─".repeat(width - 2)}╯` : `+${"-".repeat(width - 2)}+`;
+  const side = unicode ? "│" : "|";
+  const rows = [
+    "ADB READY",
+    "Android setup. No guesswork.",
+    "",
+    "CHECK  ADB and your local setup",
+    "SEE    every visible target",
+    "USE    human or JSON output",
+    "",
+    `adb-ready  v${version}`,
+  ];
+  return [
+    style.dim(top, capabilities),
+    ...rows.map((row, index) => {
+      const content = fit(row, inner);
+      const styled =
+        index === 0
+          ? style.strong(content, capabilities)
+          : index === 1
+            ? style.accent(content, capabilities)
+            : style.dim(content, capabilities);
+      return `${style.dim(side, capabilities)} ${styled} ${style.dim(side, capabilities)}`;
+    }),
+    style.dim(bottom, capabilities),
+  ];
+}
 
-function defaultSleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function center(value: string, width: number): string {
+  const padding = Math.max(0, Math.floor((width - value.length) / 2));
+  return `${" ".repeat(padding)}${value}`;
+}
+
+function homePreamble(
+  frame: number,
+  version: string,
+  capabilities: TerminalCapabilities,
+): string[] {
+  const angleX = 0.38 + Math.sin(frame * 0.035) * 0.12;
+  const angleY = frame * 0.045;
+
+  if (capabilities.columns < 76) {
+    const width = Math.max(20, Math.min(34, capabilities.columns - 4));
+    const core = renderLinkCoreFrame({ angleX, angleY, width, height: 12 });
+    return [
+      ...core.map((line) => style.accent(center(line, capabilities.columns), capabilities)),
+      "",
+      style.strong(center("ADB READY", capabilities.columns), capabilities),
+      style.dim(center("Android setup. No guesswork.", capabilities.columns), capabilities),
+      style.dim(center(`v${version}`, capabilities.columns), capabilities),
+      "",
+    ];
+  }
+
+  const coreWidth = 36;
+  const core = renderLinkCoreFrame({ angleX, angleY, width: coreWidth, height: 14 });
+  const panel = productPanel(version, capabilities);
+  const panelOffset = 2;
+  return core
+    .map((line, index) => {
+      const left = style.accent(line.padEnd(coreWidth), capabilities);
+      const right = index >= panelOffset ? (panel[index - panelOffset] ?? "") : "";
+      return `${left}    ${right}`.trimEnd();
+    })
+    .concat("");
 }
 
 export function clearInteractiveScreen(sink: TextSink, capabilities: TerminalCapabilities): void {
   if (capabilities.interactive) {
     sink.write("\u001B[2J\u001B[H");
-  }
-}
-
-async function renderSplash(options: HomeScreenOptions): Promise<void> {
-  const { capabilities, sink } = options;
-  const logo = capabilities.columns >= 64 ? WIDE_LOGO : COMPACT_LOGO;
-  const sleep = options.sleep ?? defaultSleep;
-  const delay = capabilities.animation ? 28 : 0;
-  let cursorHidden = false;
-
-  try {
-    if (capabilities.animation) {
-      sink.write("\u001B[?25l");
-      cursorHidden = true;
-    }
-    for (const line of logo) {
-      sink.write(`${style.accent(line, capabilities)}\n`);
-      if (delay > 0) {
-        await sleep(delay);
-      }
-    }
-
-    if (capabilities.animation) {
-      for (const frame of ["[·]", "[◆]", "[◈]"]) {
-        sink.write(
-          `\r\u001B[2K  ${style.accent(frame, capabilities)} establishing development link`,
-        );
-        await sleep(65);
-      }
-      sink.write("\r\u001B[2K");
-    }
-    sink.write(
-      `  ${style.strong("ADB READY", capabilities)} ${style.dim("// Android target control, diagnostics, and dev sessions", capabilities)}\n\n`,
-    );
-  } finally {
-    if (cursorHidden) {
-      sink.write("\u001B[?25h");
-    }
   }
 }
 
@@ -87,44 +110,39 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
   }
 
   clearInteractiveScreen(options.sink, options.capabilities);
-  await renderSplash(options);
   const selection = await selectOne({
-    title: `ADB Ready ${options.version} · choose a workflow`,
+    title: "WHAT DO YOU WANT TO DO?",
     options: [
       {
-        value: "dev" as const,
-        label: "Start development session",
-        description: "Prepare target, ports, and app command · coming in Phase 1",
-        disabled: true,
-      },
-      {
         value: "doctor" as const,
-        label: "Run environment doctor",
-        description: "Inspect runtime, ADB capabilities, server, and targets",
+        label: "Check my setup",
+        description: "Validate runtime, ADB, server, and target access",
         recommended: true,
       },
       {
         value: "devices" as const,
-        label: "Browse Android targets",
-        description: "List visible devices and emulators",
+        label: "Show Android targets",
+        description: "See connected devices and running emulators",
       },
       {
-        value: "pair" as const,
-        label: "Connect or pair wirelessly",
-        description: "Guided Wireless debugging setup · coming in Phase 1",
-        disabled: true,
+        value: "version" as const,
+        label: "Show version",
+        description: `ADB Ready ${options.version}`,
       },
-      { value: "version" as const, label: "Show version", description: options.version },
       {
         value: "help" as const,
-        label: "Command reference",
-        description: "Flags and automation modes",
+        label: "View command reference",
+        description: "Explore commands, flags, and automation output",
       },
-      { value: "exit" as const, label: "Exit", description: "Return to your shell" },
+      { value: "exit" as const, label: "Exit", description: "Close ADB Ready" },
     ],
     input: options.input,
     sink: options.sink,
     capabilities: options.capabilities,
+    preamble: (frame) => homePreamble(frame, options.version, options.capabilities),
+    ...(options.refreshIntervalMs === undefined
+      ? {}
+      : { refreshIntervalMs: options.refreshIntervalMs }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
 
@@ -135,9 +153,6 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     return selection.reason === "escape"
       ? { kind: "action", action: "exit" }
       : { kind: "cancelled", reason: selection.reason };
-  }
-  if (selection.value === "dev" || selection.value === "pair") {
-    return { kind: "unavailable" };
   }
   return { kind: "action", action: selection.value };
 }

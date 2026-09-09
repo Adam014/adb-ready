@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { clearInteractiveScreen, showHomeScreen } from "../../src/ui/home.js";
 import type { SelectInput } from "../../src/ui/select.js";
 import type { TextSink } from "../../src/ui/spinner.js";
+import { sanitizeTerminalText } from "../../src/ui/style.js";
 import type { TerminalCapabilities } from "../../src/ui/terminal.js";
 
 class MemorySink implements TextSink {
@@ -46,7 +47,7 @@ const interactive: TerminalCapabilities = {
 };
 
 describe("home screen", () => {
-  test("clears first, animates the wordmark, and opens on the recommended doctor", async () => {
+  test("clears first, renders product value, and opens on the recommended doctor", async () => {
     const sink = new MemorySink();
     const input = new AutoInput("\r");
     const selected = await showHomeScreen({
@@ -54,15 +55,15 @@ describe("home screen", () => {
       input,
       sink,
       capabilities: interactive,
-      sleep: async () => {},
+      refreshIntervalMs: 1,
     });
 
     expect(selected).toEqual({ kind: "action", action: "doctor" });
     expect(sink.value).toStartWith("\u001B[2J\u001B[H");
     expect(sink.value).toContain("ADB READY");
-    expect(sink.value).toContain("Start development session (unavailable)");
-    expect(sink.value).toContain("Connect or pair wirelessly (unavailable)");
-    expect(sink.value).toContain("ADB Ready 0.0.0 · choose a workflow");
+    expect(sink.value).toContain("Android setup. No guesswork.");
+    expect(sink.value).toContain("CHECK  ADB and your local setup");
+    expect(sink.value).toContain("WHAT DO YOU WANT TO DO?");
     expect(sink.value).toEndWith("\u001B[?25h");
     expect(input.isRaw).toBe(false);
   });
@@ -70,7 +71,7 @@ describe("home screen", () => {
   test("supports the version menu shortcut", async () => {
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("5", "\r"),
+      input: new AutoInput("3", "\r"),
       sink: new MemorySink(),
       capabilities: { ...interactive, animation: false },
     });
@@ -93,8 +94,12 @@ describe("home screen", () => {
       },
     });
 
-    expect(sink.value).toContain("|  [>]  ADB READY     |");
+    expect(sink.value).toContain("ADB READY");
+    expect(sink.value).toContain("Android setup. No guesswork.");
     expect(sink.value).not.toContain("\u001B[36m");
+    expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 40)).toBe(
+      true,
+    );
   });
 
   test("never clears or renders when interaction is unavailable", async () => {

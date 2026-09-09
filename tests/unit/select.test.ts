@@ -71,8 +71,8 @@ describe("selectOne", () => {
     await expect(selection).resolves.toEqual({ kind: "selected", value: "emulator" });
     expect(input.rawTransitions).toEqual([true, false]);
     expect(input.paused).toBe(true);
-    expect(sink.value).toContain("(recommended)");
-    expect(sink.value).toContain("(unavailable)");
+    expect(sink.value).toContain("· recommended");
+    expect(sink.value).toContain("· unavailable");
     expect(sink.value).toEndWith("\u001B[?25h");
   });
 
@@ -154,5 +154,53 @@ describe("selectOne", () => {
       .replaceAll("\u001B[2K", "");
     expect(withoutOwnControls).toContain("Pixel spoofed");
     expect(withoutOwnControls).not.toContain("\u001B");
+  });
+
+  test("keeps a dynamic preamble moving while the menu is open", async () => {
+    const input = new FakeInput();
+    const sink = new MemorySink();
+    const selection = selectOne({
+      title: "Select",
+      options,
+      input,
+      sink,
+      capabilities: { ...capabilities, animation: true },
+      preamble: (frame) => [`frame ${String(frame)}`, ""],
+      refreshIntervalMs: 32,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    input.send("\u001B");
+
+    await expect(selection).resolves.toEqual({ kind: "cancelled", reason: "escape" });
+    expect(sink.value).toContain("frame 0");
+    expect(sink.value).toMatch(/frame [12]/u);
+  });
+
+  test("wraps descriptions to the available terminal width", async () => {
+    const input = new FakeInput();
+    const sink = new MemorySink();
+    const selection = selectOne({
+      title: "Choose an action",
+      options: [
+        {
+          value: "doctor",
+          label: "Check my setup",
+          description: "Validate runtime, ADB capabilities, server, and every visible target",
+        },
+      ],
+      input,
+      sink,
+      capabilities: { ...capabilities, columns: 40 },
+    });
+    input.send("\u001B");
+    await selection;
+
+    const visibleLines = sink.value
+      .replaceAll("\u001B[?25l", "")
+      .replaceAll("\u001B[?25h", "")
+      .replaceAll("\u001B[2K", "")
+      .split("\n");
+    expect(visibleLines.every((line) => line.length <= 40)).toBe(true);
   });
 });

@@ -31,6 +31,47 @@ export interface SelectOptions<T> {
   sink: TextSink;
   capabilities: TerminalCapabilities;
   signal?: AbortSignal;
+  preamble?: (frame: number) => readonly string[];
+  refreshIntervalMs?: number;
+}
+
+function truncate(value: string, width: number): string {
+  if (value.length <= width) {
+    return value;
+  }
+  return width <= 3 ? value.slice(0, width) : `${value.slice(0, width - 3)}...`;
+}
+
+function wrap(value: string, width: number): string[] {
+  const clean = sanitizeTerminalText(value);
+  if (clean.length <= width) {
+    return [clean];
+  }
+  const lines: string[] = [];
+  let line = "";
+  for (const word of clean.split(" ")) {
+    if (word.length > width) {
+      if (line !== "") {
+        lines.push(line);
+        line = "";
+      }
+      for (let start = 0; start < word.length; start += width) {
+        lines.push(word.slice(start, start + width));
+      }
+      continue;
+    }
+    const candidate = line === "" ? word : `${line} ${word}`;
+    if (candidate.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line !== "") {
+    lines.push(line);
+  }
+  return lines;
 }
 
 function nextEnabled<T>(
@@ -61,32 +102,59 @@ function renderMenu<T>(
   options: SelectOptions<T>,
   selected: number,
   previousLineCount: number,
+  frame: number,
 ): number {
   const { capabilities, sink } = options;
   const glyphs = symbols(capabilities);
   if (previousLineCount > 0) {
     sink.write(`\u001B[${String(previousLineCount)}F`);
   }
-  const lines = [style.strong(sanitizeTerminalText(options.title), capabilities)];
+  const top = capabilities.unicode ? "╭─" : "+-";
+  const bottom = capabilities.unicode ? "╰─" : "+-";
+  const rail = capabilities.unicode ? "│" : "|";
+  const compact = capabilities.columns < 60;
+  const help = capabilities.unicode
+    ? "↑↓ move · 1-9 jump · enter open"
+    : "up/down · 1-9 jump · enter open";
+  const lines = [...(options.preamble?.(frame) ?? [])];
+  lines.push(
+    `${style.dim(top, capabilities)} ${style.strong(
+      truncate(sanitizeTerminalText(options.title), Math.max(8, capabilities.columns - 4)),
+      capabilities,
+    )}`,
+  );
   options.options.forEach((option, index) => {
     const isSelected = index === selected;
-    const pointer = isSelected ? style.accent(glyphs.active, capabilities) : " ";
-    const number = `${String(index + 1)}.`;
-    const disabled = option.disabled === true ? " (unavailable)" : "";
-    const recommended = option.recommended === true ? " (recommended)" : "";
-    const label = `${sanitizeTerminalText(option.label)}${disabled}${recommended}`;
+    const pointer = isSelected
+      ? style.accent(glyphs.active, capabilities)
+      : style.dim(option.disabled === true ? glyphs.skipped : glyphs.pending, capabilities);
+    const number = style.dim(`[${String(index + 1)}]`, capabilities);
+    const disabled = option.disabled === true ? "  · unavailable" : "";
+    const recommended = option.recommended === true ? "  · recommended" : "";
+    const label = truncate(
+      `${sanitizeTerminalText(option.label)}${disabled}${recommended}`,
+      Math.max(8, capabilities.columns - 10),
+    );
     const styledLabel =
       option.disabled === true
         ? style.dim(label, capabilities)
         : isSelected
           ? style.strong(label, capabilities)
           : label;
-    lines.push(`${pointer} ${number} ${styledLabel}`);
+    lines.push(`  ${pointer} ${number}  ${styledLabel}`);
     if (option.description !== undefined) {
-      lines.push(`     ${style.dim(sanitizeTerminalText(option.description), capabilities)}`);
+      for (const description of wrap(option.description, Math.max(10, capabilities.columns - 9))) {
+        const descriptionRail = isSelected ? style.accent(rail, capabilities) : " ";
+        lines.push(`  ${descriptionRail}      ${style.dim(description, capabilities)}`);
+      }
     }
   });
-  lines.push(style.dim("↑/↓ move · 1-9 jump · Enter confirm · Esc cancel", capabilities));
+  lines.push(`${style.dim(bottom, capabilities)} ${style.dim(help, capabilities)}`);
+  if (compact) {
+    lines.push(`   ${style.dim("esc close", capabilities)}`);
+  } else {
+    lines[lines.length - 1] += style.dim(" · esc close", capabilities);
+  }
 
   for (const line of lines) {
     sink.write(`\u001B[2K${line}\n`);
@@ -106,7 +174,9 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
   return await new Promise<SelectResult<T>>((resolve) => {
     const wasRaw = options.input.isRaw === true;
     let lineCount = 0;
+    let frame = 0;
     let settled = false;
+    let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
     const attempt = (operation: () => unknown) => {
       try {
@@ -118,6 +188,9 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
     const cleanup = () => {
       attempt(() => options.input.off("data", onData));
       attempt(() => options.signal?.removeEventListener("abort", onAbort));
+      if (refreshTimer !== undefined) {
+        clearInterval(refreshTimer);
+      }
       if (!wasRaw) {
         attempt(() => options.input.setRawMode?.(false));
       }
@@ -133,7 +206,7 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
       resolve(result);
     };
     const draw = () => {
-      lineCount = renderMenu(options, selected, lineCount);
+      lineCount = renderMenu(options, selected, lineCount, frame);
     };
     const onAbort = () => settle({ kind: "cancelled", reason: "signal" });
     const onData = (chunk: Uint8Array | string) => {
@@ -180,6 +253,15 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
       options.input.on("data", onData);
       options.signal?.addEventListener("abort", onAbort, { once: true });
       draw();
+      if (options.preamble !== undefined && options.capabilities.animation) {
+        refreshTimer = setInterval(
+          () => {
+            frame += 1;
+            draw();
+          },
+          Math.max(32, options.refreshIntervalMs ?? 90),
+        );
+      }
     } catch {
       settle({ kind: "unavailable" });
       return;

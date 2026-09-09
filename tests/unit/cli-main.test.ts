@@ -218,7 +218,7 @@ describe("runCli", () => {
 
     expect(exitCode).toBe(ExitCode.Success);
     expect(streams.error.value).toContain("Select an Android target");
-    expect(streams.error.value).toContain("Pixel 8 (unavailable)");
+    expect(streams.error.value).toContain("Pixel 8  · unavailable");
     expect(streams.error.value).toContain("Selected Pixel 9 · usb-1 · device");
     expect(input.isRaw).toBe(false);
   });
