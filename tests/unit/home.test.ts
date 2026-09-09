@@ -38,6 +38,33 @@ class AutoInput implements SelectInput {
   off(): void {}
 }
 
+class ManualInput implements SelectInput {
+  isRaw = false;
+  readonly listeners = new Set<(chunk: Uint8Array | string) => void>();
+
+  setRawMode(enabled: boolean): void {
+    this.isRaw = enabled;
+  }
+
+  resume(): void {}
+
+  pause(): void {}
+
+  on(_event: "data", listener: (chunk: Uint8Array | string) => void): void {
+    this.listeners.add(listener);
+  }
+
+  off(_event: "data", listener: (chunk: Uint8Array | string) => void): void {
+    this.listeners.delete(listener);
+  }
+
+  send(value: string): void {
+    for (const listener of this.listeners) {
+      listener(value);
+    }
+  }
+}
+
 const interactive: TerminalCapabilities = {
   interactive: true,
   color: false,
@@ -85,14 +112,39 @@ describe("home screen", () => {
       version: "0.0.0",
       input: new AutoInput("\u001B"),
       sink,
-      capabilities: { ...interactive, animation: false },
+      capabilities: { ...interactive, animation: false, columns: 40 },
       presentation: "menu",
     });
 
     expect(selected).toEqual({ kind: "action", action: "exit" });
-    expect(sink.value).toContain("NEXT ACTION");
+    expect(sink.value).toContain("TOOL SESSION ACTIVE");
+    expect(sink.value).toContain("ACTIONS");
+    expect(sink.value).toMatch(/[#@%*]/u);
     expect(sink.value).not.toContain("\u001B[2J\u001B[H");
     expect(sink.value).not.toContain("Android setup. No guesswork.");
+    expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 40)).toBe(
+      true,
+    );
+  });
+
+  test("keeps the mini 3D scene moving inside the compact session header", async () => {
+    const sink = new MemorySink();
+    const input = new ManualInput();
+    const selection = showHomeScreen({
+      version: "0.0.0",
+      input,
+      sink,
+      capabilities: interactive,
+      presentation: "menu",
+      refreshIntervalMs: 32,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    input.send("\u001B");
+
+    await expect(selection).resolves.toEqual({ kind: "action", action: "exit" });
+    expect(sink.value.match(/TOOL SESSION ACTIVE/gu)?.length).toBeGreaterThan(1);
+    expect(sink.value).toMatch(/\[\d+F/u);
   });
 
   test("uses a compact ASCII identity on narrow terminals", async () => {

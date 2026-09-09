@@ -99,6 +99,41 @@ function homePreamble(
     .concat("");
 }
 
+function compactSessionPreamble(
+  frame: number,
+  version: string,
+  capabilities: TerminalCapabilities,
+): string[] {
+  const unicode = capabilities.unicode;
+  const width = Math.max(20, Math.min(68, capabilities.columns));
+  const inner = width - 4;
+  const coreWidth = capabilities.columns < 48 ? 10 : 12;
+  const gap = capabilities.columns < 30 ? 1 : 3;
+  const textWidth = Math.max(4, inner - coreWidth - gap);
+  const topLabel = " ADB READY ";
+  const topFill = Math.max(0, width - topLabel.length - 2);
+  const top = unicode
+    ? `╭─${topLabel}${"─".repeat(Math.max(0, topFill - 1))}╮`
+    : `+-${topLabel}${"-".repeat(Math.max(0, topFill - 1))}+`;
+  const bottom = unicode ? `╰${"─".repeat(width - 2)}╯` : `+${"-".repeat(width - 2)}+`;
+  const side = unicode ? "│" : "|";
+  const core = renderLinkCoreFrame({
+    angleX: 0.38 + Math.sin(frame * 0.035) * 0.12,
+    angleY: frame * 0.045,
+    width: coreWidth,
+    height: 5,
+  });
+  const copy = ["TOOL SESSION ACTIVE", "Choose next action", "", `v${version}`, ""];
+  const rows = core.map((line, index) => {
+    const symbol = style.accent(line.padEnd(coreWidth), capabilities);
+    const value = fit(copy[index] ?? "", textWidth);
+    const text = index === 0 ? style.strong(value, capabilities) : style.dim(value, capabilities);
+    return `${style.dim(side, capabilities)} ${symbol}${" ".repeat(gap)}${text} ${style.dim(side, capabilities)}`;
+  });
+
+  return [style.dim(top, capabilities), ...rows, style.dim(bottom, capabilities), ""];
+}
+
 export function clearInteractiveScreen(sink: TextSink, capabilities: TerminalCapabilities): void {
   if (capabilities.interactive) {
     sink.write("\u001B[2J\u001B[H");
@@ -115,7 +150,7 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     clearInteractiveScreen(options.sink, options.capabilities);
   }
   const selection = await selectOne({
-    title: presentation === "full" ? "WHAT DO YOU WANT TO DO?" : "NEXT ACTION",
+    title: presentation === "full" ? "WHAT DO YOU WANT TO DO?" : "ACTIONS",
     options: [
       {
         value: "doctor" as const,
@@ -143,9 +178,10 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     input: options.input,
     sink: options.sink,
     capabilities: options.capabilities,
-    ...(presentation === "full"
-      ? { preamble: (frame: number) => homePreamble(frame, options.version, options.capabilities) }
-      : {}),
+    preamble: (frame: number) =>
+      presentation === "full"
+        ? homePreamble(frame, options.version, options.capabilities)
+        : compactSessionPreamble(frame, options.version, options.capabilities),
     ...(options.refreshIntervalMs === undefined
       ? {}
       : { refreshIntervalMs: options.refreshIntervalMs }),

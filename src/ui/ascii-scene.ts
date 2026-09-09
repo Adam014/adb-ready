@@ -73,8 +73,8 @@ function mix(
 
 /** Renders ADB Ready's split-link core: two solid, open angular links locked in 3D. */
 export function renderLinkCoreFrame(options: LinkCoreFrameOptions): string[] {
-  const width = Math.max(20, Math.floor(options.width ?? 36));
-  const height = Math.max(10, Math.floor(options.height ?? 14));
+  const width = Math.max(10, Math.floor(options.width ?? 36));
+  const height = Math.max(5, Math.floor(options.height ?? 14));
   const pixels = Array.from({ length: width * height }, () => " ");
   const depth = new Float64Array(width * height);
   const camera = 4.8;

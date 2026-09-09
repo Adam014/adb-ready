@@ -20,10 +20,11 @@ describe("ASCII 3D scene", () => {
     expect(second).not.toEqual(first);
   });
 
-  test("enforces a readable minimum viewport", () => {
+  test("supports a compact scene for continuing-session headers", () => {
     const frame = renderLinkCoreFrame({ angleX: 0, angleY: 0, width: 2, height: 2 });
 
-    expect(frame).toHaveLength(10);
-    expect(frame.every((line) => line.length <= 20)).toBe(true);
+    expect(frame).toHaveLength(5);
+    expect(frame.every((line) => line.length <= 10)).toBe(true);
+    expect(frame.join("").replaceAll(" ", "").length).toBeGreaterThan(4);
   });
 });
