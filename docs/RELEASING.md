@@ -1,7 +1,8 @@
 # Releasing ADB Ready
 
-ADB Ready publishes from a GitHub release through npm trusted publishing. The
-workflow does not use a long-lived npm write token.
+ADB Ready promotes one verified npm tarball through npm trusted publishing. A
+draft GitHub release is made public only after npm accepts that exact artifact.
+The workflow does not use a long-lived npm write token.
 
 ## One-time setup
 
@@ -38,24 +39,62 @@ workflow does not use a long-lived npm write token.
 
 7. Review `npm pack --dry-run --json --ignore-scripts` and confirm that no local
    context, credentials, fixtures, sources, or development scripts are present.
-8. Commit the release as one reviewable commit and push it only after every
-   check is green.
+8. Commit the release as one reviewable commit and merge it through the normal
+   protected-branch pull request.
+
+## Rehearse in GitHub Actions
+
+Run the `Release` workflow from the protected `main` branch in validation mode:
+
+```bash
+gh workflow run release.yml \
+  --ref main \
+  -f mode=validate \
+  -f release_tag=vVERSION \
+  -f ref=main
+```
+
+This uses the real GitHub-hosted release environment but has no npm identity
+permission and contains no live publish command. It verifies the complete
+suite, required package managers, release metadata, packed artifact, modern
+Yarn consumer, and `npm publish --dry-run`.
+
+Do not create or move the final tag until this rehearsal is green.
 
 ## Publish
 
-Create a GitHub release for the exact `vVERSION` tag on the audited release
-commit. Publishing the release triggers `.github/workflows/release.yml`, which:
+1. Create a draft GitHub release for the exact `vVERSION` tag on the audited
+   release commit.
+2. Dispatch the workflow itself from that immutable tag. Publish mode rejects a
+   branch-based workflow run even if its checkout input points to a tag:
 
-1. checks out the immutable release tag;
-2. installs the locked toolchain;
-3. pins an npm CLI that supports trusted publishing;
-4. runs the complete verification gate;
-5. verifies the tag, stable version, license, public metadata, changelog, README,
-   and package allowlist; and
-6. publishes the public package through short-lived OIDC credentials.
+   ```bash
+   gh workflow run release.yml \
+     --ref vVERSION \
+     -f mode=publish \
+     -f release_tag=vVERSION \
+     -f ref=vVERSION
+   ```
+
+The workflow:
+
+1. verifies the immutable tag and confirms that its GitHub release is still a
+   draft;
+2. installs the locked and pinned verification toolchain without publish
+   credentials;
+3. runs the complete verification gate;
+4. creates one tarball and installs that exact file through npm, pnpm, Yarn
+   Classic, modern Yarn, and Bun;
+5. records and rechecks its SHA-256 digest across the job boundary;
+6. grants OIDC only to the isolated npm publish job;
+7. publishes the verified tarball through short-lived trusted-publishing
+   credentials; and
+8. publishes the prepared GitHub release only after npm succeeds.
 
 Do not rerun a failed publish blindly. Inspect whether the version already
-exists on npm first; published npm versions are immutable.
+exists on npm first; published npm versions are immutable. A failed validation
+can be repeated safely. If npm succeeded but the final GitHub release step
+failed, rerun only the failed job or publish the existing draft manually.
 
 ## Verify from a clean consumer
 

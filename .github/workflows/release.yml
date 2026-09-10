@@ -1,58 +1,187 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validate only, or publish the prepared draft release
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - publish
+      release_tag:
+        description: Exact release tag matching package.json (for example v0.1.0)
+        required: true
+        default: v0.1.0
+        type: string
+      ref:
+        description: Git ref to validate; publish mode requires the release tag
+        required: true
+        default: main
+        type: string
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
-  group: npm-release-${{ github.event.release.tag_name }}
+  group: npm-release-${{ inputs.release_tag }}
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Verify and publish to npm
-    if: startsWith(github.event.release.tag_name, 'v')
+  validate:
+    name: Validate npm release artifact
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      artifact-sha256: ${{ steps.package.outputs.sha256 }}
 
     steps:
-      - name: Check out the release tag
-        uses: actions/checkout@v7
+      - name: Check out the requested ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
 
-      - name: Set up Node.js for trusted publishing
-        uses: actions/setup-node@v7
+      - name: Set up Node.js without publish credentials
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
+      - name: Set up the pinned pnpm consumer
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        env:
+          # This job intentionally tests pnpm as a consumer of this Bun-managed project.
+          PNPM_CONFIG_PM_ON_FAIL: ignore
+        with:
+          version: 12.3.4
+          cache: false
+          install: false
+
       - name: Set up Bun from packageManager
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Set up Deno 2
-        uses: denoland/setup-deno@v2
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
 
       - name: Install the locked toolchain
         run: bun install --frozen-lockfile
 
-      - name: Pin a trusted-publishing capable npm CLI
-        run: npm install --global npm@12.0.2
-
       - name: Run the complete verification gate
+        env:
+          ADB_READY_REQUIRE_PACKAGE_MANAGERS: npm,pnpm,yarn,bun
+          ADB_READY_YARN_CLI: ${{ github.workspace }}/node_modules/yarn/bin/yarn.js
         run: bun run verify
 
-      - name: Validate release metadata and tag
+      - name: Validate release metadata
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: bun run release:check -- --publish "$RELEASE_TAG"
 
+      - name: Require an immutable draft tag for publish mode
+        if: inputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ inputs.ref }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          test "$RELEASE_REF" = "$RELEASE_TAG"
+          test "$WORKFLOW_REF" = "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true"
+
+      - name: Create the immutable npm artifact
+        id: package
+        env:
+          ARTIFACT_DIRECTORY: ${{ runner.temp }}/adb-ready-release
+        run: bun run pack:release -- --output "$ARTIFACT_DIRECTORY"
+
+      - name: Test the exact artifact with required package managers
+        env:
+          ADB_READY_REQUIRE_PACKAGE_MANAGERS: npm,pnpm,yarn,bun
+          ADB_READY_YARN_CLI: ${{ github.workspace }}/node_modules/yarn/bin/yarn.js
+          RELEASE_TARBALL: ${{ steps.package.outputs.tarball }}
+        run: bun run scripts/package-manager-smoke.mjs --tarball "$RELEASE_TARBALL"
+
+      - name: Test the exact artifact with modern Yarn
+        env:
+          ADB_READY_YARN_CLI: ${{ github.workspace }}/node_modules/@yarnpkg/cli-dist/bin/yarn.js
+          RELEASE_TARBALL: ${{ steps.package.outputs.tarball }}
+        run: |
+          node "$ADB_READY_YARN_CLI" --version
+          ADB_READY_REQUIRE_PACKAGE_MANAGERS=yarn bun run scripts/package-manager-smoke.mjs --tarball "$RELEASE_TARBALL"
+
+      - name: Rehearse the registry publication
+        env:
+          RELEASE_TARBALL: ${{ steps.package.outputs.tarball }}
+        run: bun run npm publish "$RELEASE_TARBALL" --access public --dry-run
+
+      - name: Preserve the verified artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package
+          path: ${{ steps.package.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish verified artifact to npm
+    if: inputs.mode == 'publish'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # Exchange the workflow identity for a short-lived npm publish token.
+
+    steps:
+      - name: Check out the immutable release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag }}
+          persist-credentials: false
+
+      - name: Set up Node.js for trusted publishing
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Download the verified artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/adb-ready-release
+
+      - name: Verify the promoted artifact digest
+        env:
+          EXPECTED_SHA256: ${{ needs.validate.outputs.artifact-sha256 }}
+          RELEASE_TARBALL: ${{ runner.temp }}/adb-ready-release/adb-ready.tgz
+        run: test "$(sha256sum "$RELEASE_TARBALL" | cut -d ' ' -f 1)" = "$EXPECTED_SHA256"
+
       - name: Publish with npm trusted publishing
-        run: npm publish --access public
+        env:
+          RELEASE_TARBALL: ${{ runner.temp }}/adb-ready-release/adb-ready.tgz
+        run: npm publish "$RELEASE_TARBALL" --access public
+
+  github-release:
+    name: Publish the prepared GitHub release
+    if: inputs.mode == 'publish'
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # Publish the already prepared draft release after npm succeeds.
+
+    steps:
+      - name: Publish the draft after npm succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
