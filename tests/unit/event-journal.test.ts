@@ -47,6 +47,24 @@ describe("EventJournal", () => {
     expect(journal.close().events).toHaveLength(1);
   });
 
+  test("redacts project-specific literal values before journal retention", () => {
+    const bus = new EventBus();
+    const journal = new EventJournal(bus, {
+      redaction: { additionalLiterals: ["private-project-value"] },
+    });
+    bus.emit({
+      type: "child.stdout",
+      source: "child.stdout",
+      severity: "info",
+      message: "value=private-project-value",
+      correlation: { commandId: "command" },
+      data: { raw: "private-project-value" },
+    });
+    const serialized = JSON.stringify(journal.close());
+    expect(serialized).not.toContain("private-project-value");
+    expect(serialized).toContain("[REDACTED]");
+  });
+
   test("rejects unbounded or invalid retention settings", () => {
     const bus = new EventBus();
     expect(() => new EventJournal(bus, { maxEntries: 0 })).toThrow();

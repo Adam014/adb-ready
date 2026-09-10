@@ -140,6 +140,7 @@ try {
     NO_COLOR: "1",
   };
   const profileConfig = path.join(consumer, "profile-config.json");
+  const devConfig = path.join(consumer, "dev-config.json");
   await writeFile(
     profileConfig,
     `${JSON.stringify(
@@ -147,6 +148,31 @@ try {
         version: 1,
         profiles: {
           desk: { targets: { aliases: { pixel: "fixture-usb" } } },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    devConfig,
+    `${JSON.stringify(
+      {
+        version: 1,
+        dev: {
+          journal: { redactEnvironment: ["ADB_READY_FIXTURE_SECRET"] },
+          hooks: {
+            onReady: [
+              {
+                run: [
+                  process.execPath,
+                  "-e",
+                  "process.stdout.write('hook=' + process.env.ADB_READY_FIXTURE_SECRET)",
+                ],
+                envAllowlist: ["ADB_READY_FIXTURE_SECRET"],
+              },
+            ],
+          },
         },
       },
       null,
@@ -287,6 +313,8 @@ try {
       alias,
       [
         "dev",
+        "--config",
+        devConfig,
         "--no-logs",
         "--json",
         "--non-interactive",
@@ -295,7 +323,7 @@ try {
         "-e",
         "process.stdout.write('target=' + process.env.ANDROID_SERIAL)",
       ],
-      env,
+      { ...env, ADB_READY_FIXTURE_SECRET: "packaged-private-value" },
     );
     expectStatus(dev, 0, `${alias} custom dev`);
     const devPayload = parseJson(dev.stdout, `${alias} custom dev`);
@@ -305,11 +333,18 @@ try {
     if (
       devPayload.data?.preset !== "custom" ||
       devPayload.data?.child?.exitCode !== 0 ||
+      devPayload.data?.hooks?.completed !== 1 ||
       !devEvents.some(
         (event) => event.type === "child.stdout" && event.message === "target=fixture-usb",
-      )
+      ) ||
+      !devEvents.some(
+        (event) => event.type === "hook.stdout" && event.message === "hook=[REDACTED]",
+      ) ||
+      dev.stdout.includes("packaged-private-value")
     ) {
-      throw new Error(`${alias} dev: custom child was not correlated with the selected target`);
+      throw new Error(
+        `${alias} dev: target propagation, configured hook, or journal redaction failed`,
+      );
     }
     assertions += 1;
 
