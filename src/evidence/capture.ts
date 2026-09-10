@@ -65,9 +65,61 @@ function defaultName(kind: CaptureKind, current: Context): string {
   return `${kind}-${timestamp}.${kind === "screenshot" ? "png" : "mp4"}`;
 }
 
-function validPng(header: Uint8Array): boolean {
-  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  return signature.every((value, index) => header[index] === value);
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MAX_PNG_TEXT_PREAMBLE_BYTES = 16 * 1024;
+
+function isTextPreamble(value: Uint8Array): boolean {
+  return value.every(
+    (byte) => byte === 9 || byte === 10 || byte === 13 || (byte >= 32 && byte <= 126),
+  );
+}
+
+class PngStreamWriter {
+  readonly #fd: number;
+  #pending = Buffer.alloc(0);
+  #started = false;
+  #rejected = false;
+  bytes = 0;
+
+  constructor(fd: number) {
+    this.#fd = fd;
+  }
+
+  write(chunk: Uint8Array): void {
+    if (this.#rejected) return;
+    if (this.#started) {
+      writeSync(this.#fd, chunk);
+      this.bytes += chunk.byteLength;
+      return;
+    }
+
+    const combined = Buffer.concat([this.#pending, Buffer.from(chunk)]);
+    const offset = combined.indexOf(PNG_SIGNATURE);
+    if (offset === -1) {
+      if (combined.byteLength > MAX_PNG_TEXT_PREAMBLE_BYTES + PNG_SIGNATURE.byteLength - 1) {
+        this.#rejected = true;
+        this.#pending = Buffer.alloc(0);
+        return;
+      }
+      this.#pending = combined;
+      return;
+    }
+    if (offset > MAX_PNG_TEXT_PREAMBLE_BYTES || !isTextPreamble(combined.subarray(0, offset))) {
+      this.#rejected = true;
+      this.#pending = Buffer.alloc(0);
+      return;
+    }
+
+    const png = combined.subarray(offset);
+    writeSync(this.#fd, png);
+    this.bytes += png.byteLength;
+    this.#pending = Buffer.alloc(0);
+    this.#started = true;
+  }
+
+  get valid(): boolean {
+    return this.#started && !this.#rejected && this.bytes >= PNG_SIGNATURE.byteLength;
+  }
 }
 
 async function sha256(file: string): Promise<string> {
@@ -96,8 +148,7 @@ async function captureScreenshot(
   signal?: AbortSignal,
 ): Promise<EvidenceFile | undefined> {
   const handle = await openEvidenceTemporary(destination);
-  let bytes = 0;
-  let header = new Uint8Array();
+  const png = new PngStreamWriter(handle.fd);
   let observation: Awaited<ReturnType<ReadyTarget["client"]["targetCommand"]>>;
   try {
     observation = await ready.client.targetCommand(
@@ -109,23 +160,13 @@ async function captureScreenshot(
       signal,
       {
         maxBufferBytes: 64 * 1024,
-        onStdoutChunk: (chunk) => {
-          writeSync(handle.fd, chunk);
-          bytes += chunk.byteLength;
-          if (header.byteLength < 8) {
-            const needed = 8 - header.byteLength;
-            const combined = new Uint8Array(header.byteLength + Math.min(needed, chunk.byteLength));
-            combined.set(header);
-            combined.set(chunk.subarray(0, needed), header.byteLength);
-            header = combined;
-          }
-        },
+        onStdoutChunk: (chunk) => png.write(chunk),
       },
     );
   } finally {
     await handle.close();
   }
-  if (!succeeded(observation.process) || bytes === 0 || !validPng(header)) {
+  if (!succeeded(observation.process) || !png.valid) {
     await discardEvidenceDestination(destination);
     problems.push(
       succeeded(observation.process)
@@ -144,7 +185,7 @@ async function captureScreenshot(
   return {
     path: destination.relativePath,
     mediaType: "image/png",
-    bytes,
+    bytes: png.bytes,
     sha256: await sha256(destination.finalPath),
     provenance: { command: "exec-out screencap -p", targetSerial: ready.target.serial },
   };

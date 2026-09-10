@@ -21,7 +21,8 @@ breaking changes.
   explicit destructive policy, mutation-free dry runs, and postcondition
   verification.
 - Capture verified PNG screenshots and bounded MP4 screen recordings into
-  atomically published project-local evidence files with SHA-256 metadata.
+  atomically published project-local evidence files with SHA-256 metadata,
+  including OEM multi-display screenshot output with a bounded text preamble.
 - Inspect one app and the current accessibility hierarchy as bounded,
   explicitly sensitive snapshots with digest-scoped UI references.
 - Give local AI agents 19 typed Android tools and saved-session context over a

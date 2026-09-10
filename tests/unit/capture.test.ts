@@ -85,6 +85,31 @@ describe("evidence capture", () => {
     }
   });
 
+  test("strips a bounded textual OEM warning before streamed PNG data", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capture-"));
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const warning = new TextEncoder().encode(
+      "[Warning] Multiple displays were found, but no display id was specified.\n",
+    );
+    const output = new Uint8Array(warning.byteLength + png.byteLength);
+    output.set(warning);
+    output.set(png, warning.byteLength);
+    try {
+      const execution = await runCapture(
+        { kind: "screenshot", cwd: root, out: "screen.png" },
+        {},
+        fixture(output, []),
+      );
+      expect(execution.result).toMatchObject({
+        ok: true,
+        data: { evidence: { bytes: png.byteLength } },
+      });
+      expect(new Uint8Array(await readFile(path.join(root, "screen.png")))).toEqual(png);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("rejects invalid binary output and leaves no final file", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capture-"));
     try {

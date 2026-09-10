@@ -127,6 +127,10 @@ symlink outside that root and never replaces an existing file unless `--force`
 is explicit. Files are written through a private temporary path and published
 only after validation.
 
+Some multi-display Android builds, including foldables, emit a short textual
+warning before the screenshot bytes. ADB Ready removes only a bounded text
+preamble and still requires a valid PNG signature before publishing the file.
+
 The result contains:
 
 - a project-relative path;

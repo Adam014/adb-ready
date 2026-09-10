@@ -113,18 +113,29 @@ describe("app commands", () => {
     });
     expect(requests).toEqual([]);
 
+    const infoRequests: string[][] = [];
     const info = await runApp(
       { action: "info", cwd: "/project", applicationId: "com.example.app" },
       {},
-      fixture(),
+      fixture((request) => {
+        infoRequests.push([...(request.args ?? [])]);
+        return undefined;
+      }),
     );
     expect(info.result).toMatchObject({
       ok: true,
       data: {
+        resolution: {
+          provenance: { source: "cli" },
+          considered: [{ value: "com.example.app", source: "cli" }],
+        },
         package: { applicationId: "com.example.app", installed: true, versionName: "1.0.0" },
         foreground: { applicationId: "com.example.app", activity: ".MainActivity" },
       },
     });
+    expect(infoRequests.some((args) => args.includes("list") && args.includes("packages"))).toBe(
+      false,
+    );
   });
 
   test("launches and verifies the same package in the foreground", async () => {

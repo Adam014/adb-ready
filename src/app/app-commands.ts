@@ -346,15 +346,22 @@ async function applicationResolution(
   signal?: AbortSignal,
 ): Promise<{
   resolution: ApplicationIdResolution;
-  packageObservation: Awaited<ReturnType<typeof packages>>;
+  packageObservation?: Awaited<ReturnType<typeof packages>>;
 }> {
+  const project = await (dependencies.detectProject ?? detectProject)({
+    cwd: request.cwd,
+  });
+  const localResolution = await resolveApplicationId({
+    root: project.root,
+    ...(request.applicationId === undefined ? {} : { explicit: request.applicationId }),
+    ...(request.configuredPackage === undefined ? {} : { configured: request.configuredPackage }),
+  });
+  if (localResolution.kind !== "not-found") return { resolution: localResolution };
+
   const packageObservation = await packages(ready, "user", signal);
   const installed = succeeded(packageObservation.process)
     ? (packageObservation.value as AndroidPackage[]).map(({ name }) => name)
     : [];
-  const project = await (dependencies.detectProject ?? detectProject)({
-    cwd: request.cwd,
-  });
   return {
     packageObservation,
     resolution: await resolveApplicationId({
@@ -406,7 +413,7 @@ async function requireApplicationId(
     dependencies,
     signal,
   );
-  if (!succeeded(packageObservation.process)) {
+  if (packageObservation !== undefined && !succeeded(packageObservation.process)) {
     problems.push(operationProblem("packages-list", packageObservation, commandId));
     return undefined;
   }
@@ -656,7 +663,7 @@ export async function runApp(
       dependencies,
       signal,
     );
-    if (!succeeded(packageObservation.process)) {
+    if (packageObservation !== undefined && !succeeded(packageObservation.process)) {
       problems.push(operationProblem("packages-list", packageObservation, current.commandId));
       return finish<AppData>(current, null, problems);
     }
