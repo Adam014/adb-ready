@@ -206,6 +206,14 @@ describe("loadConfig", () => {
         reversePorts: [8081, { device: 8000, host: 8001 }],
         logs: true,
         cleanupPorts: true,
+        watch: true,
+        recovery: {
+          maxAttempts: 4,
+          initialDelayMs: 250,
+          maxDelayMs: 2000,
+          totalTimeoutMs: 15000,
+        },
+        session: { persist: true, maxSessions: 20, maxAgeDays: 7, maxBytes: 10000000 },
         journal: {
           maxEntries: 500,
           maxBytes: 100000,
@@ -252,6 +260,15 @@ describe("loadConfig", () => {
           devReversePorts: [{ device: 3000 }, { device: 8081 }],
           devLogs: false,
           devCleanupPorts: false,
+          devWatch: true,
+          recoveryMaxAttempts: 4,
+          recoveryInitialDelayMs: 250,
+          recoveryMaxDelayMs: 2000,
+          recoveryTotalTimeoutMs: 15000,
+          sessionPersist: true,
+          sessionMaxSessions: 20,
+          sessionMaxAgeDays: 7,
+          sessionMaxBytes: 10000000,
           journalMaxEntries: 500,
           journalMaxBytes: 100000,
           journalSources: ["child.stdout", "logcat"],
@@ -279,6 +296,40 @@ describe("loadConfig", () => {
         },
       },
     });
+  });
+
+  test("rejects unsafe recovery and retention configuration", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "invalid-recovery.json");
+    await writeJson(projectFile, {
+      version: 1,
+      dev: {
+        watch: "yes",
+        recovery: { initialDelayMs: 5000, maxDelayMs: 1000, maxAttempts: 0, typo: true },
+        session: { persist: "yes", maxSessions: 0, typo: true },
+      },
+    });
+
+    const loaded = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+    expect(loaded.ok).toBeFalse();
+    if (!loaded.ok) {
+      expect(loaded.errors.map(({ path: errorPath }) => errorPath)).toEqual([
+        "dev.watch",
+        "dev.recovery.typo",
+        "dev.recovery.maxAttempts",
+        "dev.session.typo",
+        "dev.session.persist",
+        "dev.session.maxSessions",
+        "dev.recovery.maxDelayMs",
+      ]);
+    }
   });
 
   test("returns all invalid dev fields", async () => {

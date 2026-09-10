@@ -944,6 +944,21 @@ async function runCliInternal(
           ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
           ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
           ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
+          ...(values.devWatch === undefined ? {} : { watch: values.devWatch }),
+          recovery: {
+            ...(values.recoveryMaxAttempts === undefined
+              ? {}
+              : { maxAttempts: values.recoveryMaxAttempts }),
+            ...(values.recoveryInitialDelayMs === undefined
+              ? {}
+              : { initialDelayMs: values.recoveryInitialDelayMs }),
+            ...(values.recoveryMaxDelayMs === undefined
+              ? {}
+              : { maxDelayMs: values.recoveryMaxDelayMs }),
+            ...(values.recoveryTotalTimeoutMs === undefined
+              ? {}
+              : { totalTimeoutMs: values.recoveryTotalTimeoutMs }),
+          },
           ...(values.devHooks === undefined ? {} : { hooks: values.devHooks }),
           journal: {
             ...(values.journalMaxEntries === undefined
@@ -966,7 +981,21 @@ async function runCliInternal(
                 }),
           },
           childStdin: errorCapabilities.interactive ? "inherit" : "ignore",
-          sessionStore: dependencies.sessionStore ?? { env: io.env },
+          sessionStore:
+            values.sessionPersist === false || dependencies.sessionStore === false
+              ? false
+              : (dependencies.sessionStore ?? {
+                  env: io.env,
+                  ...(values.sessionMaxSessions === undefined
+                    ? {}
+                    : { maxSessions: values.sessionMaxSessions }),
+                  ...(values.sessionMaxAgeDays === undefined
+                    ? {}
+                    : { maxAgeDays: values.sessionMaxAgeDays }),
+                  ...(values.sessionMaxBytes === undefined
+                    ? {}
+                    : { maxBytes: values.sessionMaxBytes }),
+                }),
           ...(options.format === "human" && !options.quiet
             ? {
                 onChildLine: (stream: "stderr" | "stdout", line: string) => {

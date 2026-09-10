@@ -51,6 +51,15 @@ export interface ConfigValues {
   devReversePorts?: ConfigDevPort[];
   devLogs?: boolean;
   devCleanupPorts?: boolean;
+  devWatch?: boolean;
+  recoveryMaxAttempts?: number;
+  recoveryInitialDelayMs?: number;
+  recoveryMaxDelayMs?: number;
+  recoveryTotalTimeoutMs?: number;
+  sessionPersist?: boolean;
+  sessionMaxSessions?: number;
+  sessionMaxAgeDays?: number;
+  sessionMaxBytes?: number;
   journalMaxEntries?: number;
   journalMaxBytes?: number;
   journalSources?: string[];

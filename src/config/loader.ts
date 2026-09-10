@@ -59,6 +59,9 @@ const DEV_KEYS = new Set([
   "reversePorts",
   "logs",
   "cleanupPorts",
+  "watch",
+  "recovery",
+  "session",
   "journal",
   "hooks",
 ]);
@@ -80,6 +83,8 @@ const HOOK_EVENTS = new Set([
   "finally",
 ]);
 const HOOK_KEYS = new Set(["run", "timeoutMs", "failure", "cwd", "envAllowlist"]);
+const RECOVERY_KEYS = new Set(["maxAttempts", "initialDelayMs", "maxDelayMs", "totalTimeoutMs"]);
+const SESSION_KEYS = new Set(["persist", "maxSessions", "maxAgeDays", "maxBytes"]);
 const PROFILE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -426,6 +431,7 @@ function validateDocument(
       for (const [key, configKey] of [
         ["logs", "devLogs"],
         ["cleanupPorts", "devCleanupPorts"],
+        ["watch", "devWatch"],
       ] as const) {
         const candidate = document.dev[key];
         if (candidate !== undefined) {
@@ -433,6 +439,89 @@ function validateDocument(
             errors.push(error(source, location, `dev.${key}`, `dev.${key} must be a boolean.`));
           } else {
             values[configKey] = candidate;
+          }
+        }
+      }
+      if (document.dev.recovery !== undefined) {
+        if (!isObject(document.dev.recovery)) {
+          errors.push(error(source, location, "dev.recovery", "dev.recovery must be an object."));
+        } else {
+          validateUnknownKeys(
+            document.dev.recovery,
+            RECOVERY_KEYS,
+            "dev.recovery.",
+            source,
+            location,
+            errors,
+          );
+          for (const [key, configKey] of [
+            ["maxAttempts", "recoveryMaxAttempts"],
+            ["initialDelayMs", "recoveryInitialDelayMs"],
+            ["maxDelayMs", "recoveryMaxDelayMs"],
+            ["totalTimeoutMs", "recoveryTotalTimeoutMs"],
+          ] as const) {
+            const candidate = document.dev.recovery[key];
+            if (candidate === undefined) continue;
+            if (!Number.isSafeInteger(candidate) || (candidate as number) < 1) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `dev.recovery.${key}`,
+                  `dev.recovery.${key} must be a positive integer.`,
+                ),
+              );
+            } else {
+              values[configKey] = candidate as number;
+            }
+          }
+        }
+      }
+      if (document.dev.session !== undefined) {
+        if (!isObject(document.dev.session)) {
+          errors.push(error(source, location, "dev.session", "dev.session must be an object."));
+        } else {
+          validateUnknownKeys(
+            document.dev.session,
+            SESSION_KEYS,
+            "dev.session.",
+            source,
+            location,
+            errors,
+          );
+          if (document.dev.session.persist !== undefined) {
+            if (typeof document.dev.session.persist !== "boolean") {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  "dev.session.persist",
+                  "dev.session.persist must be a boolean.",
+                ),
+              );
+            } else {
+              values.sessionPersist = document.dev.session.persist;
+            }
+          }
+          for (const [key, configKey] of [
+            ["maxSessions", "sessionMaxSessions"],
+            ["maxAgeDays", "sessionMaxAgeDays"],
+            ["maxBytes", "sessionMaxBytes"],
+          ] as const) {
+            const candidate = document.dev.session[key];
+            if (candidate === undefined) continue;
+            if (!Number.isSafeInteger(candidate) || (candidate as number) < 1) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `dev.session.${key}`,
+                  `dev.session.${key} must be a positive integer.`,
+                ),
+              );
+            } else {
+              values[configKey] = candidate as number;
+            }
           }
         }
       }
@@ -981,6 +1070,13 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
     ["ADB_READY_TIMEOUT_MS", "timeoutMs", 2_147_483_647],
     ["ADB_READY_JOURNAL_MAX_ENTRIES", "journalMaxEntries", 2_147_483_647],
     ["ADB_READY_JOURNAL_MAX_BYTES", "journalMaxBytes", 2_147_483_647],
+    ["ADB_READY_RECOVERY_MAX_ATTEMPTS", "recoveryMaxAttempts", 2_147_483_647],
+    ["ADB_READY_RECOVERY_INITIAL_DELAY_MS", "recoveryInitialDelayMs", 2_147_483_647],
+    ["ADB_READY_RECOVERY_MAX_DELAY_MS", "recoveryMaxDelayMs", 2_147_483_647],
+    ["ADB_READY_RECOVERY_TOTAL_TIMEOUT_MS", "recoveryTotalTimeoutMs", 2_147_483_647],
+    ["ADB_READY_SESSION_MAX_SESSIONS", "sessionMaxSessions", 2_147_483_647],
+    ["ADB_READY_SESSION_MAX_AGE_DAYS", "sessionMaxAgeDays", 2_147_483_647],
+    ["ADB_READY_SESSION_MAX_BYTES", "sessionMaxBytes", 2_147_483_647],
   ] as const;
   for (const [name, key, maximum] of integers) {
     const candidate = env[name];
@@ -1003,6 +1099,8 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
     ["ADB_READY_INTERACTIVE", "interactive"],
     ["ADB_READY_DEV_LOGS", "devLogs"],
     ["ADB_READY_CLEANUP_PORTS", "devCleanupPorts"],
+    ["ADB_READY_DEV_WATCH", "devWatch"],
+    ["ADB_READY_SESSION_PERSIST", "sessionPersist"],
   ] as const;
   for (const [name, key] of booleans) {
     const candidate = env[name];
@@ -1186,6 +1284,22 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Confi
   errors.push(...environment.errors);
   applyValues(values, provenance, environment.values, "environment");
   applyValues(values, provenance, options.cli ?? {}, "cli");
+
+  if (
+    values.recoveryInitialDelayMs !== undefined &&
+    values.recoveryMaxDelayMs !== undefined &&
+    values.recoveryMaxDelayMs < values.recoveryInitialDelayMs
+  ) {
+    const source = provenance.recoveryMaxDelayMs?.source ?? "project";
+    errors.push(
+      error(
+        source === "default" ? "project" : source,
+        provenance.recoveryMaxDelayMs?.location,
+        "dev.recovery.maxDelayMs",
+        "Resolved recovery maxDelayMs must be at least initialDelayMs.",
+      ),
+    );
+  }
 
   if (errors.length > 0) {
     return { ok: false, errors };

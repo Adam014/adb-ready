@@ -183,6 +183,27 @@
         },
         "logs": { "type": "boolean" },
         "cleanupPorts": { "type": "boolean" },
+        "watch": { "type": "boolean" },
+        "recovery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxAttempts": { "type": "integer", "minimum": 1 },
+            "initialDelayMs": { "type": "integer", "minimum": 1 },
+            "maxDelayMs": { "type": "integer", "minimum": 1 },
+            "totalTimeoutMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "persist": { "type": "boolean" },
+            "maxSessions": { "type": "integer", "minimum": 1 },
+            "maxAgeDays": { "type": "integer", "minimum": 1 },
+            "maxBytes": { "type": "integer", "minimum": 1 }
+          }
+        },
         "journal": {
           "type": "object",
           "additionalProperties": false,
