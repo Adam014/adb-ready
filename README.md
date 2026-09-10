@@ -429,6 +429,11 @@ diagnostics, and automation. App install/lifecycle, file transfer, screenshots,
 screen recording, interactive shell, and raw-ADB escape-hatch commands are not
 part of the current public command surface.
 
-The repository remains private during release-candidate validation. The preview
-is currently distributed as `UNLICENSED` software; an open-source license will
-be selected before a public stable release.
+The repository remains private during release-candidate validation.
+
+## Project
+
+- [Changelog](./CHANGELOG.md)
+- [Contributing guide](./CONTRIBUTING.md)
+- [Security policy](./SECURITY.md)
+- [MIT License](./LICENSE)

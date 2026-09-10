@@ -9,8 +9,10 @@
     "adbr": "dist/cli.js"
   },
   "files": [
+    "CHANGELOG.md",
     "COMPATIBILITY.md",
     "dist",
+    "LICENSE",
     "schema",
     "README.md"
   ],
@@ -55,7 +57,7 @@
     "react-native",
     "wireless-debugging"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "publishConfig": {
     "access": "public",
     "provenance": true
