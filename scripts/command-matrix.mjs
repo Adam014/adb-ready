@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -54,7 +55,7 @@ function command(alias, args, env) {
 }
 
 /**
- * @param {ReturnType<typeof run>} result
+ * @param {{ status: number | null, stdout: string, stderr: string }} result
  * @param {number} expected
  * @param {string} label
  */
@@ -153,6 +154,40 @@ try {
     )}\n`,
   );
   let assertions = 0;
+
+  const installedCli = path.join(consumer, "node_modules", "adb-ready", "dist", "cli.js");
+  const pairingCode = "739201";
+  const securePair = spawnSync(
+    process.execPath,
+    [
+      installedCli,
+      "pair",
+      "192.0.2.10:41234",
+      "--pairing-code-stdin",
+      "--json",
+      "--non-interactive",
+    ],
+    {
+      cwd: consumer,
+      env,
+      input: `${pairingCode}\n`,
+      encoding: "utf8",
+      shell: false,
+      windowsHide: true,
+    },
+  );
+  if (securePair.error !== undefined) {
+    throw new Error(`secure packaged pair could not start: ${securePair.error.message}`);
+  }
+  expectStatus(securePair, 0, "secure packaged pair");
+  const securePairPayload = parseJson(securePair.stdout, "secure packaged pair");
+  if (securePairPayload.data?.paired !== true || securePairPayload.data?.endpoint === undefined) {
+    throw new Error("secure packaged pair did not return a successful paired result");
+  }
+  if (`${securePair.stdout}\n${securePair.stderr}`.includes(pairingCode)) {
+    throw new Error("secure packaged pair leaked its pairing code");
+  }
+  assertions += 1;
 
   for (const alias of ["adb-ready", "adbr"]) {
     for (const [label, args, expected] of [
