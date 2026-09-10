@@ -41,6 +41,8 @@ for (const required of [
   "LICENSE",
   "README.md",
   "dist/cli.js",
+  "docs/getting-started.md",
+  "examples/expo/adb-ready.config.json",
   "package.json",
   "schema/config-v1.schema.json",
 ]) {

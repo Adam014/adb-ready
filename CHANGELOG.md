@@ -9,6 +9,8 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-10
+
 ### Added
 
 - Interactive and non-interactive Android workflow entrypoints.
@@ -23,4 +25,5 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.0.1-alpha.0...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Adam014/adb-ready/compare/v0.0.1-alpha.0...v0.1.0

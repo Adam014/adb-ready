@@ -67,22 +67,44 @@ for (const name of [
 
 const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
 const changelog = await readFile(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+const markdownInventory = xSync("git", ["ls-files", "*.md"], {
+  nodeOptions: { cwd: root, shell: false, windowsHide: true },
+});
+const publicMarkdown =
+  markdownInventory.exitCode === 0
+    ? await Promise.all(
+        markdownInventory.stdout
+          .split(/\r?\n/u)
+          .filter(Boolean)
+          .map(async (file) => ({
+            file,
+            value: await readFile(new URL(`../${file}`, import.meta.url), "utf8"),
+          })),
+      )
+    : [{ file: "README.md", value: readme }];
+const stableVersion = /^\d+\.\d+\.\d+$/u.test(manifest.version);
+const releaseReady = publishMode || stableVersion;
 
-if (publishMode) {
+if (releaseReady) {
   requireCondition(manifest.private === false, "remove the private publish guard before release");
-  requireCondition(
-    /^\d+\.\d+\.\d+$/u.test(manifest.version),
-    "public release version cannot be a prerelease",
-  );
-  requireCondition(
-    expectedTag === `v${manifest.version}`,
-    "Git tag must exactly match package version",
-  );
+  requireCondition(stableVersion, "public release version cannot be a prerelease");
+  if (publishMode) {
+    requireCondition(
+      expectedTag === `v${manifest.version}`,
+      "Git tag must exactly match package version",
+    );
+  }
   requireCondition(
     changelog.includes(`## [${manifest.version}]`),
     `CHANGELOG.md needs a ${manifest.version} release section`,
   );
-  requireCondition(!readme.includes("@alpha"), "README.md still contains alpha install commands");
+  const alphaDocuments = publicMarkdown
+    .filter(({ value }) => value.includes("@alpha"))
+    .map(({ file }) => file);
+  requireCondition(
+    alphaDocuments.length === 0,
+    `public documentation still contains alpha install commands: ${alphaDocuments.join(", ")}`,
+  );
   requireCondition(
     !/private during release-candidate|published npm tag is an early preview/iu.test(readme),
     "README.md still describes a private preview",
@@ -110,6 +132,8 @@ if (packed.exitCode !== 0) {
       "LICENSE",
       "README.md",
       "dist/cli.js",
+      "docs/getting-started.md",
+      "examples/expo/adb-ready.config.json",
       "package.json",
       "schema/config-v1.schema.json",
     ]) {

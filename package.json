@@ -1,8 +1,8 @@
 {
   "name": "adb-ready",
-  "version": "0.0.1-alpha.1",
+  "version": "0.1.0",
   "description": "Make an Android target ready, then keep the development session working.",
-  "private": true,
+  "private": false,
   "type": "module",
   "bin": {
     "adb-ready": "dist/cli.js",
@@ -12,6 +12,8 @@
     "CHANGELOG.md",
     "COMPATIBILITY.md",
     "dist",
+    "docs",
+    "examples",
     "LICENSE",
     "schema",
     "README.md"
@@ -23,6 +25,7 @@
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "bun run scripts/build.mjs",
+    "docs:check": "bun run scripts/docs-check.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",

@@ -20,6 +20,7 @@ const dim = (value) => paint("2", value);
 const steps = [
   ["diff hygiene", "git", ["diff", "--check"]],
   ["private-context boundary", "bun", ["run", "scripts/privacy-check.mjs"]],
+  ["public documentation", "bun", ["run", "scripts/docs-check.mjs"]],
   ["TypeScript", "bun", ["run", "typecheck"]],
   ["Biome", "bun", ["run", "lint"]],
   ["unit and integration tests", "bun", ["test"]],

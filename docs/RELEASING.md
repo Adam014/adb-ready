@@ -26,8 +26,8 @@ workflow does not use a long-lived npm write token.
 3. Change `private` to `false` only in the release commit.
 4. Move the relevant entries from `Unreleased` into a dated
    `## [VERSION] - YYYY-MM-DD` section in `CHANGELOG.md` and update its links.
-5. Replace all `@alpha` installation examples and private-preview language in
-   `README.md`.
+5. Replace all prerelease installation examples and private-preview language in
+   public documentation.
 6. Run:
 
    ```bash

@@ -1,0 +1,10 @@
+{
+  "$schema": "../../schema/config-v1.schema.json",
+  "version": 1,
+  "dev": {
+    "preset": "expo",
+    "reversePorts": [8081, 8000],
+    "logs": true,
+    "watch": true
+  }
+}

@@ -2,9 +2,13 @@
 
 ## Supported versions
 
-ADB Ready has not published its first supported public release yet. Once
-`0.1.0` is available, security fixes will target the latest published minor
-release. Preview versions may change without compatibility guarantees.
+| Version | Supported |
+| --- | --- |
+| `0.1.x` | Yes |
+| `< 0.1.0` | No |
+
+Security fixes target the latest published minor release. Because ADB Ready is
+still below `1.0.0`, minor releases may include documented breaking changes.
 
 ## Report a vulnerability privately
 

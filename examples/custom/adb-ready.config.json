@@ -1,0 +1,21 @@
+{
+  "$schema": "../../schema/config-v1.schema.json",
+  "version": 1,
+  "dev": {
+    "preset": "custom",
+    "command": {
+      "executable": "node",
+      "args": ["scripts/mobile-dev.mjs"]
+    },
+    "reversePorts": [
+      8081,
+      {
+        "device": 8000,
+        "host": 3000
+      }
+    ],
+    "logs": true,
+    "cleanupPorts": true,
+    "watch": true
+  }
+}
