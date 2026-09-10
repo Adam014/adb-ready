@@ -10,6 +10,8 @@ export type CommandName =
   | "help"
   | "pair"
   | "ports"
+  | "problems"
+  | "sessions"
   | "version";
 export type OutputFormat = "human" | "json" | "ndjson" | "plain";
 
@@ -46,6 +48,8 @@ export interface CliOptions {
   logs?: boolean;
   cleanupPorts?: boolean;
   customCommand?: { executable: string; args: string[] };
+  sessionAction?: "events" | "list" | "show";
+  sessionId?: string;
 }
 
 export interface CliParseFailure {
@@ -70,6 +74,8 @@ const COMMANDS = new Set<CommandName>([
   "help",
   "pair",
   "ports",
+  "problems",
+  "sessions",
   "version",
 ]);
 const BOOLEAN_OPTIONS = new Set([
@@ -154,6 +160,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logs: boolean | undefined;
   let cleanupPorts: boolean | undefined;
   let customCommand: CliOptions["customCommand"];
+  let sessionAction: CliOptions["sessionAction"];
+  let sessionId: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -189,7 +197,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "dev" ||
           candidate === "devices" ||
           candidate === "doctor" ||
-          candidate === "pair"
+          candidate === "pair" ||
+          candidate === "problems" ||
+          candidate === "sessions"
         ) {
           helpTarget = candidate;
           continue;
@@ -197,6 +207,31 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       if ((command === "connect" || command === "pair") && endpoint === undefined) {
         endpoint = argument;
+        continue;
+      }
+      if (command === "sessions") {
+        if (
+          sessionAction === undefined &&
+          (argument === "events" || argument === "list" || argument === "show")
+        ) {
+          sessionAction = argument;
+          continue;
+        }
+        if (
+          (sessionAction === "events" || sessionAction === "show") &&
+          sessionId === undefined &&
+          /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(argument)
+        ) {
+          sessionId = argument;
+          continue;
+        }
+      }
+      if (
+        command === "problems" &&
+        sessionId === undefined &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(argument)
+      ) {
+        sessionId = argument;
         continue;
       }
       if (command === "ports") {
@@ -426,6 +461,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
+  if (command === "sessions") sessionAction ??= "list";
   const targetCommand = command === "dev" || command === "devices" || command === "ports";
   if (select && !targetCommand) {
     return failure(
@@ -542,6 +578,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logs === undefined ? {} : { logs }),
       ...(cleanupPorts === undefined ? {} : { cleanupPorts }),
       ...(customCommand === undefined ? {} : { customCommand }),
+      ...(sessionAction === undefined ? {} : { sessionAction }),
+      ...(sessionId === undefined ? {} : { sessionId }),
     },
   };
 }

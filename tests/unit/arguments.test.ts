@@ -195,6 +195,34 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses local session history and problem inspection", () => {
+    expect(parseArguments(["sessions"])).toMatchObject({
+      ok: true,
+      options: { command: "sessions", sessionAction: "list" },
+    });
+    expect(parseArguments(["sessions", "show", "session-42", "--json"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "sessions",
+        sessionAction: "show",
+        sessionId: "session-42",
+        format: "json",
+      },
+    });
+    expect(parseArguments(["sessions", "events"])).toMatchObject({
+      ok: true,
+      options: { command: "sessions", sessionAction: "events" },
+    });
+    expect(parseArguments(["problems", "session-42", "--format", "plain"])).toMatchObject({
+      ok: true,
+      options: { command: "problems", sessionId: "session-42", format: "plain" },
+    });
+    expect(parseArguments(["sessions", "unknown"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("rejects invalid or misplaced development options", () => {
     expect(parseArguments(["dev", "--preset", "flutter"])).toMatchObject({
       ok: false,

@@ -1,0 +1,196 @@
+import { randomUUID } from "node:crypto";
+import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
+import { ExitCode, SCHEMA_VERSION } from "../domain/contracts.js";
+import {
+  listSessions,
+  readSession,
+  readSessionEvents,
+  type SessionManifest,
+  type SessionStoreOptions,
+  type StoredProblem,
+} from "../state/session-store.js";
+
+export type SessionCommandAction = "events" | "list" | "show";
+
+export type SessionCommandData =
+  | { action: "list"; sessions: SessionManifest[] }
+  | { action: "show"; session: SessionManifest }
+  | { action: "events"; session: SessionManifest; events: AdbReadyEvent[] };
+
+export interface ProblemsCommandData {
+  sessionId: string;
+  status: SessionManifest["status"];
+  problems: StoredProblem[];
+}
+
+export interface SessionCommandDependencies {
+  clock?: () => Date;
+  idFactory?: () => string;
+}
+
+export interface SessionCommandExecution<T> {
+  result: ResultEnvelope<T>;
+  exitCode: number;
+}
+
+function storageProblem(code: string, summary: string, detail: string, commandId: string): Problem {
+  return {
+    code,
+    category: "state.session-history",
+    severity: "error",
+    summary,
+    detail,
+    retryable: true,
+    evidence: [],
+    actions: [],
+    correlation: { commandId },
+  };
+}
+
+function execution<T>(
+  command: string,
+  data: T | null,
+  problems: Problem[],
+  dependencies: SessionCommandDependencies,
+): SessionCommandExecution<T> {
+  const now = (dependencies.clock ?? (() => new Date()))();
+  const ok = problems.every(({ severity }) => severity !== "error");
+  return {
+    exitCode: ok ? ExitCode.Success : ExitCode.Environment,
+    result: {
+      schemaVersion: SCHEMA_VERSION,
+      command,
+      commandId: (dependencies.idFactory ?? randomUUID)(),
+      ok,
+      startedAt: now.toISOString(),
+      finishedAt: now.toISOString(),
+      durationMs: 0,
+      data,
+      problems,
+    },
+  };
+}
+
+async function resolveManifest(
+  sessionId: string | undefined,
+  options: SessionStoreOptions,
+): Promise<
+  | { ok: true; manifest: SessionManifest }
+  | { ok: false; code: string; summary: string; detail: string }
+> {
+  if (sessionId !== undefined) {
+    const stored = await readSession(sessionId, options);
+    return stored.ok
+      ? { ok: true, manifest: stored.value }
+      : {
+          ok: false,
+          code: stored.code,
+          summary: "The requested session is unavailable.",
+          detail: stored.message,
+        };
+  }
+  const listed = await listSessions(options);
+  if (!listed.ok) {
+    return {
+      ok: false,
+      code: listed.code,
+      summary: "Session history is unavailable.",
+      detail: listed.message,
+    };
+  }
+  const latest = listed.value[0];
+  return latest === undefined
+    ? {
+        ok: false,
+        code: "SESSION_NOT_FOUND",
+        summary: "No saved development session exists yet.",
+        detail: "Run adb-ready dev first, then inspect the latest session.",
+      }
+    : { ok: true, manifest: latest };
+}
+
+export async function runSessionCommand(
+  action: SessionCommandAction,
+  sessionId: string | undefined,
+  options: SessionStoreOptions = {},
+  dependencies: SessionCommandDependencies = {},
+): Promise<SessionCommandExecution<SessionCommandData>> {
+  const command = `sessions ${action}`;
+  if (action === "list") {
+    const listed = await listSessions(options);
+    return listed.ok
+      ? execution(command, { action, sessions: listed.value }, [], dependencies)
+      : execution<SessionCommandData>(
+          command,
+          null,
+          [
+            storageProblem(
+              listed.code,
+              "Session history is unavailable.",
+              listed.message,
+              "session-history",
+            ),
+          ],
+          dependencies,
+        );
+  }
+  const resolved = await resolveManifest(sessionId, options);
+  if (!resolved.ok) {
+    return execution<SessionCommandData>(
+      command,
+      null,
+      [storageProblem(resolved.code, resolved.summary, resolved.detail, "session-history")],
+      dependencies,
+    );
+  }
+  if (action === "show") {
+    return execution(command, { action, session: resolved.manifest }, [], dependencies);
+  }
+  const events = await readSessionEvents(resolved.manifest.sessionId, options);
+  return events.ok
+    ? execution(
+        command,
+        { action, session: resolved.manifest, events: events.value },
+        [],
+        dependencies,
+      )
+    : execution<SessionCommandData>(
+        command,
+        null,
+        [
+          storageProblem(
+            events.code,
+            "The requested session events are unavailable.",
+            events.message,
+            "session-history",
+          ),
+        ],
+        dependencies,
+      );
+}
+
+export async function runProblemsCommand(
+  sessionId: string | undefined,
+  options: SessionStoreOptions = {},
+  dependencies: SessionCommandDependencies = {},
+): Promise<SessionCommandExecution<ProblemsCommandData>> {
+  const resolved = await resolveManifest(sessionId, options);
+  if (!resolved.ok) {
+    return execution<ProblemsCommandData>(
+      "problems",
+      null,
+      [storageProblem(resolved.code, resolved.summary, resolved.detail, "session-problems")],
+      dependencies,
+    );
+  }
+  return execution(
+    "problems",
+    {
+      sessionId: resolved.manifest.sessionId,
+      status: resolved.manifest.status,
+      problems: resolved.manifest.problems,
+    },
+    [],
+    dependencies,
+  );
+}

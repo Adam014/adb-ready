@@ -148,6 +148,76 @@ describe("result renderer", () => {
     expect(records[1]).toMatchObject({ kind: "result", command: "devices", ok: true });
   });
 
+  test("renders saved session timelines and problem summaries for humans", () => {
+    const session = {
+      schemaVersion: SCHEMA_VERSION,
+      command: "sessions events",
+      commandId: "command-2",
+      ok: true,
+      startedAt: "2026-09-10T11:00:00.000Z",
+      finishedAt: "2026-09-10T11:00:00.000Z",
+      durationMs: 0,
+      data: {
+        action: "events",
+        session: {
+          schemaVersion: 1 as const,
+          sessionId: "session-1",
+          status: "failed" as const,
+          command: "dev",
+          startedAt: "2026-09-10T10:00:00.000Z",
+          updatedAt: "2026-09-10T10:01:00.000Z",
+          eventFile: "session-1.ndjson",
+          eventCount: 1,
+          eventBytes: 120,
+          problems: [],
+        },
+        events: [
+          {
+            schemaVersion: SCHEMA_VERSION,
+            sequence: 1,
+            timestamp: "2026-09-10T10:00:00.000Z",
+            type: "session.degraded",
+            source: "recovery",
+            severity: "warning" as const,
+            message: "A required port disappeared.",
+            correlation: { commandId: "command-1", sessionId: "session-1" },
+          },
+        ],
+      },
+      problems: [],
+    };
+    const human = new MemorySink();
+    renderResult(session, { format: "human", capabilities, sink: human });
+    expect(human.value).toContain("Session  session-1");
+    expect(human.value).toContain("Timeline (1)");
+    expect(human.value).toContain("session.degraded · A required port disappeared.");
+
+    const problems = new MemorySink();
+    renderResult(
+      {
+        ...session,
+        command: "problems",
+        data: {
+          sessionId: "session-1",
+          status: "failed",
+          problems: [
+            {
+              code: "SESSION_RECOVERY_FAILED",
+              category: "session.recovery",
+              severity: "error",
+              summary: "Recovery stopped safely.",
+              detail: "The retry budget was exhausted.",
+              retryable: true,
+            },
+          ],
+        },
+      },
+      { format: "human", capabilities, sink: problems },
+    );
+    expect(problems.value).toContain("Problems (1)");
+    expect(problems.value).toContain("SESSION_RECOVERY_FAILED · Recovery stopped safely.");
+  });
+
   test("sanitizes terminal control characters from human-facing device fields", () => {
     const sink = new MemorySink();
     const unsafe = structuredClone(result);

@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { type CliDependencies, type CliInput, type CliIo, runCli } from "../../src/cli/main.js";
+import { EventBus } from "../../src/core/event-bus.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
+import { SessionRecorder } from "../../src/state/session-store.js";
 import type { TextSink } from "../../src/ui/spinner.js";
 
 class MemoryOutput implements TextSink {
@@ -169,6 +174,57 @@ describe("runCli", () => {
     expect(exitCode).toBe(ExitCode.Success);
     expect(streams.output.value).toContain("adb-ready [command]");
     expect(streams.error.value).toBe("");
+  });
+
+  test("reads local session history without loading project configuration or ADB", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-session-"));
+    try {
+      const bus = new EventBus(() => new Date("2026-09-10T10:00:00.000Z"));
+      const recorder = await SessionRecorder.create(
+        bus,
+        {
+          sessionId: "session-cli-1",
+          command: "dev",
+          startedAt: "2026-09-10T10:00:00.000Z",
+        },
+        { directory, maxAgeDays: 3650 },
+      );
+      bus.emit({
+        type: "session.started",
+        source: "session",
+        severity: "info",
+        message: "Development session started",
+        correlation: { commandId: "command-1", sessionId: "session-cli-1" },
+      });
+      await recorder.finish({
+        status: "completed",
+        finishedAt: "2026-09-10T10:01:00.000Z",
+      });
+      const streams = io();
+      const fixture: CliDependencies = {
+        sessionStore: { directory },
+        loadConfig: async () => {
+          throw new Error("session history must not load project configuration");
+        },
+        locateAdb: async () => {
+          throw new Error("session history must not locate ADB");
+        },
+        idFactory: () => "result-1",
+        clock: () => new Date("2026-09-10T11:00:00.000Z"),
+      };
+
+      const exitCode = await runCli(["sessions", "events", "--json"], streams, fixture);
+      const payload = JSON.parse(streams.output.value);
+      expect(exitCode).toBe(ExitCode.Success);
+      expect(payload.data).toMatchObject({
+        action: "events",
+        session: { sessionId: "session-cli-1" },
+        events: [{ type: "session.started" }],
+      });
+      expect(streams.error.value).toBe("");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("keeps JSON stdout to one complete result and stderr empty", async () => {

@@ -8,6 +8,7 @@ import type {
   PortsData,
   TargetDiscoveryData,
 } from "../app/commands.js";
+import type { ProblemsCommandData, SessionCommandData } from "../app/session-commands.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
@@ -80,6 +81,22 @@ function isDevData(value: unknown): value is DevData {
     isRecord(value.command) &&
     isRecord(value.ports) &&
     isRecord(value.journal)
+  );
+}
+
+function isSessionCommandData(value: unknown): value is SessionCommandData {
+  return (
+    isRecord(value) &&
+    (value.action === "list" || value.action === "show" || value.action === "events")
+  );
+}
+
+function isProblemsCommandData(value: unknown): value is ProblemsCommandData {
+  return (
+    isRecord(value) &&
+    typeof value.sessionId === "string" &&
+    typeof value.status === "string" &&
+    Array.isArray(value.problems)
   );
 }
 
@@ -191,6 +208,61 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     lines.push(
       `${style.success(glyphs.success, capabilities)} Journal  ${String(data.journal.events.length)} events${data.journal.dropped === 0 ? "" : ` · ${String(data.journal.dropped)} dropped`}`,
     );
+  }
+
+  if (result.command.startsWith("sessions ") && isSessionCommandData(result.data)) {
+    const data = result.data;
+    if (data.action === "list") {
+      lines.push(style.strong(`Sessions (${String(data.sessions.length)})`, capabilities));
+      if (data.sessions.length === 0) {
+        lines.push(`${style.dim(glyphs.end, capabilities)} No saved sessions`);
+      }
+      data.sessions.forEach((session, index) => {
+        const branch = index === data.sessions.length - 1 ? glyphs.end : glyphs.branch;
+        const context = [session.projectName, session.preset].filter(Boolean).join(" · ");
+        lines.push(
+          `${style.dim(branch, capabilities)} ${clean(session.sessionId)} · ${clean(session.status)} · ${clean(session.updatedAt)}${context === "" ? "" : ` · ${clean(context)}`}`,
+        );
+      });
+    } else {
+      const session = data.session;
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Session  ${clean(session.sessionId)}`,
+        `${style.success(glyphs.success, capabilities)} Status   ${clean(session.status)}`,
+        `${style.success(glyphs.success, capabilities)} Started  ${clean(session.startedAt)}`,
+        `${style.success(glyphs.success, capabilities)} Events   ${String(session.eventCount)} · ${String(session.eventBytes)} bytes`,
+      );
+      if (data.action === "events") {
+        lines.push("", style.strong(`Timeline (${String(data.events.length)})`, capabilities));
+        data.events.forEach((event, index) => {
+          const branch = index === data.events.length - 1 ? glyphs.end : glyphs.branch;
+          lines.push(
+            `${style.dim(branch, capabilities)} ${clean(event.timestamp)} · ${clean(event.severity)} · ${clean(event.type)} · ${clean(event.message)}`,
+          );
+        });
+      }
+    }
+  }
+
+  if (result.command === "problems" && isProblemsCommandData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Session  ${clean(data.sessionId)}`,
+      `${style.success(glyphs.success, capabilities)} Status   ${clean(data.status)}`,
+      "",
+      style.strong(`Problems (${String(data.problems.length)})`, capabilities),
+    );
+    if (data.problems.length === 0) {
+      lines.push(`${style.dim(glyphs.end, capabilities)} No recorded problems`);
+    } else {
+      data.problems.forEach((problem, index) => {
+        const branch = index === data.problems.length - 1 ? glyphs.end : glyphs.branch;
+        lines.push(
+          `${style.dim(branch, capabilities)} ${style.failure(clean(problem.code), capabilities)} · ${clean(problem.summary)}`,
+          `  ${clean(problem.detail)}`,
+        );
+      });
+    }
   }
 
   if (result.command === "pair" && isPairData(result.data)) {
@@ -306,6 +378,36 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     if (result.data.child !== undefined) {
       sink.write(`child_exit_code=${String(result.data.child.exitCode)}\n`);
     }
+  }
+  if (isSessionCommandData(result.data)) {
+    sink.write(`action=${clean(result.data.action)}\n`);
+    if (result.data.action === "list") {
+      sink.write(`session_count=${String(result.data.sessions.length)}\n`);
+      result.data.sessions.forEach((session, index) => {
+        sink.write(
+          `session_${String(index)}=${clean(session.sessionId)}:${clean(session.status)}:${clean(session.updatedAt)}\n`,
+        );
+      });
+    } else {
+      sink.write(`session_id=${clean(result.data.session.sessionId)}\n`);
+      sink.write(`status=${clean(result.data.session.status)}\n`);
+      sink.write(`event_count=${String(result.data.session.eventCount)}\n`);
+      if (result.data.action === "events") {
+        result.data.events.forEach((event, index) => {
+          sink.write(
+            `event_${String(index)}=${clean(event.timestamp)}:${clean(event.severity)}:${clean(event.type)}:${clean(event.message)}\n`,
+          );
+        });
+      }
+    }
+  }
+  if (isProblemsCommandData(result.data)) {
+    sink.write(`session_id=${clean(result.data.sessionId)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`problem_count=${String(result.data.problems.length)}\n`);
+    result.data.problems.forEach((problem) => {
+      sink.write(`problem=${clean(problem.code)}:${clean(problem.summary)}\n`);
+    });
   }
   if (isPairData(result.data)) {
     sink.write(`endpoint=${clean(result.data.endpoint)}\n`);

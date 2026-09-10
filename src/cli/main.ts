@@ -16,6 +16,7 @@ import {
   runPorts,
   runWirelessDiscovery,
 } from "../app/commands.js";
+import { runProblemsCommand, runSessionCommand } from "../app/session-commands.js";
 import { loadConfig } from "../config/loader.js";
 import type { ConfigError, ConfigValues } from "../config/types.js";
 import { EventBus } from "../core/event-bus.js";
@@ -62,6 +63,8 @@ Commands:
   devices                List visible Android targets
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
+  sessions [ACTION]      Inspect saved development sessions
+  problems [SESSION]     Show problems from a saved session
   help [COMMAND]         Show help
   version                Show version
 
@@ -139,6 +142,19 @@ For automation, pipe the code and add --pairing-code-stdin.
 Manages TCP mappings for one deterministic Android target. A missing second
 port means the same port on both sides. Add is idempotent and never overwrites
 an existing mapping. Use --dry-run to inspect the exact ADB plan.
+`,
+  problems: `Usage: adb-ready problems [SESSION] [options]
+
+Shows structured problems from a saved session. The latest session is used
+when no ID is provided.
+`,
+  sessions: `Usage:
+  adb-ready sessions list [options]
+  adb-ready sessions show [SESSION] [options]
+  adb-ready sessions events [SESSION] [options]
+
+Inspects private, redacted development history. Show and events use the latest
+session when no ID is provided.
 `,
 } as const;
 
@@ -507,6 +523,28 @@ async function runCliInternal(
   if (options.command === "version") {
     io.output.write(`${VERSION}\n`);
     return ExitCode.Success;
+  }
+  if (options.command === "sessions" || options.command === "problems") {
+    const storeOptions =
+      dependencies.sessionStore === false
+        ? { env: io.env }
+        : (dependencies.sessionStore ?? { env: io.env });
+    const execution =
+      options.command === "sessions"
+        ? await runSessionCommand(
+            options.sessionAction ?? "list",
+            options.sessionId,
+            storeOptions,
+            dependencies,
+          )
+        : await runProblemsCommand(options.sessionId, storeOptions, dependencies);
+    renderResult(execution.result, {
+      format: options.format,
+      capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return execution.exitCode;
   }
 
   const loaded = await (dependencies.loadConfig ?? loadConfig)({
