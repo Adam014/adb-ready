@@ -16,7 +16,7 @@ adb-ready logs --format ndjson --non-interactive
 | `human` | TTY-aware panels, progress, and actionable diagnostics |
 | `plain` | deterministic line-oriented human text without terminal control |
 | `json` | one complete versioned result envelope |
-| `ndjson` | one versioned event per line, followed by the command result where applicable |
+| `ndjson` | one versioned event per line, followed by the command result where applicable; saved timelines end with an event-count summary instead of duplicating the full event array |
 | `markdown` | bounded diagnostic context; only valid for `context` |
 
 Machine data is written to `stdout`. Human progress and diagnostics are written

@@ -137,6 +137,10 @@ describe("runDev", () => {
       "stdout:password=[REDACTED]",
       "stderr:stderr is not failure",
     ]);
+    const logcatRequest = requests.find(({ args }) => args?.includes("logcat"));
+    const logStart = logcatRequest?.args?.indexOf("-T") ?? -1;
+    expect(logStart).toBeGreaterThan(-1);
+    expect(logcatRequest?.args?.[logStart + 1]).toBe("1");
     const serializedJournal = JSON.stringify(execution.result.data?.journal.events);
     expect(serializedJournal).not.toContain("hunter2");
     expect(serializedJournal).not.toContain("secret-value");
@@ -443,7 +447,17 @@ describe("runDev", () => {
 
     expect(execution.exitCode).toBe(ExitCode.Interrupted);
     expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.OperationInterrupted);
+    expect(execution.result.data?.status).toBe("interrupted");
     expect(execution.result.data?.ports.cleaned).toBe(true);
+    expect(
+      execution.result.data?.journal.events
+        .filter(({ type }) => type === "session.state.changed")
+        .map(({ data }) => data?.to),
+    ).not.toContain("failed");
+    expect(execution.result.data?.journal.events.at(-1)).toMatchObject({
+      type: "command.interrupted",
+      severity: "warning",
+    });
   });
 
   test("restores a lost reverse mapping while the development child stays alive", async () => {

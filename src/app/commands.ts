@@ -56,7 +56,12 @@ import { type SessionState, SessionStateMachine } from "../session/state-machine
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { type SessionHealth, type SessionWatchSummary, watchSession } from "../session/watcher.js";
 import { SessionRecorder, type SessionStoreOptions } from "../state/session-store.js";
-import { type AndroidTarget, buildTargetInventory, isStableAdbSerial } from "../target/model.js";
+import {
+  type AndroidTarget,
+  buildTargetInventory,
+  correlateMdnsTransportIdentities,
+  isStableAdbSerial,
+} from "../target/model.js";
 import { type SelectedTarget, selectTarget } from "../target/selection.js";
 
 export interface CommandConfig {
@@ -275,6 +280,7 @@ function finish<T>(
   const finished = context.clock();
   const exitCode = exitCodeForProblems(problems);
   const ok = exitCode === ExitCode.Success;
+  const interrupted = exitCode === ExitCode.Interrupted;
   const result: ResultEnvelope<T> = {
     schemaVersion: SCHEMA_VERSION,
     command: context.command,
@@ -288,10 +294,14 @@ function finish<T>(
   };
 
   context.bus.emit({
-    type: ok ? "command.completed" : "command.failed",
+    type: ok ? "command.completed" : interrupted ? "command.interrupted" : "command.failed",
     source: `command.${context.command}`,
-    severity: ok ? "info" : "error",
-    message: ok ? `${context.command} completed` : `${context.command} failed`,
+    severity: ok ? "info" : interrupted ? "warning" : "error",
+    message: ok
+      ? `${context.command} completed`
+      : interrupted
+        ? `${context.command} interrupted`
+        : `${context.command} failed`,
     correlation: { commandId: context.commandId },
     data: { exitCode, problemCount: problems.length },
   });
@@ -559,14 +569,15 @@ async function inspectTargets(
     }
   });
   const services = mdnsAvailable ? mdns.value : [];
+  const observations = devices.map((device) => {
+    const hardwareSerial = identityBySerial.get(device.serial);
+    return {
+      device,
+      ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
+    };
+  });
   const inventory = buildTargetInventory(
-    devices.map((device) => {
-      const hardwareSerial = identityBySerial.get(device.serial);
-      return {
-        device,
-        ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
-      };
-    }),
+    correlateMdnsTransportIdentities(observations, services),
     services,
   );
 
@@ -1808,7 +1819,7 @@ export async function runLogs(
       ...(options.tail === undefined && options.since === undefined
         ? options.dump
           ? ["-d"]
-          : []
+          : ["-T", "1"]
         : [options.dump ? "-t" : "-T", String(options.tail ?? options.since)]),
       ...(resolvedUid === undefined ? [] : [`--uid=${String(resolvedUid)}`]),
       ...(resolvedPid === undefined ? [] : [`--pid=${String(resolvedPid)}`]),
@@ -1901,7 +1912,7 @@ export interface DevOptions {
 
 export interface DevData {
   sessionId: string;
-  status: "completed" | "failed" | "planned";
+  status: "completed" | "failed" | "interrupted" | "planned";
   adbPath: string;
   selected: SelectedTarget;
   project: {
@@ -2100,10 +2111,16 @@ export async function runDev(
   const complete = async (
     data: Omit<DevData, "journal"> | null,
   ): Promise<CommandExecution<DevData>> => {
-    if (problems.some(({ severity }) => severity === "error")) {
+    const interrupted = problems.some(({ code }) => code === ProblemCode.OperationInterrupted);
+    const failed = problems.some(
+      ({ code, severity }) => severity === "error" && code !== ProblemCode.OperationInterrupted,
+    );
+    if (failed) {
       transition(
         "failed",
-        problems.find(({ severity }) => severity === "error")?.summary ?? "failed",
+        problems.find(
+          ({ code, severity }) => severity === "error" && code !== ProblemCode.OperationInterrupted,
+        )?.summary ?? "failed",
       );
     }
     transition("stopping", "finalizing owned session resources");
@@ -2111,8 +2128,10 @@ export async function runDev(
     bus.emit({
       type: "session.ended",
       source: "session",
-      severity: problems.some(({ severity }) => severity === "error") ? "error" : "info",
-      message: "Development session ended",
+      severity: failed ? "error" : interrupted ? "warning" : "info",
+      message: interrupted
+        ? "Development session ended safely after interruption"
+        : "Development session ended",
       correlation: { commandId: context.commandId, sessionId },
     });
     const execution = finish<DevData>(context, data as DevData | null, problems);
@@ -2662,6 +2681,8 @@ export async function runDev(
         "logcat",
         "-v",
         "threadtime",
+        "-T",
+        "1",
         "ReactNativeJS:V",
         "ReactNative:V",
         "AndroidRuntime:E",
@@ -3139,7 +3160,13 @@ export async function runDev(
   await runHookPhase("finally", {}, false);
   const execution = await complete({
     ...baseData(),
-    status: problems.some(({ severity }) => severity === "error") ? "failed" : "completed",
+    status: problems.some(
+      ({ code, severity }) => severity === "error" && code !== ProblemCode.OperationInterrupted,
+    )
+      ? "failed"
+      : problems.some(({ code }) => code === ProblemCode.OperationInterrupted)
+        ? "interrupted"
+        : "completed",
     ports: {
       requested: normalizedPorts.mappings,
       created,

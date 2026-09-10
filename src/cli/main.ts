@@ -50,6 +50,7 @@ import { ProgressRenderer } from "../ui/progress-renderer.js";
 import { NdjsonEventRenderer, renderResult } from "../ui/result-renderer.js";
 import { type SelectInput, selectOne } from "../ui/select.js";
 import type { TextSink } from "../ui/spinner.js";
+import { renderChildStreamLine, renderLogStreamLine } from "../ui/stream-renderer.js";
 import { resolveTerminalCapabilities, type TerminalCapabilities } from "../ui/terminal.js";
 import { type CliOptions, type OutputFormat, parseArguments } from "./arguments.js";
 
@@ -162,7 +163,8 @@ Lists every target visible to ADB. Add --select to open the keyboard picker.
 `,
   logs: `Usage: adb-ready logs [options]
 
-Streams parsed, redacted logcat records from one deterministic target.
+Streams parsed, redacted logcat records from one deterministic target. Live
+streams follow from now by default instead of replaying the device buffer.
 
 Log options:
   --package NAME         Resolve and filter the currently running app process
@@ -995,7 +997,10 @@ async function runCliInternal(
           ...(options.logDump === undefined ? {} : { dump: options.logDump }),
           ...(options.logMaxRecords === undefined ? {} : { maxRecords: options.logMaxRecords }),
           ...(options.format === "human" && !options.quiet
-            ? { onLine: (line: string) => io.error.write(`${line}\n`) }
+            ? {
+                onLine: (line: string) =>
+                  io.error.write(`${renderLogStreamLine(line, errorCapabilities)}\n`),
+              }
             : {}),
         },
         config,
@@ -1067,7 +1072,7 @@ async function runCliInternal(
           ...(options.format === "human" && !options.quiet
             ? {
                 onChildLine: (stream: "stderr" | "stdout", line: string) => {
-                  io.error.write(`${stream === "stderr" ? "│" : " "} ${line}\n`);
+                  io.error.write(`${renderChildStreamLine(stream, line, errorCapabilities)}\n`);
                 },
               }
             : {}),

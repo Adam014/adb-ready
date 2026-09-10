@@ -16,6 +16,10 @@ adb-ready logs --exclude-tag Choreographer --tail 200
 adb-ready logs --buffer main --buffer system --buffer crash
 ```
 
+A live stream starts at the current end of the device buffer, so a new session
+does not report stale crashes from an earlier run. Use `--tail`, `--since`, or
+`--dump` when historical records are intentional.
+
 Use `--dump` for a bounded snapshot that exits:
 
 ```bash

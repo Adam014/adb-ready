@@ -155,9 +155,10 @@ export function targetInventoryProblems(
   const problems: Problem[] = [];
   for (const target of targets) {
     const serialCounts = new Map<string, number>();
+    const hasStableTransport = target.transports.some(({ stable }) => stable);
     for (const transport of target.transports) {
       serialCounts.set(transport.serial, (serialCounts.get(transport.serial) ?? 0) + 1);
-      if (!transport.stable) {
+      if (!transport.stable && !hasStableTransport) {
         problems.push({
           code: ProblemCode.UnstableTargetSerial,
           category: "target.identity",

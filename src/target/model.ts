@@ -52,6 +52,62 @@ export function isStableAdbSerial(serial: string): boolean {
   return true;
 }
 
+function normalizedServiceSerial(value: string): string {
+  return value.trim().replace(/\.+$/u, "");
+}
+
+function serviceSerial(service: AdbMdnsService): string {
+  return normalizedServiceSerial(`${service.instance}.${service.rawServiceType}`);
+}
+
+/**
+ * Correlates transient mDNS transports only through the exact advertised
+ * service and an endpoint whose hardware identity was observed directly.
+ * Incomplete or ambiguous evidence is intentionally left unresolved.
+ */
+export function correlateMdnsTransportIdentities(
+  observations: readonly TargetObservation[],
+  services: readonly AdbMdnsService[],
+): TargetObservation[] {
+  const identityByEndpoint = new Map<string, Set<string>>();
+  for (const observation of observations) {
+    const hardwareSerial = observation.hardwareSerial?.trim();
+    const endpoint = parseAdbNetworkEndpoint(observation.device.serial);
+    if (hardwareSerial === undefined || hardwareSerial === "" || endpoint === undefined) continue;
+    const identities = identityByEndpoint.get(endpoint.serial) ?? new Set<string>();
+    identities.add(hardwareSerial);
+    identityByEndpoint.set(endpoint.serial, identities);
+  }
+
+  return observations.map((observation) => {
+    if (
+      observation.hardwareSerial !== undefined ||
+      !isMdnsServiceSerial(observation.device.serial)
+    ) {
+      return observation;
+    }
+    const matchingServices = services.filter(
+      (service) => serviceSerial(service) === normalizedServiceSerial(observation.device.serial),
+    );
+    const identities = new Set<string>();
+    for (const service of matchingServices) {
+      const advertisedIdentity = service.hardwareSerial?.trim();
+      if (advertisedIdentity !== undefined && advertisedIdentity !== "") {
+        identities.add(advertisedIdentity);
+      }
+      for (const endpoint of [service.endpoint, ...(service.alternateEndpoints ?? [])]) {
+        for (const identity of identityByEndpoint.get(endpoint.serial) ?? []) {
+          identities.add(identity);
+        }
+      }
+    }
+    const [hardwareSerial] = identities;
+    return identities.size === 1 && hardwareSerial !== undefined
+      ? { ...observation, hardwareSerial }
+      : observation;
+  });
+}
+
 function transportKind(
   device: AdbDevice,
   services: readonly AdbMdnsService[],

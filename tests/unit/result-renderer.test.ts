@@ -148,6 +148,33 @@ describe("result renderer", () => {
     expect(records[1]).toMatchObject({ kind: "result", command: "devices", ok: true });
   });
 
+  test("renders port lists without confusing them with saved sessions", () => {
+    for (const mappings of [[], [{ direction: "forward", device: "tcp:8081", host: "tcp:8081" }]]) {
+      const ports: ResultEnvelope<unknown> = {
+        ...result,
+        command: "ports forward list",
+        data: {
+          direction: "forward",
+          action: "list",
+          status: "listed",
+          selected: { transport: { serial: "USB-1" } },
+          mappings,
+        },
+      };
+      const human = new MemorySink();
+      const plain = new MemorySink();
+
+      expect(() =>
+        renderResult(ports, { format: "human", capabilities, sink: human }),
+      ).not.toThrow();
+      expect(() =>
+        renderResult(ports, { format: "plain", capabilities, sink: plain }),
+      ).not.toThrow();
+      expect(human.value).toContain(`Mappings (${String(mappings.length)})`);
+      expect(plain.value).toContain(`mapping_count=${String(mappings.length)}`);
+    }
+  });
+
   test("renders saved session timelines and problem summaries for humans", () => {
     const session = {
       schemaVersion: SCHEMA_VERSION,
@@ -192,6 +219,26 @@ describe("result renderer", () => {
     expect(human.value).toContain("Timeline (1)");
     expect(human.value).toContain("session.degraded · A required port disappeared.");
 
+    const ndjson = new MemorySink();
+    renderResult(session, { format: "ndjson", capabilities, sink: ndjson });
+    const records = ndjson.value
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({ kind: "event", type: "session.degraded" });
+    expect(records[1]).toMatchObject({
+      kind: "result",
+      command: "sessions events",
+      data: { action: "events", eventCount: 1 },
+    });
+    const summaryData = records[1]?.data;
+    expect(summaryData).toBeObject();
+    if (typeof summaryData !== "object" || summaryData === null) {
+      throw new Error("Expected an NDJSON result summary");
+    }
+    expect((summaryData as Record<string, unknown>).events).toBeUndefined();
+
     const problems = new MemorySink();
     renderResult(
       {
@@ -229,5 +276,34 @@ describe("result renderer", () => {
 
     expect(sink.value).toContain("Pixel spoofed");
     expect(sink.value).not.toContain("\u001b");
+  });
+
+  test("presents Ctrl-C as a safe interruption while retaining a failed envelope", () => {
+    const sink = new MemorySink();
+    renderResult(
+      {
+        ...result,
+        command: "logs",
+        ok: false,
+        data: null,
+        problems: [
+          {
+            code: "OPERATION_INTERRUPTED",
+            category: "process.interrupted",
+            severity: "error",
+            summary: "Log streaming was interrupted.",
+            detail: "The owned process was stopped safely.",
+            retryable: true,
+            evidence: [],
+            actions: [],
+            correlation: { commandId: "command-1" },
+          },
+        ],
+      },
+      { format: "human", capabilities, sink },
+    );
+
+    expect(sink.value).toContain("Interrupted safely in 10ms");
+    expect(sink.value).not.toContain("Failed in");
   });
 });

@@ -348,6 +348,41 @@ describe("runDevices", () => {
     ]);
   });
 
+  test("correlates an ADB 37 mDNS transport with its exact connected endpoint", async () => {
+    const execution = await runDevices(
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          devices:
+            "List of devices attached\n" +
+            "10.0.1.66:43949 device model:SM_F936B transport_id:178\n" +
+            "adb-RFCT802R8WJ-7ZLXqa._adb-tls-connect._tcp device model:SM_F936B transport_id:179\n",
+          "hardware-serial:10.0.1.66:43949": "RFCT802R8WJ\n",
+          "mdns-services":
+            "List of discovered mdns services\n" +
+            "adb-RFCT802R8WJ-7ZLXqa _adb-tls-connect._tcp 10.0.1.66:43949\n",
+        }),
+      ),
+    );
+
+    expect(execution.result.data?.targets).toHaveLength(1);
+    expect(execution.result.data?.targets[0]).toMatchObject({
+      serial: "10.0.1.66:43949",
+      hardwareSerial: "RFCT802R8WJ",
+      transports: [
+        { serial: "10.0.1.66:43949", kind: "tls", stable: true },
+        {
+          serial: "adb-RFCT802R8WJ-7ZLXqa._adb-tls-connect._tcp",
+          kind: "unknown",
+          stable: false,
+        },
+      ],
+    });
+    expect(execution.result.problems).not.toContainEqual(
+      expect.objectContaining({ code: ProblemCode.UnstableTargetSerial }),
+    );
+  });
+
   test("keeps an offline target visible without failing the inventory command", async () => {
     const execution = await runDevices(
       {},
