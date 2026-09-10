@@ -34,6 +34,21 @@ export class ProgressRenderer {
       this.#spinner.succeed(event.message.replace(/ completed$/u, ""));
     } else if (event.type === "operation.failed") {
       this.#spinner.fail(event.message.replace(/ failed$/u, ""));
+    } else if (event.type === "session.state.changed") {
+      const state = event.data?.to;
+      if (state === "acquiring-target") {
+        this.#spinner.start("Acquiring one Android target");
+      } else if (state === "preparing-ports") {
+        this.#spinner.start("Preparing session ports");
+      } else if (state === "starting-child") {
+        this.#spinner.start("Starting development command");
+      } else if (state === "ready") {
+        this.#spinner.succeed("Development session ready");
+      } else if (state === "stopping") {
+        this.#spinner.start("Stopping owned session resources");
+      } else if (state === "failed") {
+        this.#spinner.fail("Development session failed");
+      }
     } else if (event.type === "session.degraded") {
       this.#spinner.warn(event.message);
     } else if (event.type === "recovery.started") {

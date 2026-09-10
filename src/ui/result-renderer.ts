@@ -251,6 +251,8 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     }
     lines.push(
       `${style.success(glyphs.success, capabilities)} Journal  ${String(data.journal.events.length)} events${data.journal.dropped === 0 ? "" : ` · ${String(data.journal.dropped)} dropped`}`,
+      `${data.recovery.failed ? style.failure(glyphs.failure, capabilities) : style.success(glyphs.success, capabilities)} Recovery ${data.recovery.failed ? "failed" : data.recovery.recoveries === 0 ? "healthy" : `${String(data.recovery.recoveries)} verified repair(s)`}`,
+      `${style.success(glyphs.success, capabilities)} Session  ${clean(data.sessionId)} · ${clean(data.status)}`,
     );
   }
 

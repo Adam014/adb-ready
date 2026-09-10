@@ -211,4 +211,33 @@ describe("ProgressRenderer", () => {
 
     expect(sink.value).toBe("! Android target disconnected.\n✓ Development session recovered.\n");
   });
+
+  test("turns session state transitions into concise live status", () => {
+    const sink = new MemorySink();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const renderer = new ProgressRenderer({
+      bus,
+      sink,
+      capabilities: { ...interactiveCapabilities, animation: false },
+    });
+
+    for (const state of [
+      "acquiring-target",
+      "preparing-ports",
+      "starting-child",
+      "ready",
+    ] as const) {
+      bus.emit({
+        type: "session.state.changed",
+        source: "session",
+        severity: "info",
+        message: `Development session is ${state}`,
+        correlation: { commandId: "command-1", sessionId: "session-1" },
+        data: { from: "planning", to: state, reason: "fixture" },
+      });
+    }
+    renderer.dispose();
+
+    expect(sink.value).toBe("✓ Development session ready\n");
+  });
 });

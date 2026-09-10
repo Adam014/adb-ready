@@ -52,6 +52,7 @@ import {
   tcpEndpoint,
 } from "../ports/model.js";
 import type { RecoveryPolicyInput } from "../session/recovery-policy.js";
+import { type SessionState, SessionStateMachine } from "../session/state-machine.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { type SessionHealth, type SessionWatchSummary, watchSession } from "../session/watcher.js";
 import { SessionRecorder, type SessionStoreOptions } from "../state/session-store.js";
@@ -2059,6 +2060,19 @@ export async function runDev(
   const journal = new EventJournal(bus, options.journal);
   const context = createContext("dev", { ...dependencies, bus, idFactory });
   const problems: Problem[] = [];
+  const stateMachine = new SessionStateMachine(dependencies.clock);
+  const transition = (to: SessionState, reason: string): void => {
+    if (!stateMachine.canTransition(to)) return;
+    const state = stateMachine.transition(to, reason);
+    bus.emit({
+      type: "session.state.changed",
+      source: "session",
+      severity: to === "failed" ? "error" : to === "degraded" ? "warning" : "info",
+      message: `Development session is ${to}`,
+      correlation: { commandId: context.commandId, sessionId },
+      data: { from: state.from, to: state.to, reason: state.reason },
+    });
+  };
   let recorder: SessionRecorder | undefined;
   if (options.sessionStore !== undefined && options.sessionStore !== false && !config.dryRun) {
     try {
@@ -2086,6 +2100,21 @@ export async function runDev(
   const complete = async (
     data: Omit<DevData, "journal"> | null,
   ): Promise<CommandExecution<DevData>> => {
+    if (problems.some(({ severity }) => severity === "error")) {
+      transition(
+        "failed",
+        problems.find(({ severity }) => severity === "error")?.summary ?? "failed",
+      );
+    }
+    transition("stopping", "finalizing owned session resources");
+    transition("ended", "session command finalized");
+    bus.emit({
+      type: "session.ended",
+      source: "session",
+      severity: problems.some(({ severity }) => severity === "error") ? "error" : "info",
+      message: "Development session ended",
+      correlation: { commandId: context.commandId, sessionId },
+    });
     const execution = finish<DevData>(context, data as DevData | null, problems);
     const snapshot = journal.close();
     if (execution.result.data !== null) execution.result.data.journal = snapshot;
@@ -2128,6 +2157,7 @@ export async function runDev(
     message: "Development session started",
     correlation,
   });
+  transition("acquiring-target", "discovering and selecting one Android target");
 
   const executable = await resolveAdb(context, config, dependencies);
   if (executable === undefined) {
@@ -2187,6 +2217,7 @@ export async function runDev(
     correlation: { ...correlation, targetId: selected.target.id },
     data: { serial: selected.transport.serial, reason: selected.reason },
   });
+  transition("preparing-ports", "target selected and project configuration resolved");
 
   const project = await (dependencies.detectProject ?? detectProject)({
     cwd: options.cwd,
@@ -2569,6 +2600,7 @@ export async function runDev(
     correlation: targetCorrelation,
     data: { created: created.length, reused: reused.length },
   });
+  transition("starting-child", "ports verified and development command prepared");
   if (!(await runHookPhase("onPortsReady"))) {
     await cleanup();
     await runHookPhase("finally", {}, false);
@@ -2713,6 +2745,7 @@ export async function runDev(
   });
   const readyHooksSucceeded = await runHookPhase("onReady");
   if (!readyHooksSucceeded) childController.abort();
+  if (readyHooksSucceeded) transition("ready", "target, ports, logs, and child are ready");
 
   const watchController = new AbortController();
   if (signal?.aborted === true || !readyHooksSucceeded) watchController.abort();
@@ -2929,6 +2962,17 @@ export async function runDev(
           ...(options.recovery === undefined ? {} : { policy: options.recovery }),
           ...(dependencies.sleep === undefined ? {} : { sleep: dependencies.sleep }),
           onEvent: (event) => {
+            if (event.type === "session.degraded") {
+              transition("degraded", event.detail ?? "session health degraded");
+            } else if (event.type === "recovery.started") {
+              transition("recovering", `bounded recovery attempt ${String(event.attempt ?? 1)}`);
+            } else if (event.type === "recovery.completed") {
+              transition("ready", event.detail ?? "recovery independently verified");
+            } else if (event.type === "recovery.failed") {
+              transition("degraded", event.detail ?? "recovery verification failed");
+            } else if (event.type === "watch.failed") {
+              transition("failed", event.detail ?? "session watcher failed");
+            }
             bus.emit({
               type: event.type,
               source: "recovery",
@@ -3091,13 +3135,6 @@ export async function runDev(
     );
   }
   await runHookPhase("finally", {}, false);
-  bus.emit({
-    type: "session.ended",
-    source: "session",
-    severity: problems.some(({ severity }) => severity === "error") ? "error" : "info",
-    message: "Development session ended",
-    correlation: targetCorrelation,
-  });
   const execution = await complete({
     ...baseData(),
     status: problems.some(({ severity }) => severity === "error") ? "failed" : "completed",

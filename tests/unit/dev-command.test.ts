@@ -142,6 +142,18 @@ describe("runDev", () => {
     expect(serializedJournal).not.toContain("secret-value");
     expect(serializedJournal).toContain("child.stdout");
     expect(serializedJournal).toContain("log.record");
+    expect(
+      execution.result.data?.journal.events
+        .filter(({ type }) => type === "session.state.changed")
+        .map(({ data }) => data?.to),
+    ).toEqual([
+      "acquiring-target",
+      "preparing-ports",
+      "starting-child",
+      "ready",
+      "stopping",
+      "ended",
+    ]);
     expect(execution.result.problems).toContainEqual(
       expect.objectContaining({ code: "REACT_NATIVE_FATAL", severity: "warning" }),
     );
@@ -569,6 +581,21 @@ describe("runDev", () => {
     expect(execution.result.data?.journal.events.map(({ type }) => type)).toContain(
       "log.stream.failed",
     );
+    expect(
+      execution.result.data?.journal.events
+        .filter(({ type }) => type === "session.state.changed")
+        .map(({ data }) => data?.to),
+    ).toEqual([
+      "acquiring-target",
+      "preparing-ports",
+      "starting-child",
+      "ready",
+      "degraded",
+      "recovering",
+      "ready",
+      "stopping",
+      "ended",
+    ]);
   });
 
   test("stops the owned child after the bounded recovery budget is exhausted", async () => {
