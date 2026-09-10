@@ -1,4 +1,5 @@
 import type { AdbDevice, AdbMdnsService } from "../adb/parsers.js";
+import type { AgentSetupData } from "../agent/setup.js";
 import type { AppData, AppsData, OpenData } from "../app/app-commands.js";
 import type {
   ConnectedData,
@@ -191,6 +192,17 @@ function isConfigReportData(value: unknown): value is ConfigReportData {
     (value.action === "validate" || value.action === "explain") &&
     value.valid === true &&
     isRecord(value.files)
+  );
+}
+
+function isAgentSetupData(value: unknown): value is AgentSetupData {
+  return (
+    isRecord(value) &&
+    typeof value.client === "string" &&
+    typeof value.status === "string" &&
+    typeof value.path === "string" &&
+    typeof value.content === "string" &&
+    typeof value.next === "string"
   );
 }
 
@@ -529,6 +541,23 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     );
   }
 
+  if (result.command === "agent setup" && isAgentSetupData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Client  ${clean(data.client)}`,
+      `${style.success(glyphs.success, capabilities)} Config  ${clean(data.path)}`,
+      `${style.success(glyphs.success, capabilities)} Status  ${clean(data.status)}`,
+      "",
+      style.strong(
+        data.status === "manual" ? "Merge this configuration" : "Configuration",
+        capabilities,
+      ),
+      ...data.content.trimEnd().split("\n").map(clean),
+      "",
+      `${style.accent("Next:", capabilities)} ${clean(data.next)}`,
+    );
+  }
+
   if (result.command.startsWith("config ") && isConfigReportData(result.data)) {
     lines.push(
       `${style.success(glyphs.success, capabilities)} Config   valid`,
@@ -758,6 +787,12 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     if (result.data.detectedPreset !== undefined) {
       sink.write(`detected_preset=${clean(result.data.detectedPreset)}\n`);
     }
+  }
+  if (isAgentSetupData(result.data)) {
+    sink.write(`client=${clean(result.data.client)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`path=${clean(result.data.path)}\n`);
+    sink.write(`scope=${clean(result.data.scope)}\n`);
   }
   if (isConfigReportData(result.data)) {
     sink.write(`action=${clean(result.data.action)}\n`);

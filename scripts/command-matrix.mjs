@@ -227,6 +227,7 @@ try {
       ["bare non-TTY", [], "ADB Ready"],
       ["help flag", ["--help"], "adb-ready [command]"],
       ["help command", ["help"], "ADB Ready"],
+      ["agent help", ["help", "agent"], "adb-ready agent setup"],
       ["doctor help", ["help", "doctor"], "adb-ready doctor"],
       ["devices help", ["devices", "--help"], "adb-ready devices"],
       ["connect help", ["connect", "--help"], "adb-ready connect"],
@@ -241,6 +242,22 @@ try {
       expectIncludes(execution.stdout, expected, `${alias} ${label}`);
       assertions += 1;
     }
+
+    const agentPlan = command(
+      alias,
+      ["agent", "setup", "cursor", "--dry-run", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(agentPlan, 0, `${alias} agent setup dry-run`);
+    const agentPayload = parseJson(agentPlan.stdout, `${alias} agent setup dry-run`);
+    if (
+      agentPayload.data?.status !== "planned" ||
+      agentPayload.data?.path !== ".cursor/mcp.json" ||
+      !agentPayload.data?.content?.includes('"adb-ready"')
+    ) {
+      throw new Error(`${alias} agent setup: invalid project configuration plan`);
+    }
+    assertions += 1;
 
     const connect = command(
       alias,

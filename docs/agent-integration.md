@@ -26,6 +26,17 @@ it. ADB Ready does not open an MCP network listener.
 
 ## Connect an agent
 
+Preview the exact project change first, then apply it:
+
+```bash
+adb-ready agent setup codex --dry-run
+adb-ready agent setup codex
+```
+
+Replace `codex` with `claude-code`, `cursor`, or `vscode`. Existing unrelated
+configuration is preserved. An existing `adb-ready` entry with different
+settings is reported as a conflict and is never replaced automatically.
+
 ### Codex
 
 Create a project-scoped `.codex/config.toml`:
@@ -86,6 +97,30 @@ Create `.vscode/mcp.json`:
 ```
 
 See the [official VS Code MCP guide](https://code.visualstudio.com/docs/agent-customization/mcp-servers).
+
+### Windsurf
+
+Windsurf currently keeps MCP configuration in a user-scoped file. Generate a
+project-bound snippet and merge it through Windsurf MCP settings:
+
+```bash
+adb-ready agent setup windsurf
+```
+
+ADB Ready deliberately does not edit this global file. The generated entry
+uses an absolute local package path and `ADB_READY_MCP_PROJECT_ROOT` so Cascade
+still resolves the intended project. See the [official Windsurf MCP guide](https://docs.windsurf.com/windsurf/cascade/mcp).
+
+### Other MCP clients
+
+Generate a standard `mcpServers` entry:
+
+```bash
+adb-ready agent setup generic
+```
+
+Merge the result at the location required by the client and ensure the server
+starts in the Android project root.
 
 ## Recommended agent workflow
 

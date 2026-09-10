@@ -9,6 +9,7 @@
 - Start a session: `adb-ready dev`
 - Machine output: `adb-ready COMMAND --json --non-interactive`
 - MCP stdio server: `node ./node_modules/adb-ready/dist/cli.js mcp`
+- Agent setup: `adb-ready agent setup CLIENT --dry-run`
 
 ## Agent contract
 

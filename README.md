@@ -109,7 +109,7 @@ Running `adb-ready` without a command opens the interactive workflow home.
 | see only the Android logs that matter | [Focused logcat](./docs/logs-and-context.md#focused-logcat) |
 | understand why the last session failed | [Session problems](./docs/logs-and-context.md#session-history) |
 | prepare safe evidence for an AI assistant | [Diagnostic context](./docs/logs-and-context.md#diagnostic-context) |
-| let Codex, Claude Code, Cursor, or Copilot operate typed Android workflows | [AI agent integration](./docs/agent-integration.md) |
+| connect Codex, Claude Code, Cursor, Copilot, or Windsurf | [`adb-ready agent setup`](./docs/agent-integration.md#connect-an-agent) |
 | share project settings without a custom shell script | [Configuration](./docs/configuration.md) |
 | use ADB Ready from CI or another tool | [Automation contract](./docs/automation.md) |
 | fix a known setup or target problem | [Troubleshooting](./docs/troubleshooting.md) |

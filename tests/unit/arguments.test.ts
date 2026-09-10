@@ -402,6 +402,26 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses safe agent client setup and dry runs", () => {
+    expect(parseArguments(["agent", "setup", "codex", "--dry-run", "--json"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "agent",
+        agentClient: "codex",
+        dryRun: true,
+        format: "json",
+      },
+    });
+    expect(parseArguments(["agent", "setup", "unknown"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["agent", "codex"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("parses bounded app and UI inspection", () => {
     expect(parseArguments(["inspect", "app", "com.example.app", "--last"])).toMatchObject({
       ok: true,

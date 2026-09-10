@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import process from "node:process";
 import manifest from "../../package.json" with { type: "json" };
 import type { AdbMdnsService } from "../adb/parsers.js";
 import { runMcpStdio } from "../agent/mcp-server.js";
+import { runAgentSetup } from "../agent/setup.js";
 import {
   type AppData,
   type AppsData,
@@ -82,6 +84,7 @@ Usage:
   adbr [command] [options]
 
 Commands:
+  agent setup CLIENT     Configure a project-local AI agent bridge
   app ACTION [APP_ID]   Resolve, inspect, install, or control one app
   apps list             List packages on one Android target
   capture ACTION         Save a verified screenshot or bounded screen recording
@@ -133,6 +136,18 @@ Other:
 `;
 
 const COMMAND_HELP = {
+  agent: `Usage:
+  adb-ready agent setup codex [--dry-run]
+  adb-ready agent setup claude-code [--dry-run]
+  adb-ready agent setup cursor [--dry-run]
+  adb-ready agent setup vscode [--dry-run]
+  adb-ready agent setup windsurf [--dry-run]
+  adb-ready agent setup generic [--dry-run]
+
+Creates or safely merges a project MCP configuration without replacing an
+existing adb-ready server entry. Windsurf and generic clients return a manual
+snippet because their configuration is user-scoped or client-defined.
+`,
   app: `Usage:
   adb-ready app resolve [APP_ID] [options]
   adb-ready app info [APP_ID] [options]
@@ -673,8 +688,35 @@ async function runCliInternal(
     return ExitCode.Success;
   }
   if (options.command === "mcp") {
-    await runMcpStdio({ cwd: io.cwd, env: io.env, dependencies, version: VERSION }, signal);
+    const explicitRoot = io.env.ADB_READY_MCP_PROJECT_ROOT?.trim();
+    await runMcpStdio(
+      {
+        cwd:
+          explicitRoot === undefined || explicitRoot === "" ? io.cwd : path.resolve(explicitRoot),
+        env: io.env,
+        dependencies,
+        version: VERSION,
+      },
+      signal,
+    );
     return ExitCode.Success;
+  }
+  if (options.command === "agent") {
+    const execution = await runAgentSetup(
+      {
+        client: options.agentClient ?? "generic",
+        cwd: io.cwd,
+        ...(options.dryRun ? { dryRun: true } : {}),
+      },
+      dependencies,
+    );
+    renderResult(execution.result, {
+      format: options.format,
+      capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return execution.exitCode;
   }
   if (options.command === "init") {
     const execution = await runInit(

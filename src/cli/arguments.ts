@@ -1,9 +1,11 @@
+import type { AgentClient } from "../agent/setup.js";
 import type { AppAction, PackageScope } from "../app/app-commands.js";
 import type { PortAction } from "../app/commands.js";
 import type { DevPreset, PackageManagerName } from "../dev/project.js";
 import type { PortDirection } from "../ports/model.js";
 
 export type CommandName =
+  | "agent"
   | "app"
   | "apps"
   | "capture"
@@ -100,6 +102,7 @@ export interface CliOptions {
   inspectKind?: "app" | "ui";
   interactiveOnly?: boolean;
   maxDepth?: number;
+  agentClient?: AgentClient;
 }
 
 export interface CliParseFailure {
@@ -117,6 +120,7 @@ export interface CliParseSuccess {
 export type CliParseResult = CliParseFailure | CliParseSuccess;
 
 const COMMANDS = new Set<CommandName>([
+  "agent",
   "app",
   "apps",
   "capture",
@@ -147,6 +151,14 @@ const APP_ACTIONS = new Set<AppAction>([
   "restart",
   "stop",
   "uninstall",
+]);
+const AGENT_CLIENTS = new Set<AgentClient>([
+  "claude-code",
+  "codex",
+  "cursor",
+  "generic",
+  "vscode",
+  "windsurf",
 ]);
 const BOOLEAN_OPTIONS = new Set([
   "-h",
@@ -274,6 +286,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let inspectKind: CliOptions["inspectKind"];
   let interactiveOnly = false;
   let maxDepth: number | undefined;
+  let agentSetupSeen = false;
+  let agentClient: AgentClient | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -305,6 +319,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (command === "help" && COMMANDS.has(argument as CommandName)) {
         const candidate = argument as CommandName;
         if (
+          candidate === "agent" ||
           candidate === "app" ||
           candidate === "apps" ||
           candidate === "capture" ||
@@ -330,6 +345,20 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       if ((command === "connect" || command === "pair") && endpoint === undefined) {
         endpoint = argument;
+        continue;
+      }
+      if (command === "agent" && argument === "setup" && !agentSetupSeen) {
+        agentSetupSeen = true;
+        continue;
+      }
+      if (command === "agent" && agentSetupSeen && agentClient === undefined) {
+        if (!AGENT_CLIENTS.has(argument as AgentClient)) {
+          return failure(
+            "CLI_INVALID_VALUE",
+            `Invalid agent client: ${argument}. Expected codex, claude-code, cursor, vscode, windsurf, or generic.`,
+          );
+        }
+        agentClient = argument as AgentClient;
         continue;
       }
       if (command === "apps" && argument === "list" && !appsListSeen) {
@@ -902,7 +931,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command !== "open" &&
     command !== "pair" &&
     command !== "ports" &&
-    command !== "init"
+    command !== "init" &&
+    command !== "agent"
   ) {
     return failure(
       "CLI_USAGE",
@@ -942,6 +972,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (command === "inspect" && inspectKind === undefined) {
     return failure("CLI_USAGE", "inspect requires app or ui.");
+  }
+  if (command === "agent" && (!agentSetupSeen || agentClient === undefined)) {
+    return failure("CLI_USAGE", "agent requires setup and a supported client name.");
   }
   if (interactiveOnly && (command !== "inspect" || inspectKind !== "ui")) {
     return failure("CLI_USAGE", "--interactive-only can only be used with inspect ui.");
@@ -1102,6 +1135,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(inspectKind === undefined ? {} : { inspectKind }),
       ...(interactiveOnly ? { interactiveOnly: true } : {}),
       ...(maxDepth === undefined ? {} : { maxDepth }),
+      ...(agentClient === undefined ? {} : { agentClient }),
     },
   };
 }

@@ -23,6 +23,8 @@ breaking changes.
 - Give local AI agents 13 typed Android tools and saved-session context over a
   tested Node.js, Bun, and Deno MCP stdio server without exposing raw shell/ADB
   or destructive app removal.
+- Generate or safely merge project MCP setup for Codex, Claude Code, Cursor,
+  and VS Code, with non-mutating snippets for Windsurf and generic clients.
 - Replace the command-heavy interactive home with focused workflow categories
   and progressive disclosure.
 
