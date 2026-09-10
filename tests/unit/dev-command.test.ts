@@ -127,7 +127,7 @@ describe("runDev", () => {
     const childRequest = requests.find(({ executable }) => executable === "dev-server");
     expect(childRequest).toMatchObject({
       args: ["serve"],
-      cwd: "/workspace/app",
+      cwd: path.resolve("/workspace/app"),
       stdin: "inherit",
       env: { ANDROID_SERIAL: "USB-1" },
     });

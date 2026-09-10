@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { EventBus } from "../../src/core/event-bus.js";
 import { runHooks } from "../../src/dev/hooks.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
@@ -54,7 +55,7 @@ describe("runHooks", () => {
     expect(requests[0]).toMatchObject({
       executable: "node",
       args: ["notify.mjs", "literal;$(safe)"],
-      cwd: "/project",
+      cwd: path.resolve("/project"),
       inheritEnv: false,
       env: {
         PATH: "/bin",

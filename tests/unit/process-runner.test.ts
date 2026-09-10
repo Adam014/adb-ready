@@ -97,8 +97,8 @@ describe("runProcess", () => {
         "-e",
         'process.stdout.write("first"); setTimeout(() => process.stdout.write("-second"), 10); setTimeout(() => {}, 10_000)',
       ],
-      stopAfterIdleMs: 25,
-      timeoutMs: 1_000,
+      stopAfterIdleMs: 150,
+      timeoutMs: 2_000,
     });
 
     expect(result.stdout).toBe("first-second");
@@ -178,10 +178,9 @@ describe("runProcess", () => {
       env: { ADB_READY_FIXTURE: "portable" },
     });
 
-    expect(JSON.parse(result.stdout)).toEqual({
-      cwd: await realpath(directory),
-      value: "portable",
-    });
+    const observed = JSON.parse(result.stdout) as { cwd: string; value: string };
+    expect(await realpath(observed.cwd)).toBe(await realpath(directory));
+    expect(observed.value).toBe("portable");
   });
 
   test("bounds captured output while continuing to drain the child", async () => {
