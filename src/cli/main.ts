@@ -27,6 +27,7 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import { planTargetAcquisition } from "../session/target-acquisition.js";
 import {
   type RememberedTarget,
   readTargetState,
@@ -579,20 +580,60 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
-  if (
-    (options.command === "ports" && options.select) ||
-    (options.command === "dev" &&
-      errorCapabilities.interactive &&
-      options.device === undefined &&
-      options.transportId === undefined)
-  ) {
-    const inventory = await runDevices(config, commandDependencies, signal);
-    const selectable =
+  if ((options.command === "ports" && options.select) || options.command === "dev") {
+    let inventory = await runDevices(config, commandDependencies, signal);
+    let selectable =
       inventory.result.data?.targets.filter((target) =>
         target.transports.some(({ stable, state }) => stable && state === "device"),
       ) ?? [];
+    if (options.command === "dev" && selectable.length === 0 && !options.dryRun) {
+      const acquisition = planTargetAcquisition({
+        ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
+        ...(values.targetAliases === undefined ? {} : { aliases: values.targetAliases }),
+        ...(lastTarget === undefined ? {} : { remembered: lastTarget }),
+        services: inventory.result.data?.discovery.mdns.services ?? [],
+      });
+      if (acquisition.kind === "connect") {
+        const connected = await runConnect(
+          acquisition.endpoint,
+          acquisition.discovered
+            ? {
+                ...config,
+                endpointWasDiscovered: true,
+                discoveredEndpointCandidates: acquisition.candidates,
+              }
+            : config,
+          commandDependencies,
+          signal,
+        );
+        const connectedData = connected.result.data;
+        if (!connected.result.ok || connectedData === null || !("serial" in connectedData)) {
+          renderResult(
+            { ...connected.result, command: "dev" },
+            {
+              format: options.format,
+              capabilities: errorCapabilities,
+              sink: options.format === "human" ? io.error : io.output,
+              verbose: options.verbose,
+            },
+          );
+          return connected.exitCode;
+        }
+        config.targetSelector = connectedData.serial;
+        delete config.targetTransportId;
+        inventory = await runDevices(config, commandDependencies, signal);
+        selectable =
+          inventory.result.data?.targets.filter((target) =>
+            target.transports.some(({ stable, state }) => stable && state === "device"),
+          ) ?? [];
+      }
+    }
     const shouldPrompt =
-      options.select || (inventory.result.data?.selected === undefined && selectable.length !== 1);
+      options.select ||
+      (options.command === "dev" &&
+        errorCapabilities.interactive &&
+        inventory.result.data?.selected === undefined &&
+        selectable.length !== 1);
     const selected = shouldPrompt
       ? await selectDevice(inventory, io, errorCapabilities, lastTarget, signal)
       : inventory;

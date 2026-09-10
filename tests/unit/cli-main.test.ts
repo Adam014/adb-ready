@@ -535,6 +535,56 @@ describe("runCli", () => {
     expect(remembered).toMatchObject({ serial: "USB-1", hardwareSerial: "PHONE-1" });
   });
 
+  test("acquires one unambiguous wireless target before starting dev", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    let connected = false;
+    const requests: ProcessRequest[] = [];
+    fixture.runner = async (request) => {
+      requests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          connected
+            ? "List of devices attached\n192.168.1.20:42000 device model:Pixel_9 transport_id:9\n"
+            : "List of devices attached\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) {
+        return result(
+          request,
+          "List of discovered mdns services\nadb-phone _adb-tls-connect._tcp 192.168.1.20:42000\n",
+        );
+      }
+      if (args.includes("connect")) {
+        connected = true;
+        return result(request, "connected to 192.168.1.20:42000\n");
+      }
+      if (args.includes("get-state")) return result(request, "device\n");
+      if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+      if (args.includes("--list")) return result(request, "");
+      if (request.executable === "node") {
+        expect(request.env?.ANDROID_SERIAL).toBe("192.168.1.20:42000");
+        return result(request, "ready\n");
+      }
+      return result(request, "");
+    };
+
+    const exitCode = await runCli(
+      ["dev", "--no-logs", "--json", "--non-interactive", "--", "node", "server.mjs"],
+      streams,
+      fixture,
+    );
+    const payload = JSON.parse(streams.output.value);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload.data.selected.transport.serial).toBe("192.168.1.20:42000");
+    expect(requests.some(({ args }) => args?.includes("connect"))).toBeTrue();
+    expect(streams.error.value).toBe("");
+  });
+
   test("automatically uses one discovered endpoint in an interactive connect flow", async () => {
     const streams = io({ inputTTY: true, errorTTY: true });
     const fixture = dependencies();
