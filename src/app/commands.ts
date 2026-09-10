@@ -22,6 +22,7 @@ import {
   noTargetsProblem,
   ProblemCode,
   problemsForDevices,
+  problemsForServerStatus,
   targetInventoryProblems,
   targetSelectionProblem,
 } from "../domain/problems.js";
@@ -464,6 +465,12 @@ export async function runDoctor(
     const status = await client.serverStatus(signal);
     if (processSucceeded(status.process)) {
       serverStatus = redactedRecord(status.value);
+      problems.push(
+        ...problemsForServerStatus(status.value, version.value.platformToolsVersion, {
+          commandId: context.commandId,
+          operationId: status.operationId,
+        }),
+      );
     } else {
       const problem = operationProblem("server-status", status, context.commandId);
       if (problem.code === ProblemCode.OperationInterrupted) {

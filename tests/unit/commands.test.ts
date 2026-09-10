@@ -165,6 +165,29 @@ describe("runDoctor", () => {
     expect(execution.exitCode).toBe(ExitCode.Success);
   });
 
+  test("surfaces server-status discovery problems without failing healthy ADB commands", async () => {
+    const execution = await runDoctor(
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          version: "Android Debug Bridge version 1.0.41\nVersion 37.0.0-14910828\n",
+          "host-features": "server_status\n",
+          "server-status": 'version: "36.0.0"\nmdns_enabled: false\n',
+          devices: "List of devices attached\n",
+          "mdns-services": "List of discovered mdns services\n",
+        }),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.ok).toBe(true);
+    expect(execution.result.problems.map(({ code }) => code)).toEqual([
+      ProblemCode.AdbMdnsDisabled,
+      ProblemCode.AdbVersionMismatch,
+      ProblemCode.NoTargets,
+    ]);
+  });
+
   test("feature-detects ADB 37 streaming mDNS discovery", async () => {
     const requests: ProcessRequest[] = [];
     const execution = await runDoctor(

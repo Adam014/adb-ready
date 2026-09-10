@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { redactText } from "../../src/core/redaction.js";
-import { adbProcessProblem, ProblemCode, problemsForDevices } from "../../src/domain/problems.js";
+import {
+  adbProcessProblem,
+  ProblemCode,
+  problemsForDevices,
+  problemsForServerStatus,
+} from "../../src/domain/problems.js";
 import type { ProcessResult } from "../../src/platform/process-runner.js";
 
 function failedProcess(overrides: Partial<ProcessResult> = {}): ProcessResult {
@@ -85,6 +90,47 @@ describe("problem classification", () => {
 
     expect(daemon.code).toBe(ProblemCode.AdbServerUnavailable);
     expect(generic.code).toBe(ProblemCode.AdbCommandFailed);
+  });
+
+  test("classifies a command missing from an older ADB build", () => {
+    const problem = adbProcessProblem(
+      "pair",
+      failedProcess({ stderr: "adb: unknown command pair" }),
+      { commandId: "command-1" },
+    );
+
+    expect(problem).toMatchObject({
+      code: ProblemCode.AdbFeatureUnavailable,
+      category: "environment.compatibility",
+      severity: "error",
+    });
+    expect(problem.actions[0]).toMatchObject({
+      id: "update_platform_tools",
+      automatic: false,
+    });
+  });
+
+  test("diagnoses disabled mDNS and a mismatched running ADB server", () => {
+    const problems = problemsForServerStatus(
+      { mdns_enabled: "false", version: '"36.0.0"' },
+      "37.0.0-14910828",
+      { commandId: "command-1", operationId: "operation-1" },
+    );
+
+    expect(problems.map(({ code }) => code)).toEqual([
+      ProblemCode.AdbMdnsDisabled,
+      ProblemCode.AdbVersionMismatch,
+    ]);
+    expect(problems.every(({ severity }) => severity === "warning")).toBe(true);
+    expect(problems.every(({ actions }) => actions[0]?.risk === "shared-global")).toBe(true);
+  });
+
+  test("does not warn for a healthy matching ADB server", () => {
+    expect(
+      problemsForServerStatus({ mdns_enabled: "true", version: '"37.0.0"' }, "37.0.0-14910828", {
+        commandId: "command-1",
+      }),
+    ).toEqual([]);
   });
 
   test("redacts process evidence before attaching it to a problem", () => {

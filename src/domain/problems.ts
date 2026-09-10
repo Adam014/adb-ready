@@ -7,9 +7,12 @@ import type { Correlation, Evidence, Problem, SuggestedAction } from "./contract
 
 export const ProblemCode = {
   AdbCommandFailed: "ADB_COMMAND_FAILED",
+  AdbFeatureUnavailable: "ADB_FEATURE_UNAVAILABLE",
+  AdbMdnsDisabled: "ADB_MDNS_DISABLED",
   AdbNotFound: "ADB_NOT_FOUND",
   AdbOptionalProbeFailed: "ADB_OPTIONAL_PROBE_FAILED",
   AdbServerUnavailable: "ADB_SERVER_UNAVAILABLE",
+  AdbVersionMismatch: "ADB_VERSION_MISMATCH",
   AdbTimeout: "ADB_TIMEOUT",
   InteractiveSelectionUnavailable: "INTERACTIVE_SELECTION_UNAVAILABLE",
   MultipleTargets: "MULTIPLE_TARGETS",
@@ -204,22 +207,107 @@ export function adbNotFoundProblem(correlation: Correlation, requestedPath?: str
 }
 
 function processEvidence(result: ProcessResult): Evidence[] {
-  const redacted = redactText(result.stderr.trim());
+  const redactedStderr = redactText(result.stderr.trim());
+  const redactedStdout = redactText(result.stdout.trim());
   return [
     { source: "process", field: "exitCode", value: result.exitCode },
     { source: "process", field: "signal", value: result.signal },
     { source: "process", field: "timedOut", value: result.timedOut },
-    ...(redacted.value === ""
+    ...(redactedStderr.value === ""
       ? []
       : [
           {
             source: "process",
             field: "stderr",
-            value: redacted.value.slice(0, 2_000),
-            redacted: redacted.replacements > 0,
+            value: redactedStderr.value.slice(0, 2_000),
+            redacted: redactedStderr.replacements > 0,
+          } satisfies Evidence,
+        ]),
+    ...(redactedStdout.value === ""
+      ? []
+      : [
+          {
+            source: "process",
+            field: "stdout",
+            value: redactedStdout.value.slice(0, 2_000),
+            redacted: redactedStdout.replacements > 0,
           } satisfies Evidence,
         ]),
   ];
+}
+
+function manualServerRestartAction(title: string): SuggestedAction {
+  return {
+    id: "review_adb_server_restart",
+    title,
+    kind: "user",
+    risk: "shared-global",
+    automatic: false,
+  };
+}
+
+function unquoted(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+}
+
+function versionCore(value: string | undefined): string | undefined {
+  return unquoted(value)?.match(/^\d+\.\d+\.\d+/u)?.[0];
+}
+
+export function problemsForServerStatus(
+  status: Readonly<Record<string, string>>,
+  clientVersion: string | undefined,
+  correlation: Correlation,
+): Problem[] {
+  const problems: Problem[] = [];
+  const mdnsEnabled = unquoted(status.mdns_enabled)?.toLowerCase();
+  if (mdnsEnabled === "false") {
+    problems.push({
+      code: ProblemCode.AdbMdnsDisabled,
+      category: "adb.discovery",
+      severity: "warning",
+      summary: "ADB network discovery is disabled.",
+      detail:
+        "Explicit wireless endpoints can still work, but automatic mDNS discovery is unavailable.",
+      retryable: true,
+      evidence: [{ source: "adb.server-status", field: "mdns_enabled", value: false }],
+      actions: [
+        manualServerRestartAction(
+          "Enable ADB mDNS and restart the shared ADB server when it is safe",
+        ),
+      ],
+      correlation,
+    });
+  }
+
+  const clientCore = versionCore(clientVersion);
+  const serverCore = versionCore(status.version);
+  if (clientCore !== undefined && serverCore !== undefined && clientCore !== serverCore) {
+    problems.push({
+      code: ProblemCode.AdbVersionMismatch,
+      category: "adb.server",
+      severity: "warning",
+      summary: "The ADB client and running server use different versions.",
+      detail:
+        "Mixed Platform-Tools versions can expose different capabilities and make diagnostics inconsistent.",
+      retryable: true,
+      evidence: [
+        { source: "adb.client", field: "version", value: clientCore },
+        { source: "adb.server-status", field: "version", value: serverCore },
+      ],
+      actions: [
+        manualServerRestartAction(
+          "Align Platform-Tools versions and restart the shared ADB server when it is safe",
+        ),
+      ],
+      correlation,
+    });
+  }
+  return problems;
 }
 
 export function adbProcessProblem(
@@ -255,6 +343,33 @@ export function adbProcessProblem(
       retryable: true,
       evidence: processEvidence(result),
       actions: [retryDevicesAction()],
+      correlation,
+    };
+  }
+
+  const combinedOutput = `${result.stderr}\n${result.stdout}`;
+  if (
+    /(?:unknown|unrecognized)\s+(?:command|option)\b|(?:command|option)\s+.+\s+is not supported\b/iu.test(
+      combinedOutput,
+    )
+  ) {
+    return {
+      code: ProblemCode.AdbFeatureUnavailable,
+      category: "environment.compatibility",
+      severity: "error",
+      summary: `The installed ADB does not support ${operation}.`,
+      detail: "Update Android SDK Platform-Tools, then retry the requested operation.",
+      retryable: true,
+      evidence: processEvidence(result),
+      actions: [
+        {
+          id: "update_platform_tools",
+          title: "Update Android SDK Platform-Tools",
+          kind: "user",
+          risk: "local-additive",
+          automatic: false,
+        },
+      ],
       correlation,
     };
   }
