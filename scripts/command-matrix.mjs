@@ -198,6 +198,7 @@ try {
       ["devices help", ["devices", "--help"], "adb-ready devices"],
       ["connect help", ["connect", "--help"], "adb-ready connect"],
       ["pair help", ["help", "pair"], "adb-ready pair"],
+      ["ports help", ["ports", "--help"], "adb-ready ports reverse"],
       ["version flag", ["--version"], manifest.version],
       ["version command", ["version"], manifest.version],
     ]) {
@@ -251,6 +252,33 @@ try {
       planPayload.data.plan.steps?.[0]?.id !== "pair"
     ) {
       throw new Error(`${alias} pair: invalid dry-run plan`);
+    }
+    assertions += 1;
+
+    const ports = command(alias, ["ports", "reverse", "list", "--json", "--non-interactive"], env);
+    expectStatus(ports, 0, `${alias} ports reverse list`);
+    const portsPayload = parseJson(ports.stdout, `${alias} ports reverse list`);
+    if (
+      portsPayload.data?.direction !== "reverse" ||
+      portsPayload.data?.status !== "listed" ||
+      portsPayload.data?.selected?.transport?.serial !== "fixture-usb"
+    ) {
+      throw new Error(`${alias} ports: unexpected mapping result`);
+    }
+    assertions += 1;
+
+    const portsPlan = command(
+      alias,
+      ["ports", "reverse", "add", "8081", "--dry-run", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(portsPlan, 0, `${alias} ports reverse dry-run`);
+    const portsPlanPayload = parseJson(portsPlan.stdout, `${alias} ports reverse dry-run`);
+    if (
+      portsPlanPayload.data?.plan?.steps?.[0]?.args?.join(" ") !==
+      "-t 1 reverse --no-rebind tcp:8081 tcp:8081"
+    ) {
+      throw new Error(`${alias} ports: invalid dry-run plan`);
     }
     assertions += 1;
 

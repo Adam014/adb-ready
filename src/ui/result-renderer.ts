@@ -4,6 +4,7 @@ import type {
   DevicesData,
   DoctorData,
   PairedData,
+  PortsData,
   TargetDiscoveryData,
 } from "../app/commands.js";
 import type { OutputFormat } from "../cli/arguments.js";
@@ -58,6 +59,15 @@ function isConnectData(value: unknown): value is ConnectedData {
 
 function isPairData(value: unknown): value is PairedData {
   return isRecord(value) && value.paired === true && typeof value.endpoint === "string";
+}
+
+function isPortsData(value: unknown): value is PortsData {
+  return (
+    isRecord(value) &&
+    (value.direction === "forward" || value.direction === "reverse") &&
+    Array.isArray(value.mappings) &&
+    isRecord(value.selected)
+  );
 }
 
 function hasPlan(value: unknown): value is { plan: OperationPlan } {
@@ -158,6 +168,26 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       style.dim("Run adb-ready connect to verify the final device transport.", capabilities),
     );
   }
+  if (result.command.startsWith("ports ") && isPortsData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} Action   ${clean(data.status)} · ${clean(data.direction)}`,
+      "",
+      style.strong(`Mappings (${String(data.mappings.length)})`, capabilities),
+    );
+    if (data.mappings.length === 0) {
+      lines.push(`${style.dim(glyphs.end, capabilities)} None`);
+    } else {
+      data.mappings.forEach((mapping, index) => {
+        const branch = index === data.mappings.length - 1 ? glyphs.end : glyphs.branch;
+        const arrow = mapping.direction === "reverse" ? "device → host" : "host → device";
+        lines.push(
+          `${style.dim(branch, capabilities)} ${clean(arrow)} · ${clean(mapping.device)} ↔ ${clean(mapping.host)}`,
+        );
+      });
+    }
+  }
   if (hasPlan(result.data)) {
     const steps = result.data.plan.steps;
     lines.push(style.strong("Dry-run plan", capabilities));
@@ -236,6 +266,18 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
   if (isPairData(result.data)) {
     sink.write(`endpoint=${clean(result.data.endpoint)}\n`);
     sink.write("paired=true\n");
+  }
+  if (isPortsData(result.data)) {
+    sink.write(`direction=${clean(result.data.direction)}\n`);
+    sink.write(`action=${clean(result.data.action)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`mapping_count=${String(result.data.mappings.length)}\n`);
+    result.data.mappings.forEach((mapping, index) => {
+      sink.write(
+        `mapping_${String(index)}=${clean(mapping.direction)}:${clean(mapping.device)}:${clean(mapping.host)}\n`,
+      );
+    });
   }
   if (hasPlan(result.data)) {
     sink.write("dry_run=true\n");

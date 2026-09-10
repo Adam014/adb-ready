@@ -1,4 +1,7 @@
-export type CommandName = "connect" | "devices" | "doctor" | "help" | "pair" | "version";
+import type { PortAction } from "../app/commands.js";
+import type { PortDirection } from "../ports/model.js";
+
+export type CommandName = "connect" | "devices" | "doctor" | "help" | "pair" | "ports" | "version";
 export type OutputFormat = "human" | "json" | "ndjson" | "plain";
 
 export interface CliOptions {
@@ -24,6 +27,10 @@ export interface CliOptions {
   pairingCodeStdin: boolean;
   remembered: boolean;
   dryRun: boolean;
+  portDirection?: PortDirection;
+  portAction?: PortAction;
+  primaryPort?: string;
+  secondaryPort?: string;
 }
 
 export interface CliParseFailure {
@@ -40,7 +47,15 @@ export interface CliParseSuccess {
 
 export type CliParseResult = CliParseFailure | CliParseSuccess;
 
-const COMMANDS = new Set<CommandName>(["connect", "devices", "doctor", "help", "pair", "version"]);
+const COMMANDS = new Set<CommandName>([
+  "connect",
+  "devices",
+  "doctor",
+  "help",
+  "pair",
+  "ports",
+  "version",
+]);
 const BOOLEAN_OPTIONS = new Set([
   "-h",
   "--help",
@@ -109,6 +124,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let pairingCodeStdin = false;
   let remembered = false;
   let dryRun = false;
+  let portDirection: PortDirection | undefined;
+  let portAction: PortAction | undefined;
+  let primaryPort: string | undefined;
+  let secondaryPort: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -141,6 +160,28 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         endpoint = argument;
         continue;
       }
+      if (command === "ports") {
+        if (portDirection === undefined && (argument === "forward" || argument === "reverse")) {
+          portDirection = argument;
+          continue;
+        }
+        if (
+          portDirection !== undefined &&
+          portAction === undefined &&
+          (argument === "add" || argument === "list" || argument === "remove")
+        ) {
+          portAction = argument;
+          continue;
+        }
+        if (portAction !== undefined && portAction !== "list" && primaryPort === undefined) {
+          primaryPort = argument;
+          continue;
+        }
+        if (portAction === "add" && secondaryPort === undefined) {
+          secondaryPort = argument;
+          continue;
+        }
+      }
       return failure("CLI_USAGE", `Unexpected argument: ${argument}`);
     }
 
@@ -165,7 +206,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         command === "connect" ||
         command === "doctor" ||
         command === "devices" ||
-        command === "pair"
+        command === "pair" ||
+        command === "ports"
       ) {
         helpTarget = command;
       }
@@ -300,13 +342,18 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
-  if (select && command !== "devices") {
-    return failure("CLI_USAGE", "--select can only be used with the devices command.", "--select");
-  }
-  if ((device !== undefined || transportId !== undefined) && command !== "devices") {
+  const targetCommand = command === "devices" || command === "ports";
+  if (select && !targetCommand) {
     return failure(
       "CLI_USAGE",
-      "Target selection options can only be used with the devices command.",
+      "--select can only be used with a target-aware command.",
+      "--select",
+    );
+  }
+  if ((device !== undefined || transportId !== undefined) && !targetCommand) {
+    return failure(
+      "CLI_USAGE",
+      "Target selection options can only be used with a target-aware command.",
     );
   }
   if (select && nonInteractive) {
@@ -328,14 +375,35 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       "--pairing-code-stdin",
     );
   }
-  if (remembered && command !== "devices") {
-    return failure("CLI_USAGE", "--last can only be used with the devices command.", "--last");
+  if (remembered && !targetCommand) {
+    return failure("CLI_USAGE", "--last can only be used with a target-aware command.", "--last");
   }
   if (remembered && (select || device !== undefined || transportId !== undefined)) {
     return failure("CLI_USAGE", "--last cannot be combined with another target selector.");
   }
-  if (dryRun && command !== "connect" && command !== "pair") {
-    return failure("CLI_USAGE", "--dry-run can only be used with connect or pair.", "--dry-run");
+  if (dryRun && command !== "connect" && command !== "pair" && command !== "ports") {
+    return failure(
+      "CLI_USAGE",
+      "--dry-run can only be used with connect, pair, or ports.",
+      "--dry-run",
+    );
+  }
+  if (command === "ports") {
+    if (portDirection === undefined) {
+      return failure("CLI_USAGE", "ports requires a direction: reverse or forward.");
+    }
+    if (portAction === undefined) {
+      return failure("CLI_USAGE", `ports ${portDirection} requires list, add, or remove.`);
+    }
+    if (portAction === "list" && (primaryPort !== undefined || secondaryPort !== undefined)) {
+      return failure("CLI_USAGE", `ports ${portDirection} list does not accept a port.`);
+    }
+    if (portAction !== "list" && primaryPort === undefined) {
+      return failure("CLI_USAGE", `ports ${portDirection} ${portAction} requires a listen port.`);
+    }
+    if (portAction === "remove" && secondaryPort !== undefined) {
+      return failure("CLI_USAGE", `ports ${portDirection} remove accepts one port.`);
+    }
   }
 
   return {
@@ -363,6 +431,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       pairingCodeStdin,
       remembered,
       dryRun,
+      ...(portDirection === undefined ? {} : { portDirection }),
+      ...(portAction === undefined ? {} : { portAction }),
+      ...(primaryPort === undefined ? {} : { primaryPort }),
+      ...(secondaryPort === undefined ? {} : { secondaryPort }),
     },
   };
 }

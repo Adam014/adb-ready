@@ -6,10 +6,12 @@ import {
   type CommandDependencies,
   type CommandExecution,
   type DevicesData,
+  type PortsData,
   runConnect,
   runDevices,
   runDoctor,
   runPair,
+  runPorts,
   runWirelessDiscovery,
 } from "../app/commands.js";
 import { loadConfig } from "../config/loader.js";
@@ -54,6 +56,7 @@ Commands:
   doctor                 Inspect the local ADB environment
   devices                List visible Android targets
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
+  ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
   help [COMMAND]         Show help
   version                Show version
 
@@ -74,12 +77,12 @@ Execution:
   --adb-port PORT        Use an explicit ADB server port
   --config PATH          Use an explicit project configuration file
   --profile NAME         Use a named configuration profile
-  --select               Interactively select from listed devices
+  --select               Interactively select a target
   -s, --device SELECTOR  Select an exact serial or configured alias
   --transport-id ID      Select an exact ADB transport ID
   --last                 Select the last successfully verified target
   --pairing-code-stdin   Read the pairing code from stdin without echoing it
-  --dry-run              Show connect/pair operations without changing state
+  --dry-run              Show mutating operations without changing state
 
 Other:
   -h, --help             Show help
@@ -104,6 +107,18 @@ Lists every target visible to ADB. Add --select to open the keyboard picker.
 
 Pairs with Android Wireless debugging using a hidden six-digit code prompt.
 For automation, pipe the code and add --pairing-code-stdin.
+`,
+  ports: `Usage:
+  adb-ready ports reverse list [options]
+  adb-ready ports reverse add DEVICE_PORT [HOST_PORT] [options]
+  adb-ready ports reverse remove DEVICE_PORT [options]
+  adb-ready ports forward list [options]
+  adb-ready ports forward add HOST_PORT [DEVICE_PORT] [options]
+  adb-ready ports forward remove HOST_PORT [options]
+
+Manages TCP mappings for one deterministic Android target. A missing second
+port means the same port on both sides. Add is idempotent and never overwrites
+an existing mapping. Use --dry-run to inspect the exact ADB plan.
 `,
 } as const;
 
@@ -484,7 +499,10 @@ async function runCliInternal(
   const outputCapabilities = capabilities(options, values, io, "output", options.format);
   let lastTarget: RememberedTarget | undefined;
   let stateWarning: Problem | undefined;
-  if (options.command === "devices" && (options.select || options.remembered)) {
+  if (
+    (options.command === "devices" || options.command === "ports") &&
+    (options.select || options.remembered)
+  ) {
     const state = await (dependencies.readTargetState ?? readTargetState)({
       env: io.env,
       ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
@@ -505,7 +523,7 @@ async function runCliInternal(
         correlation: { commandId: "state" },
       };
       if (options.remembered) {
-        const failure = failureResult("devices", [problem], dependencies);
+        const failure = failureResult(options.command, [problem], dependencies);
         renderFailure(failure, options.format, io);
         return ExitCode.Environment;
       }
@@ -520,7 +538,7 @@ async function runCliInternal(
   }
   const bus = dependencies.bus ?? new EventBus(dependencies.clock);
   const commandDependencies = { ...dependencies, bus };
-  const config = {
+  const config: import("../app/commands.js").CommandConfig = {
     ...(values.adbPath === undefined ? {} : { adbPath: values.adbPath }),
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
     ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
@@ -535,6 +553,28 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
+  if (options.command === "ports" && options.select) {
+    const inventory = await runDevices(config, commandDependencies, signal);
+    const selected = await selectDevice(inventory, io, errorCapabilities, lastTarget, signal);
+    if (!selected.result.ok || selected.result.data?.selected === undefined) {
+      renderResult(
+        { ...selected.result, command: "ports" },
+        {
+          format: "human",
+          capabilities: errorCapabilities,
+          sink: io.error,
+          verbose: options.verbose,
+        },
+      );
+      return selected.exitCode;
+    }
+    const transport = selected.result.data.selected.transport;
+    if (transport.transportId === undefined) {
+      config.targetSelector = transport.serial;
+    } else {
+      config.targetTransportId = transport.transportId;
+    }
+  }
   let endpoint = options.endpoint;
   let endpointWasDiscovered = false;
   let discoveredEndpointCandidates: string[] | undefined;
@@ -684,7 +724,8 @@ async function runCliInternal(
     | CommandExecution<DevicesData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDoctor>>
-    | Awaited<ReturnType<typeof runPair>>;
+    | Awaited<ReturnType<typeof runPair>>
+    | Awaited<ReturnType<typeof runPorts>>;
   try {
     if (options.command === "doctor") {
       execution = await runDoctor(config, commandDependencies, signal);
@@ -705,7 +746,7 @@ async function runCliInternal(
         commandDependencies,
         signal,
       );
-    } else {
+    } else if (options.command === "pair") {
       execution = await runPair(
         endpoint,
         pairingCode ?? "",
@@ -718,6 +759,32 @@ async function runCliInternal(
                 : { discoveredEndpointCandidates }),
             }
           : config,
+        commandDependencies,
+        signal,
+      );
+    } else {
+      const direction = options.portDirection;
+      const action = options.portAction;
+      if (direction === undefined || action === undefined) {
+        throw new Error("Validated ports command is missing its direction or action.");
+      }
+      execution = await runPorts(
+        {
+          direction,
+          action,
+          ...(direction === "reverse"
+            ? {
+                ...(options.primaryPort === undefined ? {} : { devicePort: options.primaryPort }),
+                ...(options.secondaryPort === undefined ? {} : { hostPort: options.secondaryPort }),
+              }
+            : {
+                ...(options.primaryPort === undefined ? {} : { hostPort: options.primaryPort }),
+                ...(options.secondaryPort === undefined
+                  ? {}
+                  : { devicePort: options.secondaryPort }),
+              }),
+        },
+        config,
         commandDependencies,
         signal,
       );
@@ -763,6 +830,16 @@ async function runCliInternal(
     } else if (options.command === "devices") {
       const data = execution.result.data as DevicesData;
       if (data.selected !== undefined) {
+        selectedTarget = {
+          serial: data.selected.transport.serial,
+          ...(data.selected.target.hardwareSerial === undefined
+            ? {}
+            : { hardwareSerial: data.selected.target.hardwareSerial }),
+        };
+      }
+    } else if (options.command === "ports") {
+      const data = execution.result.data as PortsData | null;
+      if (data !== null) {
         selectedTarget = {
           serial: data.selected.transport.serial,
           ...(data.selected.target.hardwareSerial === undefined

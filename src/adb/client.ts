@@ -44,6 +44,18 @@ export interface AdbObservation<T> {
   value: T;
 }
 
+export interface AdbTargetSelector {
+  serial: string;
+  transportId?: string;
+}
+
+function targetArguments(target: string | AdbTargetSelector): string[] {
+  if (typeof target === "string") {
+    return ["-s", target];
+  }
+  return target.transportId === undefined ? ["-s", target.serial] : ["-t", target.transportId];
+}
+
 function processMetadata(result: ProcessResult): Record<string, JsonValue> {
   return {
     durationMs: result.durationMs,
@@ -196,21 +208,21 @@ export class AdbClient {
   }
 
   async listPortMappings(
-    serial: string,
+    target: string | AdbTargetSelector,
     direction: "forward" | "reverse",
     signal?: AbortSignal,
   ): Promise<AdbObservation<AdbPortMapping[]>> {
     return await this.#observe(
       `${direction}-list`,
-      `Listing ${direction} mappings for ${serial}`,
-      ["-s", serial, direction, "--list"],
+      `Listing ${direction} mappings for ${typeof target === "string" ? target : target.serial}`,
+      [...targetArguments(target), direction, "--list"],
       parseAdbPortMappings,
       signal,
     );
   }
 
   async addPortMapping(
-    serial: string,
+    target: string | AdbTargetSelector,
     direction: "forward" | "reverse",
     firstEndpoint: string,
     secondEndpoint: string,
@@ -218,23 +230,23 @@ export class AdbClient {
   ): Promise<AdbObservation<string | undefined>> {
     return await this.#observe(
       `${direction}-add`,
-      `Adding ${direction} mapping for ${serial}`,
-      ["-s", serial, direction, "--no-rebind", firstEndpoint, secondEndpoint],
+      `Adding ${direction} mapping for ${typeof target === "string" ? target : target.serial}`,
+      [...targetArguments(target), direction, "--no-rebind", firstEndpoint, secondEndpoint],
       parseSingleLine,
       signal,
     );
   }
 
   async removePortMapping(
-    serial: string,
+    target: string | AdbTargetSelector,
     direction: "forward" | "reverse",
     listenEndpoint: string,
     signal?: AbortSignal,
   ): Promise<AdbObservation<undefined>> {
     return await this.#observe(
       `${direction}-remove`,
-      `Removing ${direction} mapping for ${serial}`,
-      ["-s", serial, direction, "--remove", listenEndpoint],
+      `Removing ${direction} mapping for ${typeof target === "string" ? target : target.serial}`,
+      [...targetArguments(target), direction, "--remove", listenEndpoint],
       () => undefined,
       signal,
     );

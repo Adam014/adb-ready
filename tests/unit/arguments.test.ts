@@ -113,6 +113,59 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses explicit reverse and forward port workflows", () => {
+    expect(parseArguments(["ports", "reverse", "list", "--device", "pixel"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "ports",
+        portDirection: "reverse",
+        portAction: "list",
+        device: "pixel",
+      },
+    });
+    expect(parseArguments(["ports", "reverse", "add", "8081", "3000", "--dry-run"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "ports",
+        portDirection: "reverse",
+        portAction: "add",
+        primaryPort: "8081",
+        secondaryPort: "3000",
+        dryRun: true,
+      },
+    });
+    expect(parseArguments(["ports", "forward", "remove", "9229", "--last"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "ports",
+        portDirection: "forward",
+        portAction: "remove",
+        primaryPort: "9229",
+        remembered: true,
+      },
+    });
+    expect(parseArguments(["ports", "--help"])).toMatchObject({
+      ok: true,
+      options: { command: "help", helpTarget: "ports" },
+    });
+  });
+
+  test("rejects incomplete and over-specified port workflows", () => {
+    expect(parseArguments(["ports"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(parseArguments(["ports", "sideways", "list"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["ports", "reverse", "add"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["ports", "forward", "remove", "8081", "3000"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("rejects unknown commands and options", () => {
     expect(parseArguments(["launch"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
     expect(parseArguments(["doctor", "--magical"])).toEqual({

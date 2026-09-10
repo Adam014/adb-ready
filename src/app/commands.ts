@@ -29,6 +29,13 @@ import {
 import { locateAdb } from "../platform/executable.js";
 import type { ProcessResult, ProcessRunner } from "../platform/process-runner.js";
 import { detectRuntime, type RuntimeInfo } from "../platform/runtime.js";
+import {
+  mappingArguments,
+  normalizePortMapping,
+  type PortDirection,
+  type TcpPortMapping,
+  tcpEndpoint,
+} from "../ports/model.js";
 import { type AndroidTarget, buildTargetInventory, isStableAdbSerial } from "../target/model.js";
 import { type SelectedTarget, selectTarget } from "../target/selection.js";
 
@@ -126,6 +133,29 @@ export interface WirelessDiscoveryData {
   adbPath: string;
   kind: "connect" | "pairing";
   services: AdbMdnsService[];
+}
+
+export type PortAction = "add" | "list" | "remove";
+
+export interface PortCommandRequest {
+  direction: PortDirection;
+  action: PortAction;
+  hostPort?: string | number;
+  devicePort?: string | number;
+}
+
+export interface PortsData {
+  adbPath: string;
+  action: PortAction;
+  direction: PortDirection;
+  selected: SelectedTarget;
+  mappings: TcpPortMapping[];
+  status: "added" | "already-exists" | "listed" | "not-found" | "removed" | "planned";
+  requested?: {
+    host: string;
+    device: string;
+  };
+  plan?: OperationPlan;
 }
 
 interface CommandContext {
@@ -698,6 +728,305 @@ export async function runDevices(
       targets: inspection.targets,
       discovery: inspection.discovery,
       ...(selected === undefined ? {} : { selected }),
+    },
+    problems,
+  );
+}
+
+function portInputProblem(
+  field: "device" | "host",
+  value: string | number | undefined,
+  commandId: string,
+): Problem {
+  return commandProblem(
+    ProblemCode.InvalidPort,
+    "input.port",
+    `The ${field} port is invalid.`,
+    "Use a TCP port from 1 to 65535, for example 8081 or tcp:8081.",
+    commandId,
+    [{ source: "input", field: `${field}Port`, value: value === undefined ? null : String(value) }],
+  );
+}
+
+function requestedPortMapping(
+  request: PortCommandRequest,
+  commandId: string,
+): { host: string; device: string } | Problem {
+  const primary = request.direction === "reverse" ? request.devicePort : request.hostPort;
+  if (primary === undefined) {
+    return portInputProblem(
+      request.direction === "reverse" ? "device" : "host",
+      primary,
+      commandId,
+    );
+  }
+  const primaryEndpoint = tcpEndpoint(primary);
+  if (primaryEndpoint === undefined) {
+    return portInputProblem(
+      request.direction === "reverse" ? "device" : "host",
+      primary,
+      commandId,
+    );
+  }
+  const secondary =
+    request.direction === "reverse"
+      ? (request.hostPort ?? request.devicePort)
+      : (request.devicePort ?? request.hostPort);
+  if (secondary === undefined) {
+    return portInputProblem(
+      request.direction === "reverse" ? "host" : "device",
+      secondary,
+      commandId,
+    );
+  }
+  const secondaryEndpoint = tcpEndpoint(secondary);
+  if (secondaryEndpoint === undefined) {
+    return portInputProblem(
+      request.direction === "reverse" ? "host" : "device",
+      secondary,
+      commandId,
+    );
+  }
+  return request.direction === "reverse"
+    ? { host: secondaryEndpoint, device: primaryEndpoint }
+    : { host: primaryEndpoint, device: secondaryEndpoint };
+}
+
+function listenEndpoint(
+  direction: PortDirection,
+  mapping: { host: string; device: string },
+): string {
+  return direction === "forward" ? mapping.host : mapping.device;
+}
+
+function targetForAdb(selection: SelectedTarget): { serial: string; transportId?: string } {
+  return {
+    serial: selection.transport.serial,
+    ...(selection.transport.transportId === undefined
+      ? {}
+      : { transportId: selection.transport.transportId }),
+  };
+}
+
+export async function runPorts(
+  request: PortCommandRequest,
+  config: CommandConfig = {},
+  dependencies: CommandDependencies = {},
+  signal?: AbortSignal,
+): Promise<CommandExecution<PortsData>> {
+  const context = createContext(`ports ${request.direction} ${request.action}`, dependencies);
+  const problems: Problem[] = [];
+  const requested =
+    request.action === "list" ? undefined : requestedPortMapping(request, context.commandId);
+  if (requested !== undefined && "code" in requested) {
+    problems.push(requested);
+    return finish<PortsData>(context, null, problems);
+  }
+
+  const executable = await resolveAdb(context, config, dependencies);
+  if (executable === undefined) {
+    problems.push(adbNotFoundProblem({ commandId: context.commandId }, config.adbPath));
+    return finish<PortsData>(context, null, problems);
+  }
+  const client = createClient(executable, context, config, dependencies);
+  const devices = await client.devices(signal);
+  if (!processSucceeded(devices.process)) {
+    problems.push(operationProblem("devices", devices, context.commandId));
+    return finish<PortsData>(context, null, problems);
+  }
+  const inspection = await inspectTargets(client, devices.value, context.commandId, signal);
+  if (inspection.interruption !== undefined) {
+    problems.push(inspection.interruption);
+    return finish<PortsData>(context, null, problems);
+  }
+  problems.push(...inspection.optionalProblems);
+  problems.push(...targetInventoryProblems(inspection.targets, { commandId: context.commandId }));
+  const selection = selectTarget(inspection.targets, {
+    ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
+    ...(config.targetTransportId === undefined ? {} : { transportId: config.targetTransportId }),
+    ...(config.targetAliases === undefined ? {} : { aliases: config.targetAliases }),
+    ...(config.rememberedSerial === undefined ? {} : { rememberedSerial: config.rememberedSerial }),
+    ...(config.rememberedHardwareSerial === undefined
+      ? {}
+      : { rememberedHardwareSerial: config.rememberedHardwareSerial }),
+    ...(config.rememberedOnly === undefined ? {} : { rememberedOnly: config.rememberedOnly }),
+  });
+  if (selection.kind !== "selected") {
+    problems.push(targetSelectionProblem(selection, { commandId: context.commandId }));
+    return finish<PortsData>(context, null, problems);
+  }
+
+  const target = targetForAdb(selection.selection);
+  const listed = await client.listPortMappings(target, request.direction, signal);
+  if (!processSucceeded(listed.process)) {
+    problems.push(operationProblem(`${request.direction}-list`, listed, context.commandId));
+    return finish<PortsData>(context, null, problems);
+  }
+  const mappings = listed.value.map((mapping) => normalizePortMapping(request.direction, mapping));
+  if (request.action === "list") {
+    return finish(
+      context,
+      {
+        adbPath: redactedPath(executable),
+        action: request.action,
+        direction: request.direction,
+        selected: selection.selection,
+        mappings,
+        status: "listed",
+      },
+      problems,
+    );
+  }
+
+  if (requested === undefined) {
+    throw new Error("Port request validation did not produce a mapping.");
+  }
+  const requestedListen = listenEndpoint(request.direction, requested);
+  const existingAtEndpoint = mappings.find(
+    (mapping) => listenEndpoint(request.direction, mapping) === requestedListen,
+  );
+  const base = {
+    adbPath: redactedPath(executable),
+    action: request.action,
+    direction: request.direction,
+    selected: selection.selection,
+    requested,
+  };
+
+  if (request.action === "add" && existingAtEndpoint !== undefined) {
+    if (
+      existingAtEndpoint.host === requested.host &&
+      existingAtEndpoint.device === requested.device
+    ) {
+      return finish(context, { ...base, mappings, status: "already-exists" as const }, problems);
+    }
+    problems.push(
+      commandProblem(
+        ProblemCode.PortMappingConflict,
+        "adb.port.conflict",
+        `The ${request.direction} listen port is already mapped.`,
+        "Remove the existing mapping explicitly or choose another port; ADB Ready will not overwrite it.",
+        context.commandId,
+        [
+          { source: "adb.port", field: "listen", value: requestedListen },
+          { source: "adb.port", field: "host", value: existingAtEndpoint.host },
+          { source: "adb.port", field: "device", value: existingAtEndpoint.device },
+        ],
+      ),
+    );
+    return finish<PortsData>(context, { ...base, mappings, status: "already-exists" }, problems);
+  }
+
+  const [firstEndpoint, secondEndpoint] = mappingArguments(
+    request.direction,
+    requested.host,
+    requested.device,
+  );
+  if (config.dryRun) {
+    const args =
+      request.action === "add"
+        ? [
+            ...(target.transportId === undefined
+              ? ["-s", target.serial]
+              : ["-t", target.transportId]),
+            request.direction,
+            "--no-rebind",
+            firstEndpoint,
+            secondEndpoint,
+          ]
+        : [
+            ...(target.transportId === undefined
+              ? ["-s", target.serial]
+              : ["-t", target.transportId]),
+            request.direction,
+            "--remove",
+            requestedListen,
+          ];
+    return finish(
+      context,
+      {
+        ...base,
+        mappings,
+        status: "planned",
+        plan: {
+          schemaVersion: SCHEMA_VERSION,
+          dryRun: true,
+          steps: [
+            {
+              id: `${request.direction}-${request.action}`,
+              title: `${request.action === "add" ? "Add" : "Remove"} ${request.direction} mapping ${requested.device} ↔ ${requested.host}`,
+              risk: "device-reversible",
+              executable: redactedPath(executable),
+              args,
+            },
+            {
+              id: "verify-port-mapping",
+              title: `Verify ${request.direction} mappings`,
+              risk: "read-only",
+              executable: redactedPath(executable),
+              args: [
+                ...(target.transportId === undefined
+                  ? ["-s", target.serial]
+                  : ["-t", target.transportId]),
+                request.direction,
+                "--list",
+              ],
+            },
+          ],
+        },
+      },
+      problems,
+    );
+  }
+
+  if (request.action === "remove" && existingAtEndpoint === undefined) {
+    return finish(context, { ...base, mappings, status: "not-found" }, problems);
+  }
+
+  const mutation =
+    request.action === "add"
+      ? await client.addPortMapping(
+          target,
+          request.direction,
+          firstEndpoint,
+          secondEndpoint,
+          signal,
+        )
+      : await client.removePortMapping(target, request.direction, requestedListen, signal);
+  if (!processSucceeded(mutation.process)) {
+    problems.push(
+      operationProblem(`${request.direction}-${request.action}`, mutation, context.commandId),
+    );
+    return finish<PortsData>(context, { ...base, mappings, status: "not-found" }, problems);
+  }
+  const verified = await client.listPortMappings(target, request.direction, signal);
+  if (!processSucceeded(verified.process)) {
+    problems.push(operationProblem(`${request.direction}-verify`, verified, context.commandId));
+    return finish<PortsData>(context, { ...base, mappings, status: "not-found" }, problems);
+  }
+  const verifiedMappings = verified.value.map((mapping) =>
+    normalizePortMapping(request.direction, mapping),
+  );
+  const isPresent = verifiedMappings.some(
+    (mapping) => mapping.host === requested.host && mapping.device === requested.device,
+  );
+  if ((request.action === "add" && !isPresent) || (request.action === "remove" && isPresent)) {
+    problems.push(
+      commandProblem(
+        ProblemCode.PortMappingVerificationFailed,
+        "adb.port.verification",
+        `ADB did not verify the ${request.direction} mapping change.`,
+        "The requested mutation returned success, but the follow-up mapping list disagreed.",
+        context.commandId,
+      ),
+    );
+  }
+  return finish(
+    context,
+    {
+      ...base,
+      mappings: verifiedMappings,
+      status: request.action === "add" ? "added" : "removed",
     },
     problems,
   );

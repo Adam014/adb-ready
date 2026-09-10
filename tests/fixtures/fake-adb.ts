@@ -11,6 +11,8 @@ const command = [
   "connect",
   "get-state",
   "pair",
+  "forward",
+  "reverse",
 ].find((candidate) => args.includes(candidate));
 const scenario = process.env.ADB_READY_FAKE_SCENARIO ?? "ready";
 
@@ -45,6 +47,10 @@ if (scenario === "failure") {
   process.stdout.write("device\n");
 } else if (command === "pair") {
   process.stdout.write(`Successfully paired to ${args.at(-1) ?? "fixture.local:41234"}\n`);
+} else if ((command === "forward" || command === "reverse") && args.includes("--list")) {
+  process.stdout.write("");
+} else if (command === "forward" || command === "reverse") {
+  process.stdout.write("");
 } else {
   process.stderr.write(`unsupported fake ADB arguments: ${args.join(" ")}\n`);
   process.exitCode = 1;

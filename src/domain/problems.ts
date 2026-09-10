@@ -34,6 +34,9 @@ export const ProblemCode = {
   WirelessPairingFailed: "WIRELESS_PAIRING_FAILED",
   DuplicateTargetTransport: "DUPLICATE_TARGET_TRANSPORT",
   UnstableTargetSerial: "UNSTABLE_TARGET_SERIAL",
+  InvalidPort: "INVALID_PORT",
+  PortMappingConflict: "PORT_MAPPING_CONFLICT",
+  PortMappingVerificationFailed: "PORT_MAPPING_VERIFICATION_FAILED",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {
