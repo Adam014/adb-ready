@@ -325,6 +325,69 @@ interface WirelessEndpointResolution {
   problem?: Problem;
 }
 
+function isConnectableDiscoveryService(service: AdbMdnsService): boolean {
+  return (
+    service.serviceType === "legacy" ||
+    (service.serviceType === "connect" && service.knownDevice !== false)
+  );
+}
+
+function pairingRequiredProblem(
+  connectServices: readonly AdbMdnsService[],
+  allServices: readonly AdbMdnsService[],
+  commandId: string,
+): Problem {
+  const pairingEndpoints = [
+    ...new Set(
+      allServices
+        .filter(({ serviceType }) => serviceType === "pairing")
+        .map(({ endpoint }) => endpoint.serial),
+    ),
+  ].sort();
+  const pairingEndpoint = pairingEndpoints.length === 1 ? pairingEndpoints[0] : undefined;
+  return {
+    code: ProblemCode.WirelessPairingRequired,
+    category: "target.authorization",
+    severity: "error",
+    summary: "The discovered wireless target must be paired first.",
+    detail:
+      pairingEndpoint === undefined
+        ? "ADB reports that this computer does not know the target. Open Pair device with pairing code on Android, then run adb-ready pair."
+        : `ADB reports that this computer does not know the target. Run adb-ready pair ${pairingEndpoint}, then connect it.`,
+    retryable: true,
+    evidence: [
+      {
+        source: "adb.mdns",
+        field: "unpairedEndpoints",
+        value: connectServices.map(({ endpoint }) => endpoint.serial),
+      },
+    ],
+    actions:
+      pairingEndpoint === undefined
+        ? [
+            {
+              id: "open_pairing_screen",
+              title: "Open Pair device with pairing code on the Android target",
+              kind: "user",
+              risk: "none",
+              automatic: false,
+            },
+          ]
+        : [
+            {
+              id: "pair_discovered_target",
+              title: `Pair ${pairingEndpoint}`,
+              kind: "command",
+              risk: "device-reversible",
+              automatic: false,
+              idempotent: false,
+              command: { executable: "adb-ready", args: ["pair", pairingEndpoint] },
+            },
+          ],
+    correlation: { commandId },
+  };
+}
+
 function serviceEndpointCandidates(service: AdbMdnsService): string[] {
   return [
     ...new Set([
@@ -684,7 +747,22 @@ async function resolveWirelessEndpoint(
   }
   const serviceKinds =
     serviceType === "connect" ? new Set(["connect", "legacy"]) : new Set(["pairing"]);
-  const services = mdns.value.filter((service) => serviceKinds.has(service.serviceType));
+  const discoveredServices = mdns.value.filter((service) => serviceKinds.has(service.serviceType));
+  const services =
+    serviceType === "connect"
+      ? discoveredServices.filter(isConnectableDiscoveryService)
+      : discoveredServices;
+  if (
+    serviceType === "connect" &&
+    services.length === 0 &&
+    discoveredServices.some(({ knownDevice }) => knownDevice === false)
+  ) {
+    return {
+      candidates: [],
+      discovered: true,
+      problem: pairingRequiredProblem(discoveredServices, mdns.value, commandId),
+    };
+  }
   const serviceGroups = new Map<string, AdbMdnsService[]>();
   for (const service of services) {
     const key = `${service.rawServiceType}\0${service.instance}`;
@@ -755,9 +833,23 @@ export async function runWirelessDiscovery(
     return finish<WirelessDiscoveryData>(context, null, problems);
   }
   const accepted = kind === "connect" ? new Set(["connect", "legacy"]) : new Set(["pairing"]);
+  const discoveredServices = mdns.value.filter((service) => accepted.has(service.serviceType));
+  if (
+    kind === "connect" &&
+    discoveredServices.length > 0 &&
+    discoveredServices.every(
+      ({ knownDevice, serviceType }) => serviceType === "connect" && knownDevice === false,
+    )
+  ) {
+    problems.push(pairingRequiredProblem(discoveredServices, mdns.value, context.commandId));
+    return finish(context, { adbPath: redactedPath(executable), kind, services: [] }, problems);
+  }
   const seen = new Set<string>();
-  const services = mdns.value.filter((service) => {
-    if (!accepted.has(service.serviceType) || seen.has(service.endpoint.serial)) {
+  const services = discoveredServices.filter((service) => {
+    if (
+      (kind === "connect" && !isConnectableDiscoveryService(service)) ||
+      seen.has(service.endpoint.serial)
+    ) {
       return false;
     }
     seen.add(service.endpoint.serial);

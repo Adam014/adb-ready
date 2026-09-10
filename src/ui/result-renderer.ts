@@ -79,7 +79,13 @@ function targetLabel(target: AndroidTarget): string {
 
 function wirelessServiceLabel(service: AdbMdnsService): string {
   const identity = service.givenName ?? service.deviceModel ?? service.instance;
-  return `${clean(identity)} · ${clean(service.endpoint.serial)} · ${clean(service.serviceType)}`;
+  const pairingState =
+    service.serviceType !== "connect" || service.knownDevice === undefined
+      ? ""
+      : service.knownDevice
+        ? " · paired"
+        : " · pair first";
+  return `${clean(identity)} · ${clean(service.endpoint.serial)} · ${clean(service.serviceType)}${pairingState}`;
 }
 
 function problemLines(

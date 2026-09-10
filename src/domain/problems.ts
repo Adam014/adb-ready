@@ -28,6 +28,7 @@ export const ProblemCode = {
   InvalidEndpoint: "INVALID_ENDPOINT",
   InvalidPairingCode: "INVALID_PAIRING_CODE",
   WirelessEndpointNotFound: "WIRELESS_ENDPOINT_NOT_FOUND",
+  WirelessPairingRequired: "WIRELESS_PAIRING_REQUIRED",
   MultipleWirelessEndpoints: "MULTIPLE_WIRELESS_ENDPOINTS",
   WirelessConnectionFailed: "WIRELESS_CONNECTION_FAILED",
   WirelessPairingFailed: "WIRELESS_PAIRING_FAILED",
@@ -503,7 +504,10 @@ export function noTargetsProblem(
   const connectEndpoints = [
     ...new Set(
       discoveredServices
-        .filter(({ serviceType }) => serviceType === "connect" || serviceType === "legacy")
+        .filter(
+          ({ knownDevice, serviceType }) =>
+            serviceType === "legacy" || (serviceType === "connect" && knownDevice !== false),
+        )
         .map(({ endpoint }) => endpoint.serial),
     ),
   ].sort();

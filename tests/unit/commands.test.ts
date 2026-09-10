@@ -436,6 +436,43 @@ describe("wireless target commands", () => {
     ]);
   });
 
+  test("requires pairing before offering an ADB 37 unknown TLS target for connection", async () => {
+    const requests: ProcessRequest[] = [];
+    const outputs = {
+      "host-features": "track_mdns\n",
+      "mdns-track-services":
+        'tls {\n service {\n instance: "phone-connect"\n service: "_adb-tls-connect._tcp"\n ipv4: "192.168.1.20"\n port: 37123\n }\n known_device: false\n}\n' +
+        'pair {\n service {\n instance: "phone-pair"\n service: "_adb-tls-pairing._tcp"\n ipv4: "192.168.1.20"\n port: 41234\n }\n}\n',
+    };
+    const discovery = await runWirelessDiscovery(
+      "connect",
+      {},
+      deterministicDependencies(fixtureRunner(outputs, requests)),
+    );
+    const connection = await runConnect(
+      undefined,
+      {},
+      deterministicDependencies(fixtureRunner(outputs, requests)),
+    );
+
+    expect(discovery.exitCode).toBe(ExitCode.Target);
+    expect(connection.exitCode).toBe(ExitCode.Target);
+    expect(discovery.result.problems[0]).toMatchObject({
+      code: ProblemCode.WirelessPairingRequired,
+      actions: [
+        {
+          command: {
+            executable: "adb-ready",
+            args: ["pair", "192.168.1.20:41234"],
+          },
+        },
+      ],
+    });
+    expect(connection.result.problems[0]?.code).toBe(ProblemCode.WirelessPairingRequired);
+    expect(discovery.result.data?.services).toEqual([]);
+    expect(requests.map(commandName)).not.toContain("connect");
+  });
+
   test("connects an explicit endpoint and verifies the final serial", async () => {
     const requests: ProcessRequest[] = [];
     const execution = await runConnect(
