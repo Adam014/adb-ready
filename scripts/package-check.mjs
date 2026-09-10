@@ -53,6 +53,7 @@ for (const required of [
   "examples/expo/adb-ready.config.json",
   "package.json",
   "schema/config-v1.schema.json",
+  "schema/agent-tools-v1.json",
 ]) {
   if (!files.includes(required)) {
     throw new Error(`required package file is missing: ${required}`);

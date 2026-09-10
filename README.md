@@ -106,6 +106,7 @@ Running `adb-ready` without a command opens the interactive workflow home.
 | install, inspect, launch, restart, or deep-link my app | [App lifecycle](./docs/apps-and-evidence.md#app-lifecycle) |
 | save a verified screenshot or bounded screen recording | [Evidence capture](./docs/apps-and-evidence.md#evidence-capture) |
 | give a developer or agent one bounded app/UI snapshot | [Structured inspection](./docs/apps-and-evidence.md#structured-inspection) |
+| safely tap, type, swipe, press keys, or wait for Android UI | [Safe UI automation](./docs/ui-automation.md) |
 | see only the Android logs that matter | [Focused logcat](./docs/logs-and-context.md#focused-logcat) |
 | understand why the last session failed | [Session problems](./docs/logs-and-context.md#session-history) |
 | prepare safe evidence for an AI assistant | [Diagnostic context](./docs/logs-and-context.md#diagnostic-context) |
@@ -172,6 +173,7 @@ server. It exposes focused Android workflows, not a generic shell or raw ADB.
 | [Targets and Wireless debugging](./docs/targets-and-wireless.md) | How are devices paired, connected, and selected safely? |
 | [Apps and evidence](./docs/apps-and-evidence.md) | How do I control one app and capture verified device evidence? |
 | [AI agent integration](./docs/agent-integration.md) | How do Codex, Claude Code, Cursor, or Copilot use safe Android tools? |
+| [Safe UI automation](./docs/ui-automation.md) | How do humans and agents act on current UI with verifiable evidence? |
 | [Logs and AI context](./docs/logs-and-context.md) | What is captured, redacted, saved, and exported? |
 | [Configuration](./docs/configuration.md) | How do projects, profiles, hooks, and precedence work? |
 | [Automation](./docs/automation.md) | What are the JSON, NDJSON, stdout, and exit-code contracts? |
@@ -201,6 +203,8 @@ Android transport backend.
 - npm publication is prepared for short-lived OIDC credentials and provenance.
 - AI clients receive typed bounded tools; raw shell/ADB and destructive app
   removal are not exposed through MCP.
+- UI references are bound to the current hierarchy digest, so stale targets are
+  rejected before input is sent.
 
 ## Project
 

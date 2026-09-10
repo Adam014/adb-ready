@@ -145,11 +145,16 @@ Later tools cannot silently switch to another target.
 | Host and target readiness | `doctor`, `list_targets`, `ensure_ready` |
 | App identity and lifecycle | `resolve_app`, `install_app`, `launch_app`, `restart_app`, `open_url` |
 | Current evidence | `inspect_app`, `inspect_ui`, `capture_screenshot` |
+| Safe UI actions | `tap_ui`, `long_press_ui`, `swipe_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui` |
 | Saved diagnostics | `get_session_problems`, `compile_debug_context` |
 
 The `adb-ready://sessions` resource lists saved local sessions. Tool results
 contain the same structured success, problem, evidence, and verification data
 used by CLI JSON output.
+
+The npm package also ships `schema/agent-tools-v1.json`, generated from the
+server's real `tools/list` response during every build. Integrations can inspect
+version-matched input schemas and safety annotations without starting ADB.
 
 ## Safety boundary
 
@@ -158,6 +163,8 @@ used by CLI JSON output.
 - Local APK installation accepts only a real path inside the project.
 - Screenshots require an explicit tool call and are stored as project files.
 - UI hierarchy and app inspection are marked sensitive and remain bounded.
+- UI references are checked against a fresh hierarchy digest before mutation;
+  stale references are rejected.
 - Data clearing and uninstall are intentionally absent from the agent surface.
 - Tool annotations help clients request approval, but ADB Ready enforces its
   own target, path, and destructive-action rules.

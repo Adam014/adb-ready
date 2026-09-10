@@ -21,6 +21,7 @@ import type { LoadedConfig } from "../config/types.js";
 import type { ResultEnvelope } from "../domain/contracts.js";
 import { runCapture } from "../evidence/capture.js";
 import { runInspectApp, runInspectUi } from "../evidence/inspect.js";
+import { runUiAction } from "../evidence/ui-actions.js";
 import { selectTarget } from "../target/selection.js";
 
 interface BoundTarget {
@@ -113,7 +114,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     { name: "adb-ready", version: options.version ?? manifest.version },
     {
       instructions:
-        "Call ensure_ready before target-bound work. Treat inspect_ui and screenshots as sensitive. Never infer success when ok=false or verified=false.",
+        "Call ensure_ready before target-bound work. Treat inspect_ui and screenshots as sensitive. Use digest-scoped UI refs when possible. Never infer success when ok=false or verified=false.",
     },
   );
   const load = async () => await loadConfig({ cwd: options.cwd, env: options.env });
@@ -368,6 +369,167 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         {
           ...(interactiveOnly === undefined ? {} : { interactiveOnly }),
           ...(maxDepth === undefined ? {} : { maxDepth }),
+        },
+        commandConfig(loaded, bound),
+        dependencies,
+        signal,
+      );
+      bound ??= selectedTarget(execution.result.data);
+      return toolResult(execution.result);
+    },
+  );
+  const pointSchema = z.union([
+    z.object({ ref: z.string().regex(/^ui:[a-f0-9]{12}:\d+$/u) }),
+    z.object({ x: z.number().int().min(0).max(100_000), y: z.number().int().min(0).max(100_000) }),
+  ]);
+  for (const action of ["tap", "long-press"] as const) {
+    register(
+      `${action === "tap" ? "tap" : "long_press"}_ui`,
+      `${action === "tap" ? "Tap" : "Long-press"} a current digest-scoped UI ref or explicit display coordinate, then compare UI state.`,
+      z.object({ target: pointSchema, dryRun: z.boolean().optional() }),
+      { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      async ({ target, dryRun }, signal, loaded) => {
+        const request =
+          action === "tap"
+            ? "ref" in target
+              ? {
+                  action: "tap" as const,
+                  ref: target.ref,
+                  ...(dryRun === undefined ? {} : { dryRun }),
+                }
+              : {
+                  action: "tap" as const,
+                  x: target.x,
+                  y: target.y,
+                  ...(dryRun === undefined ? {} : { dryRun }),
+                }
+            : "ref" in target
+              ? {
+                  action: "long-press" as const,
+                  ref: target.ref,
+                  ...(dryRun === undefined ? {} : { dryRun }),
+                }
+              : {
+                  action: "long-press" as const,
+                  x: target.x,
+                  y: target.y,
+                  ...(dryRun === undefined ? {} : { dryRun }),
+                };
+        const execution = await runUiAction(
+          request,
+          commandConfig(loaded, bound),
+          dependencies,
+          signal,
+        );
+        bound ??= selectedTarget(execution.result.data);
+        return toolResult(execution.result);
+      },
+    );
+  }
+  register(
+    "swipe_ui",
+    "Swipe in a screen-relative direction or between explicit display coordinates, then compare UI state.",
+    z.object({
+      direction: z.enum(["down", "left", "right", "up"]).optional(),
+      x1: z.number().int().min(0).max(100_000).optional(),
+      y1: z.number().int().min(0).max(100_000).optional(),
+      x2: z.number().int().min(0).max(100_000).optional(),
+      y2: z.number().int().min(0).max(100_000).optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    async ({ direction, x1, y1, x2, y2, dryRun }, signal, loaded) => {
+      const coordinateCount = [x1, y1, x2, y2].filter((value) => value !== undefined).length;
+      if (
+        (direction === undefined && coordinateCount !== 4) ||
+        (direction !== undefined && coordinateCount !== 0)
+      ) {
+        return inputFailure(
+          "MCP_UI_SWIPE_INPUT",
+          "Pass either direction or all four coordinates, not both.",
+        );
+      }
+      const request =
+        direction !== undefined
+          ? { action: "swipe" as const, direction, ...(dryRun === undefined ? {} : { dryRun }) }
+          : {
+              action: "swipe" as const,
+              x1: x1 ?? 0,
+              y1: y1 ?? 0,
+              x2: x2 ?? 0,
+              y2: y2 ?? 0,
+              ...(dryRun === undefined ? {} : { dryRun }),
+            };
+      const execution = await runUiAction(
+        request,
+        commandConfig(loaded, bound),
+        dependencies,
+        signal,
+      );
+      bound ??= selectedTarget(execution.result.data);
+      return toolResult(execution.result);
+    },
+  );
+  register(
+    "type_text_ui",
+    "Type conservative shell-safe text into the focused Android field and optionally press enter.",
+    z.object({
+      text: z.string().min(1).max(256),
+      submit: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    async ({ text, submit, dryRun }, signal, loaded) => {
+      const execution = await runUiAction(
+        {
+          action: "type",
+          text,
+          ...(submit === undefined ? {} : { submit }),
+          ...(dryRun === undefined ? {} : { dryRun }),
+        },
+        commandConfig(loaded, bound),
+        dependencies,
+        signal,
+      );
+      bound ??= selectedTarget(execution.result.data);
+      return toolResult(execution.result);
+    },
+  );
+  register(
+    "press_key_ui",
+    "Press one allowlisted Android navigation or volume key, then compare UI state.",
+    z.object({
+      key: z.enum(["back", "enter", "home", "menu", "volume-down", "volume-up"]),
+      dryRun: z.boolean().optional(),
+    }),
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    async ({ key, dryRun }, signal, loaded) => {
+      const execution = await runUiAction(
+        { action: "press", key, ...(dryRun === undefined ? {} : { dryRun }) },
+        commandConfig(loaded, bound),
+        dependencies,
+        signal,
+      );
+      bound ??= selectedTarget(execution.result.data);
+      return toolResult(execution.result);
+    },
+  );
+  register(
+    "wait_for_ui",
+    "Wait a bounded time for an exact id=, text=, desc=, or package= selector to be visible or gone.",
+    z.object({
+      selector: z.string().min(3).max(264),
+      state: z.enum(["gone", "visible"]).optional(),
+      timeoutMs: z.number().int().min(100).max(120_000).optional(),
+    }),
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ selector, state, timeoutMs }, signal, loaded) => {
+      const execution = await runUiAction(
+        {
+          action: "wait",
+          selector,
+          ...(state === undefined ? {} : { state }),
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
         },
         commandConfig(loaded, bound),
         dependencies,

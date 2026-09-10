@@ -234,6 +234,7 @@ try {
       ["dev help", ["dev", "--help"], "adb-ready dev"],
       ["pair help", ["help", "pair"], "adb-ready pair"],
       ["ports help", ["ports", "--help"], "adb-ready ports reverse"],
+      ["UI help", ["ui", "--help"], "adb-ready ui tap"],
       ["version flag", ["--version"], manifest.version],
       ["version command", ["version"], manifest.version],
     ]) {
@@ -256,6 +257,21 @@ try {
       !agentPayload.data?.content?.includes('"adb-ready"')
     ) {
       throw new Error(`${alias} agent setup: invalid project configuration plan`);
+    }
+    assertions += 1;
+
+    const uiPlan = command(
+      alias,
+      ["ui", "press", "back", "--dry-run", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(uiPlan, 0, `${alias} UI dry-run`);
+    const uiPayload = parseJson(uiPlan.stdout, `${alias} UI dry-run`);
+    if (
+      uiPayload.data?.status !== "planned" ||
+      uiPayload.data?.plan?.steps?.[0]?.args?.join(" ") !== "-t 1 shell input keyevent 4"
+    ) {
+      throw new Error(`${alias} UI: invalid packaged dry-run plan`);
     }
     assertions += 1;
 

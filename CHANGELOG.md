@@ -20,11 +20,13 @@ breaking changes.
   atomically published project-local evidence files with SHA-256 metadata.
 - Inspect one app and the current accessibility hierarchy as bounded,
   explicitly sensitive snapshots with digest-scoped UI references.
-- Give local AI agents 13 typed Android tools and saved-session context over a
+- Give local AI agents 19 typed Android tools and saved-session context over a
   tested Node.js, Bun, and Deno MCP stdio server without exposing raw shell/ADB
   or destructive app removal.
 - Generate or safely merge project MCP setup for Codex, Claude Code, Cursor,
   and VS Code, with non-mutating snippets for Windsurf and generic clients.
+- Safely tap, long-press, swipe, type, press allowlisted keys, and wait for exact
+  UI postconditions with stale-reference protection and before/after evidence.
 - Replace the command-heavy interactive home with focused workflow categories
   and progressive disclosure.
 

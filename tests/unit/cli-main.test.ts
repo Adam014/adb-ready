@@ -793,6 +793,54 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
+  test("routes a safe UI action and emits structured verification", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    let snapshots = 0;
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("uiautomator")) {
+        snapshots += 1;
+        return result(
+          request,
+          snapshots === 1
+            ? '<?xml version="1.0"?><hierarchy><node text="Open" /></hierarchy>'
+            : '<?xml version="1.0"?><hierarchy><node text="Done" /></hierarchy>',
+        );
+      }
+      return result(request, "");
+    };
+    const exitCode = await runCli(
+      ["ui", "press", "back", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      ok: true,
+      command: "ui press",
+      data: {
+        action: "press",
+        status: "completed",
+        verified: true,
+        verification: "ui-changed",
+        selected: { transport: { serial: "USB-1" } },
+      },
+    });
+    expect(streams.error.value).toBe("");
+  });
+
   test("dry-runs a destructive app command without confirmation or mutation", async () => {
     const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
     const fixture = dependencies(

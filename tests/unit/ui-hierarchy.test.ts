@@ -37,6 +37,7 @@ describe("UI hierarchy snapshots", () => {
   });
 
   test("filters to actionable nodes without reporting intentional filtering as truncation", () => {
+    const full = parseUiHierarchy(XML);
     const snapshot = parseUiHierarchy(XML, { interactiveOnly: true });
     expect(snapshot).toMatchObject({
       complete: true,
@@ -45,6 +46,8 @@ describe("UI hierarchy snapshots", () => {
       truncated: false,
       nodes: [{ resourceId: "com.example.app:id/open", clickable: true }],
     });
+    expect(snapshot?.digest).toBe(full?.digest);
+    expect(snapshot?.nodes[0]?.ref).toBe(full?.nodes[2]?.ref);
   });
 
   test("reports depth and node limits instead of silently dropping hierarchy data", () => {
@@ -58,6 +61,7 @@ describe("UI hierarchy snapshots", () => {
       returnedNodes: 2,
       truncated: true,
     });
+    expect(parseUiHierarchy(XML, { maxNodes: 2 })?.digest).toBe(parseUiHierarchy(XML)?.digest);
     expect(parseUiHierarchy("secure window returned no hierarchy")).toBeUndefined();
   });
 });

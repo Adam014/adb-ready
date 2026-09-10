@@ -100,7 +100,8 @@ export function parseUiHierarchy(
   const xml = output.slice(xmlStart, xmlEnd + "</hierarchy>".length);
   const maxDepth = options.maxDepth ?? 25;
   const maxNodes = options.maxNodes ?? 2_000;
-  const candidates: Array<Omit<UiNode, "ref">> = [];
+  const canonical: Array<Omit<UiNode, "ref">> = [];
+  const digestHash = createHash("sha256");
   let depth = 0;
   let totalNodes = 0;
   let truncated = false;
@@ -137,18 +138,22 @@ export function parseUiHierarchy(
       scrollable: boolean(values.scrollable),
       selected: boolean(values.selected),
     };
-    if (options.interactiveOnly !== true || interactive(node)) {
-      if (currentDepth > maxDepth || candidates.length >= maxNodes) truncated = true;
-      else candidates.push(node);
-    }
+    digestHash.update(JSON.stringify(node));
+    if (canonical.length >= maxNodes) truncated = true;
+    else canonical.push(node);
+    if (currentDepth > maxDepth) truncated = true;
     if (!selfClosing) depth += 1;
   }
-  const digest = createHash("sha256").update(JSON.stringify(candidates)).digest("hex");
+  const digest = digestHash.digest("hex");
   const prefix = digest.slice(0, 12);
-  const nodes = candidates.map((node, index) => ({
-    ref: `ui:${prefix}:${String(index + 1)}`,
-    ...node,
-  }));
+  const nodes = canonical
+    .map((node, index) => ({
+      ref: `ui:${prefix}:${String(index + 1)}`,
+      ...node,
+    }))
+    .filter(
+      (node) => node.depth <= maxDepth && (options.interactiveOnly !== true || interactive(node)),
+    );
   return {
     digest,
     sensitive: true,

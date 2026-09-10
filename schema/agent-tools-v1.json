@@ -1,0 +1,522 @@
+{
+  "title": "ADB Ready agent tool contract",
+  "schemaVersion": 1,
+  "packageVersion": "0.1.2",
+  "protocolVersion": "2025-11-25",
+  "transport": "stdio",
+  "tools": [
+    {
+      "name": "capture_screenshot",
+      "description": "Capture a verified PNG inside the project without overwriting an existing file.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "out": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compile_debug_context",
+      "description": "Compile bounded redacted context. Screenshots and UI text are excluded.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "budget": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 100000
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "doctor",
+      "description": "Inspect the local runtime, ADB server, capabilities, and visible Android targets.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ensure_ready",
+      "description": "Select exactly one ready Android target and bind it for this MCP connection.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "device": {
+            "type": "string",
+            "minLength": 1
+          },
+          "transportId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_session_problems",
+      "description": "Read structured problems from one saved local development session.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_app",
+      "description": "Return bounded sensitive app, foreground, and classified-log evidence without a screenshot.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "applicationId": {
+            "type": "string",
+            "minLength": 3
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_ui",
+      "description": "Return a bounded sensitive accessibility snapshot with digest-scoped references.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "interactiveOnly": {
+            "type": "boolean"
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "install_app",
+      "description": "Install one project-local APK and verify its package. Downloads and split APKs are rejected.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "applicationId": {
+            "type": "string",
+            "minLength": 3
+          },
+          "replace": {
+            "type": "boolean"
+          },
+          "grantRuntimePermissions": {
+            "type": "boolean"
+          }
+        },
+        "required": ["path"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "launch_app",
+      "description": "Launch the resolved app and verify it is foreground.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "applicationId": {
+            "type": "string",
+            "minLength": 3
+          },
+          "activity": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_targets",
+      "description": "List Android targets without changing the connection's bound target.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "long_press_ui",
+      "description": "Long-press a current digest-scoped UI ref or explicit display coordinate, then compare UI state.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ref": {
+                    "type": "string",
+                    "pattern": "^ui:[a-f0-9]{12}:\\d+$"
+                  }
+                },
+                "required": ["ref"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000
+                  },
+                  "y": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000
+                  }
+                },
+                "required": ["x", "y"]
+              }
+            ]
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": ["target"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "open_url",
+      "description": "Open an absolute URL and verify an explicit app handler when provided.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "applicationId": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "required": ["url"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "press_key_ui",
+      "description": "Press one allowlisted Android navigation or volume key, then compare UI state.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": ["back", "enter", "home", "menu", "volume-down", "volume-up"]
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": ["key"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "resolve_app",
+      "description": "Resolve the Android project application ID with provenance.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "applicationId": {
+            "type": "string",
+            "minLength": 3
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "restart_app",
+      "description": "Restart the resolved app and verify it is foreground.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "applicationId": {
+            "type": "string",
+            "minLength": 3
+          },
+          "activity": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "swipe_ui",
+      "description": "Swipe in a screen-relative direction or between explicit display coordinates, then compare UI state.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": ["down", "left", "right", "up"]
+          },
+          "x1": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "y1": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "x2": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "y2": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "tap_ui",
+      "description": "Tap a current digest-scoped UI ref or explicit display coordinate, then compare UI state.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ref": {
+                    "type": "string",
+                    "pattern": "^ui:[a-f0-9]{12}:\\d+$"
+                  }
+                },
+                "required": ["ref"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000
+                  },
+                  "y": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000
+                  }
+                },
+                "required": ["x", "y"]
+              }
+            ]
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": ["target"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "type_text_ui",
+      "description": "Type conservative shell-safe text into the focused Android field and optionally press enter.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "submit": {
+            "type": "boolean"
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": ["text"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "wait_for_ui",
+      "description": "Wait a bounded time for an exact id=, text=, desc=, or package= selector to be visible or gone.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 264
+          },
+          "state": {
+            "type": "string",
+            "enum": ["gone", "visible"]
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 120000
+          }
+        },
+        "required": ["selector"]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

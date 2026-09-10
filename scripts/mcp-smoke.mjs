@@ -57,9 +57,15 @@ const requiredTools = [
   "install_app",
   "launch_app",
   "list_targets",
+  "long_press_ui",
   "open_url",
+  "press_key_ui",
   "resolve_app",
   "restart_app",
+  "swipe_ui",
+  "tap_ui",
+  "type_text_ui",
+  "wait_for_ui",
 ];
 
 /** @param {{ name: string, executable: string, args: string[] }} runtime */

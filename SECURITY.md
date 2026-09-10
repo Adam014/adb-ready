@@ -49,6 +49,9 @@ The MCP surface is intentionally narrower than the CLI:
 - one verified target is bound per connection and cannot be switched silently;
 - APK paths must resolve to existing project-local files;
 - UI hierarchy, logs, identifiers, and screenshots are treated as sensitive;
+- mutating UI tools accept only typed actions; digest-scoped references are
+  checked against fresh UI evidence, coordinates are display-bounded, and text
+  uses a conservative shell-safe allowlist;
 - capture is explicit and never implied by an inspection call; and
 - data clearing and app uninstall are not available as MCP tools.
 

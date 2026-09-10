@@ -23,6 +23,7 @@ import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../d
 import { ProblemCode } from "../domain/problems.js";
 import type { CaptureData } from "../evidence/capture.js";
 import type { InspectAppData, InspectUiData } from "../evidence/inspect.js";
+import type { UiActionData } from "../evidence/ui-actions.js";
 import type { AndroidTarget } from "../target/model.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
@@ -148,6 +149,17 @@ function isInspectAppData(value: unknown): value is InspectAppData {
 function isInspectUiData(value: unknown): value is InspectUiData {
   return (
     isRecord(value) && value.kind === "ui" && isRecord(value.selected) && isRecord(value.snapshot)
+  );
+}
+
+function isUiActionData(value: unknown): value is UiActionData {
+  return (
+    isRecord(value) &&
+    typeof value.action === "string" &&
+    isRecord(value.selected) &&
+    typeof value.status === "string" &&
+    typeof value.verified === "boolean" &&
+    typeof value.verification === "string"
   );
 }
 
@@ -465,6 +477,31 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     });
   }
 
+  if (result.command.startsWith("ui ") && isUiActionData(result.data)) {
+    const data = result.data;
+    const marker =
+      data.status === "planned"
+        ? style.accent(glyphs.active, capabilities)
+        : data.verified
+          ? style.success(glyphs.success, capabilities)
+          : style.warning(glyphs.warning, capabilities);
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target       ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${marker} Action       ${clean(data.action)} · ${clean(data.status)}`,
+      `${marker} Verification ${clean(data.verification)} · ${String(data.attempts)} attempt(s)`,
+    );
+    if (data.resolved !== undefined) {
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Point        ${String(data.resolved.x)},${String(data.resolved.y)}${data.resolved.ref === undefined ? "" : ` · ${clean(data.resolved.ref)}`}`,
+      );
+    }
+    if (data.before !== undefined && data.after !== undefined) {
+      lines.push(
+        `${data.before.digest === data.after.digest ? style.warning(glyphs.warning, capabilities) : style.success(glyphs.success, capabilities)} UI digest    ${clean(data.before.digest.slice(0, 12))} → ${clean(data.after.digest.slice(0, 12))}`,
+      );
+    }
+  }
+
   if (result.command.startsWith("sessions ") && isSessionCommandData(result.data)) {
     const data = result.data;
     if (data.action === "list") {
@@ -742,6 +779,20 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`node_count=${String(result.data.snapshot.returnedNodes)}\n`);
     sink.write(`truncated=${String(result.data.snapshot.truncated)}\n`);
     sink.write("sensitive=true\n");
+  }
+  if (isUiActionData(result.data)) {
+    sink.write(`action=${clean(result.data.action)}\n`);
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`verified=${String(result.data.verified)}\n`);
+    sink.write(`verification=${clean(result.data.verification)}\n`);
+    sink.write(`attempts=${String(result.data.attempts)}\n`);
+    if (result.data.before !== undefined) {
+      sink.write(`before_digest=${clean(result.data.before.digest)}\n`);
+    }
+    if (result.data.after !== undefined) {
+      sink.write(`after_digest=${clean(result.data.after.digest)}\n`);
+    }
   }
   if (isSessionCommandData(result.data)) {
     sink.write(`action=${clean(result.data.action)}\n`);

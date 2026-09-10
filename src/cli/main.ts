@@ -53,6 +53,7 @@ import {
   runInspectApp,
   runInspectUi,
 } from "../evidence/inspect.js";
+import { runUiAction, type UiActionData } from "../evidence/ui-actions.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
 import {
@@ -102,6 +103,7 @@ Commands:
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
   sessions [ACTION]      Inspect saved development sessions
+  ui ACTION              Perform a bounded, verified Android UI action
   problems [SESSION]     Show problems from a saved session
   help [COMMAND]         Show help
   version                Show version
@@ -227,6 +229,19 @@ never replaced unless --force is explicit. Use --dry-run to preview the file.
 Returns a bounded evidence snapshot for one deterministic target. UI text and
 hierarchy data are explicitly marked sensitive and are never added to AI
 context implicitly.
+`,
+  ui: `Usage:
+  adb-ready ui tap REF|X Y [--dry-run]
+  adb-ready ui long-press REF|X Y [--dry-run]
+  adb-ready ui swipe up|down|left|right [--dry-run]
+  adb-ready ui swipe X1 Y1 X2 Y2 [--dry-run]
+  adb-ready ui type TEXT [--submit] [--dry-run]
+  adb-ready ui press back|home|enter|menu|volume-up|volume-down [--dry-run]
+  adb-ready ui wait SELECTOR [--state visible|gone] [--timeout 5s]
+
+Uses fresh UI evidence before every mutation. A ui:* reference is accepted only
+while its snapshot digest still matches. Selectors are exact id=, text=, desc=,
+or package= values. Typed text uses a conservative shell-safe character set.
 `,
   devices: `Usage: adb-ready devices [options]
 
@@ -823,7 +838,8 @@ async function runCliInternal(
       options.command === "inspect" ||
       options.command === "logs" ||
       options.command === "open" ||
-      options.command === "ports") &&
+      options.command === "ports" ||
+      options.command === "ui") &&
     (options.command === "app" ||
       options.command === "apps" ||
       options.command === "capture" ||
@@ -831,6 +847,7 @@ async function runCliInternal(
       options.command === "inspect" ||
       options.command === "logs" ||
       options.command === "open" ||
+      options.command === "ui" ||
       options.select ||
       options.remembered)
   ) {
@@ -892,6 +909,7 @@ async function runCliInternal(
     options.command === "inspect" ||
     options.command === "logs" ||
     options.command === "open" ||
+    options.command === "ui" ||
     (options.command === "ports" && options.select)
   ) {
     let inventory = await runDevices(config, commandDependencies, signal);
@@ -949,7 +967,8 @@ async function runCliInternal(
         options.command === "dev" ||
         options.command === "inspect" ||
         options.command === "logs" ||
-        options.command === "open") &&
+        options.command === "open" ||
+        options.command === "ui") &&
         errorCapabilities.interactive &&
         inventory.result.data?.selected === undefined &&
         selectable.length !== 1);
@@ -1130,6 +1149,7 @@ async function runCliInternal(
     | CommandExecution<DevicesData>
     | CommandExecution<InspectAppData>
     | CommandExecution<InspectUiData>
+    | CommandExecution<UiActionData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
@@ -1257,6 +1277,11 @@ async function runCliInternal(
               commandDependencies,
               signal,
             );
+    } else if (options.command === "ui") {
+      if (options.uiRequest === undefined) {
+        throw new Error("Validated UI command is missing its action request.");
+      }
+      execution = await runUiAction(options.uiRequest, config, commandDependencies, signal);
     } else if (options.command === "open") {
       execution = await runOpen(
         options.url ?? "",
@@ -1508,7 +1533,8 @@ async function runCliInternal(
       options.command === "apps" ||
       options.command === "capture" ||
       options.command === "inspect" ||
-      options.command === "open"
+      options.command === "open" ||
+      options.command === "ui"
     ) {
       const data = execution.result.data as
         | AppData
@@ -1517,6 +1543,7 @@ async function runCliInternal(
         | InspectAppData
         | InspectUiData
         | OpenData
+        | UiActionData
         | null;
       if (data !== null && "selected" in data) {
         selectedTarget = {

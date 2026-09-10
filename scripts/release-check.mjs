@@ -144,6 +144,7 @@ if (packed.exitCode !== 0) {
       "examples/expo/adb-ready.config.json",
       "package.json",
       "schema/config-v1.schema.json",
+      "schema/agent-tools-v1.json",
     ]) {
       requireCondition(files.includes(required), `packed artifact is missing ${required}`);
     }

@@ -126,6 +126,23 @@ try {
       throw new Error(`${runtime.name} dev returned an invalid dry-run plan`);
     }
 
+    const uiPlan = invoke(runtime, [
+      "ui",
+      "press",
+      "back",
+      "--dry-run",
+      "--json",
+      "--non-interactive",
+    ]);
+    expectSuccess(runtime, "UI dry-run", uiPlan);
+    const uiPayload = JSON.parse(uiPlan.stdout);
+    if (
+      uiPayload.data?.status !== "planned" ||
+      uiPayload.data?.plan?.steps?.[0]?.args?.join(" ") !== "-t 1 shell input keyevent 4"
+    ) {
+      throw new Error(`${runtime.name} UI returned an invalid dry-run plan`);
+    }
+
     const failedChild = invoke(runtime, [
       "dev",
       "--no-logs",
@@ -147,7 +164,7 @@ try {
     }
 
     process.stdout.write(
-      `✓ ${runtime.name}: version, dev, target propagation, journal, dry-run, child exit\n`,
+      `✓ ${runtime.name}: version, dev, UI, target propagation, journal, dry-run, child exit\n`,
     );
   }
 } finally {

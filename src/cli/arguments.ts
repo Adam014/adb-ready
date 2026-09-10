@@ -2,6 +2,13 @@ import type { AgentClient } from "../agent/setup.js";
 import type { AppAction, PackageScope } from "../app/app-commands.js";
 import type { PortAction } from "../app/commands.js";
 import type { DevPreset, PackageManagerName } from "../dev/project.js";
+import type {
+  UiAction,
+  UiActionRequest,
+  UiDirection,
+  UiKey,
+  UiWaitState,
+} from "../evidence/ui-actions.js";
 import type { PortDirection } from "../ports/model.js";
 
 export type CommandName =
@@ -25,6 +32,7 @@ export type CommandName =
   | "ports"
   | "problems"
   | "sessions"
+  | "ui"
   | "version";
 export type OutputFormat = "human" | "json" | "markdown" | "ndjson" | "plain";
 export type ContextFilter =
@@ -103,6 +111,7 @@ export interface CliOptions {
   interactiveOnly?: boolean;
   maxDepth?: number;
   agentClient?: AgentClient;
+  uiRequest?: UiActionRequest;
 }
 
 export interface CliParseFailure {
@@ -140,8 +149,10 @@ const COMMANDS = new Set<CommandName>([
   "ports",
   "problems",
   "sessions",
+  "ui",
   "version",
 ]);
+const UI_ACTIONS = new Set<UiAction>(["long-press", "press", "swipe", "tap", "type", "wait"]);
 const APP_ACTIONS = new Set<AppAction>([
   "clear-data",
   "info",
@@ -192,6 +203,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--system",
   "--all",
   "--interactive-only",
+  "--submit",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -288,6 +300,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let maxDepth: number | undefined;
   let agentSetupSeen = false;
   let agentClient: AgentClient | undefined;
+  let uiAction: UiAction | undefined;
+  const uiOperands: string[] = [];
+  let uiWaitState: UiWaitState | undefined;
+  let uiSubmit = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -337,7 +353,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "pair" ||
           candidate === "ports" ||
           candidate === "problems" ||
-          candidate === "sessions"
+          candidate === "sessions" ||
+          candidate === "ui"
         ) {
           helpTarget = candidate;
           continue;
@@ -407,6 +424,20 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
         }
         appId = argument;
+        continue;
+      }
+      if (command === "ui") {
+        if (uiAction === undefined) {
+          if (!UI_ACTIONS.has(argument as UiAction)) {
+            return failure(
+              "CLI_INVALID_VALUE",
+              `Invalid UI action: ${argument}. Expected tap, long-press, swipe, type, press, or wait.`,
+            );
+          }
+          uiAction = argument as UiAction;
+        } else {
+          uiOperands.push(argument);
+        }
         continue;
       }
       if (command === "sessions") {
@@ -733,6 +764,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       durationSeconds = milliseconds / 1_000;
     } else if (option === "--interactive-only") {
       interactiveOnly = true;
+    } else if (option === "--submit") {
+      uiSubmit = true;
+    } else if (option === "--state") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value !== "visible" && value !== "gone") {
+        return failure("CLI_INVALID_VALUE", `Invalid UI wait state: ${value}.`, option);
+      }
+      uiWaitState = value;
     } else if (option === "--max-depth") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -884,7 +924,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command === "inspect" ||
     command === "logs" ||
     command === "open" ||
-    command === "ports";
+    command === "ports" ||
+    command === "ui";
   if (select && !targetCommand) {
     return failure(
       "CLI_USAGE",
@@ -932,7 +973,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command !== "pair" &&
     command !== "ports" &&
     command !== "init" &&
-    command !== "agent"
+    command !== "agent" &&
+    command !== "ui"
   ) {
     return failure(
       "CLI_USAGE",
@@ -973,6 +1015,88 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (command === "inspect" && inspectKind === undefined) {
     return failure("CLI_USAGE", "inspect requires app or ui.");
   }
+  let uiRequest: UiActionRequest | undefined;
+  if (command === "ui") {
+    if (uiAction === undefined) return failure("CLI_USAGE", "ui requires an action.");
+    const coordinate = (value: string | undefined): number | undefined => {
+      if (value === undefined || !/^\d+$/u.test(value)) return undefined;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed <= 100_000 ? parsed : undefined;
+    };
+    if (uiAction === "tap" || uiAction === "long-press") {
+      const [first, second] = uiOperands;
+      const x = coordinate(first);
+      const y = coordinate(second);
+      if (uiOperands.length === 1 && /^ui:[a-f0-9]{12}:\d+$/u.test(first ?? ""))
+        uiRequest =
+          uiAction === "tap"
+            ? { action: "tap", ref: first ?? "" }
+            : { action: "long-press", ref: first ?? "" };
+      else if (uiOperands.length === 2 && x !== undefined && y !== undefined)
+        uiRequest = uiAction === "tap" ? { action: "tap", x, y } : { action: "long-press", x, y };
+      else
+        return failure(
+          "CLI_USAGE",
+          `ui ${uiAction} requires one current UI ref or two integer coordinates.`,
+        );
+    } else if (uiAction === "swipe") {
+      const direction = uiOperands[0] as UiDirection | undefined;
+      if (
+        uiOperands.length === 1 &&
+        direction !== undefined &&
+        new Set<UiDirection>(["down", "left", "right", "up"]).has(direction)
+      ) {
+        uiRequest = { action: "swipe", direction };
+      } else if (uiOperands.length === 4) {
+        const values = uiOperands.map(coordinate);
+        if (values.some((value) => value === undefined)) {
+          return failure("CLI_INVALID_VALUE", "UI swipe coordinates must be bounded integers.");
+        }
+        uiRequest = {
+          action: "swipe",
+          x1: values[0] ?? 0,
+          y1: values[1] ?? 0,
+          x2: values[2] ?? 0,
+          y2: values[3] ?? 0,
+        };
+      } else {
+        return failure(
+          "CLI_USAGE",
+          "ui swipe requires up, down, left, right, or four integer coordinates.",
+        );
+      }
+    } else if (uiAction === "type") {
+      if (uiOperands.length !== 1) return failure("CLI_USAGE", "ui type requires one text value.");
+      uiRequest = {
+        action: "type",
+        text: uiOperands[0] ?? "",
+        ...(uiSubmit ? { submit: true } : {}),
+      };
+    } else if (uiAction === "press") {
+      const key = uiOperands[0] as UiKey | undefined;
+      if (
+        uiOperands.length !== 1 ||
+        key === undefined ||
+        !new Set<UiKey>(["back", "enter", "home", "menu", "volume-down", "volume-up"]).has(key)
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "ui press requires back, home, enter, menu, volume-up, or volume-down.",
+        );
+      }
+      uiRequest = { action: "press", key };
+    } else {
+      if (uiOperands.length !== 1) {
+        return failure("CLI_USAGE", "ui wait requires one exact selector.");
+      }
+      uiRequest = {
+        action: "wait",
+        selector: uiOperands[0] ?? "",
+        ...(uiWaitState === undefined ? {} : { state: uiWaitState }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      };
+    }
+  }
   if (command === "agent" && (!agentSetupSeen || agentClient === undefined)) {
     return failure("CLI_USAGE", "agent requires setup and a supported client name.");
   }
@@ -981,6 +1105,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (maxDepth !== undefined && (command !== "inspect" || inspectKind !== "ui")) {
     return failure("CLI_USAGE", "--max-depth can only be used with inspect ui.");
+  }
+  if (uiSubmit && (command !== "ui" || uiAction !== "type")) {
+    return failure("CLI_USAGE", "--submit can only be used with ui type.");
+  }
+  if (uiWaitState !== undefined && (command !== "ui" || uiAction !== "wait")) {
+    return failure("CLI_USAGE", "--state can only be used with ui wait.");
+  }
+  if (dryRun && command === "ui" && uiAction === "wait") {
+    return failure("CLI_USAGE", "--dry-run is not meaningful for the read-only ui wait action.");
   }
   if (outputPath !== undefined && command !== "capture") {
     return failure("CLI_USAGE", "--out can only be used with capture.");
@@ -1136,6 +1269,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(interactiveOnly ? { interactiveOnly: true } : {}),
       ...(maxDepth === undefined ? {} : { maxDepth }),
       ...(agentClient === undefined ? {} : { agentClient }),
+      ...(uiRequest === undefined
+        ? {}
+        : {
+            uiRequest:
+              dryRun && uiRequest.action !== "wait" ? { ...uiRequest, dryRun: true } : uiRequest,
+          }),
     },
   };
 }

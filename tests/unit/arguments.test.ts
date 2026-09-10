@@ -450,6 +450,67 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses bounded UI actions and rejects ambiguous input", () => {
+    expect(parseArguments(["ui", "tap", "ui:012345abcdef:4", "--dry-run"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "ui",
+        dryRun: true,
+        uiRequest: { action: "tap", ref: "ui:012345abcdef:4", dryRun: true },
+      },
+    });
+    expect(parseArguments(["ui", "long-press", "120", "340"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "long-press", x: 120, y: 340 } },
+    });
+    expect(parseArguments(["ui", "swipe", "up", "--device", "pixel"])).toMatchObject({
+      ok: true,
+      options: { device: "pixel", uiRequest: { action: "swipe", direction: "up" } },
+    });
+    expect(parseArguments(["ui", "swipe", "10", "20", "30", "40"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "swipe", x1: 10, y1: 20, x2: 30, y2: 40 } },
+    });
+    expect(parseArguments(["ui", "type", "hello world", "--submit"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "type", text: "hello world", submit: true } },
+    });
+    expect(parseArguments(["ui", "press", "back"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "press", key: "back" } },
+    });
+    expect(
+      parseArguments([
+        "ui",
+        "wait",
+        "id=com.example:id/open",
+        "--state",
+        "gone",
+        "--timeout",
+        "2s",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        timeoutMs: 2_000,
+        uiRequest: {
+          action: "wait",
+          selector: "id=com.example:id/open",
+          state: "gone",
+          timeoutMs: 2_000,
+        },
+      },
+    });
+    expect(parseArguments(["ui", "tap", "12"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["ui", "wait", "text=Done", "--dry-run"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("rejects incomplete and mismatched app options", () => {
     expect(parseArguments(["app"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
     expect(parseArguments(["app", "install"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
