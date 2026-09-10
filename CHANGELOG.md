@@ -9,6 +9,18 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Resolve Android application IDs with provenance, enumerate installed
+  packages, and inspect one project app on a deterministic target.
+- Install, launch, stop, restart, clear, uninstall, and deep-link apps with
+  explicit destructive policy, mutation-free dry runs, and postcondition
+  verification.
+- Capture verified PNG screenshots and bounded MP4 screen recordings into
+  atomically published project-local evidence files with SHA-256 metadata.
+- Replace the command-heavy interactive home with focused workflow categories
+  and progressive disclosure.
+
 ## [0.1.2] - 2026-09-10
 
 ### Changed

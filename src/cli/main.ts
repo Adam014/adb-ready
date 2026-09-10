@@ -43,6 +43,7 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import { type CaptureData, runCapture } from "../evidence/capture.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
 import {
@@ -76,6 +77,7 @@ Usage:
 Commands:
   app ACTION [APP_ID]   Resolve, inspect, install, or control one app
   apps list             List packages on one Android target
+  capture ACTION         Save a verified screenshot or bounded screen recording
   config ACTION          Validate or explain resolved configuration
   connect [HOST:PORT]    Connect and verify a wireless Android target
   context [SESSION]      Export bounded AI-ready diagnostic context
@@ -139,6 +141,13 @@ operations against the same deterministic Android target.
 
 Lists packages from one deterministic Android target. User-installed packages
 are shown by default.
+`,
+  capture: `Usage:
+  adb-ready capture screenshot [--out PATH] [--force]
+  adb-ready capture screen-record [--out PATH] [--duration 10s] [--force]
+
+Writes verified binary evidence inside the current project. Existing files are
+never replaced unless --force is explicit. Recordings are bounded to 180s.
 `,
   config: `Usage:
   adb-ready config validate [options]
@@ -722,6 +731,7 @@ async function runCliInternal(
   if (
     (options.command === "app" ||
       options.command === "apps" ||
+      options.command === "capture" ||
       options.command === "dev" ||
       options.command === "devices" ||
       options.command === "logs" ||
@@ -729,6 +739,7 @@ async function runCliInternal(
       options.command === "ports") &&
     (options.command === "app" ||
       options.command === "apps" ||
+      options.command === "capture" ||
       options.command === "dev" ||
       options.command === "logs" ||
       options.command === "open" ||
@@ -788,6 +799,7 @@ async function runCliInternal(
   if (
     options.command === "app" ||
     options.command === "apps" ||
+    options.command === "capture" ||
     options.command === "dev" ||
     options.command === "logs" ||
     options.command === "open" ||
@@ -844,6 +856,7 @@ async function runCliInternal(
       options.select ||
       ((options.command === "app" ||
         options.command === "apps" ||
+        options.command === "capture" ||
         options.command === "dev" ||
         options.command === "logs" ||
         options.command === "open") &&
@@ -1023,6 +1036,7 @@ async function runCliInternal(
   let execution:
     | CommandExecution<AppData>
     | CommandExecution<AppsData>
+    | CommandExecution<CaptureData>
     | CommandExecution<DevicesData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
@@ -1099,6 +1113,21 @@ async function runCliInternal(
       execution = await runApps(
         options.packageScope ?? "user",
         options.packageFilter,
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "capture") {
+      execution = await runCapture(
+        {
+          kind: options.captureKind ?? "screenshot",
+          cwd: io.cwd,
+          ...(options.outputPath === undefined ? {} : { out: options.outputPath }),
+          ...(options.force === undefined ? {} : { force: options.force }),
+          ...(options.durationSeconds === undefined
+            ? {}
+            : { durationSeconds: options.durationSeconds }),
+        },
         config,
         commandDependencies,
         signal,
@@ -1352,9 +1381,10 @@ async function runCliInternal(
     } else if (
       options.command === "app" ||
       options.command === "apps" ||
+      options.command === "capture" ||
       options.command === "open"
     ) {
-      const data = execution.result.data as AppData | AppsData | OpenData | null;
+      const data = execution.result.data as AppData | AppsData | CaptureData | OpenData | null;
       if (data !== null && "selected" in data) {
         selectedTarget = {
           serial: data.selected.transport.serial,

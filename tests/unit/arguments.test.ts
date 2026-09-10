@@ -351,6 +351,46 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses bounded evidence capture without allowing unsafe option reuse", () => {
+    expect(
+      parseArguments([
+        "capture",
+        "screen-record",
+        "--out",
+        "artifacts/demo.mp4",
+        "--duration",
+        "15s",
+        "--force",
+        "--last",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "capture",
+        captureKind: "screen-record",
+        outputPath: "artifacts/demo.mp4",
+        durationSeconds: 15,
+        force: true,
+        remembered: true,
+      },
+    });
+    expect(parseArguments(["capture", "screenshot", "--duration", "2s"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["capture", "screen-record", "--duration", "181s"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+      option: "--duration",
+    });
+    expect(
+      parseArguments(["capture", "screenshot", "--out", "screen.png", "--json"]),
+    ).toMatchObject({
+      ok: true,
+      options: { command: "capture", captureKind: "screenshot", outputPath: "screen.png" },
+    });
+  });
+
   test("rejects incomplete and mismatched app options", () => {
     expect(parseArguments(["app"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
     expect(parseArguments(["app", "install"])).toMatchObject({ ok: false, code: "CLI_USAGE" });

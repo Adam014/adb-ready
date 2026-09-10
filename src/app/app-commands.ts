@@ -104,7 +104,7 @@ export interface AppMutationData {
 
 export type AppData = AppInfoData | AppMutationData | AppResolutionData;
 
-interface Context {
+export interface Context {
   bus: EventBus;
   clock: () => Date;
   command: string;
@@ -112,7 +112,8 @@ interface Context {
   started: Date;
 }
 
-interface ReadyTarget {
+export interface ReadyTarget {
+  executable: string;
   adbPath: string;
   client: AdbClient;
   selected: import("../target/selection.js").SelectedTarget;
@@ -160,7 +161,7 @@ function mutationPlanData(
   };
 }
 
-function context(command: string, dependencies: CommandDependencies): Context {
+export function context(command: string, dependencies: CommandDependencies): Context {
   const clock = dependencies.clock ?? (() => new Date());
   const commandId = (dependencies.idFactory ?? randomUUID)();
   const bus = dependencies.bus ?? new EventBus(clock);
@@ -185,7 +186,11 @@ function exitCode(problems: readonly Problem[]): ExitCode {
   return ExitCode.AdbOperation;
 }
 
-function finish<T>(current: Context, data: T | null, problems: Problem[]): CommandExecution<T> {
+export function finish<T>(
+  current: Context,
+  data: T | null,
+  problems: Problem[],
+): CommandExecution<T> {
   const finished = current.clock();
   const code = exitCode(problems);
   const result: ResultEnvelope<T> = {
@@ -210,7 +215,7 @@ function finish<T>(current: Context, data: T | null, problems: Problem[]): Comma
   return { result, exitCode: code };
 }
 
-function problem(
+export function problem(
   code: string,
   category: string,
   summary: string,
@@ -231,7 +236,7 @@ function problem(
   };
 }
 
-function succeeded(result: ProcessResult, accepted: readonly number[] = []): boolean {
+export function succeeded(result: ProcessResult, accepted: readonly number[] = []): boolean {
   return (
     result.spawnError === undefined &&
     result.streamError === undefined &&
@@ -241,7 +246,7 @@ function succeeded(result: ProcessResult, accepted: readonly number[] = []): boo
   );
 }
 
-function operationProblem(
+export function operationProblem(
   name: string,
   observation: { operationId: string; process: ProcessResult },
   commandId: string,
@@ -252,7 +257,7 @@ function operationProblem(
   });
 }
 
-async function readyTarget(
+export async function readyTarget(
   current: Context,
   config: CommandConfig,
   dependencies: CommandDependencies,
@@ -301,6 +306,7 @@ async function readyTarget(
       : { transportId: selected.transport.transportId }),
   };
   return {
+    executable,
     adbPath: redactText(executable).value,
     selected,
     target,

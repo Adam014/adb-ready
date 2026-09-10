@@ -103,6 +103,8 @@ Running `adb-ready` without a command opens the interactive workflow home.
 | pair or reconnect an Android device over Wi-Fi | [Targets and Wireless debugging](./docs/targets-and-wireless.md) |
 | choose the right device when several are connected | [Deterministic target selection](./docs/targets-and-wireless.md#explicit-selection) |
 | expose Metro, a local API, or a debugger to Android | [Port workflows](./docs/dev-sessions.md#port-ownership) |
+| install, inspect, launch, restart, or deep-link my app | [App lifecycle](./docs/apps-and-evidence.md#app-lifecycle) |
+| save a verified screenshot or bounded screen recording | [Evidence capture](./docs/apps-and-evidence.md#evidence-capture) |
 | see only the Android logs that matter | [Focused logcat](./docs/logs-and-context.md#focused-logcat) |
 | understand why the last session failed | [Session problems](./docs/logs-and-context.md#session-history) |
 | prepare safe evidence for an AI assistant | [Diagnostic context](./docs/logs-and-context.md#diagnostic-context) |
@@ -162,6 +164,7 @@ adb-ready context --since 5m --only problems,recovery,logs
 | [Getting started](./docs/getting-started.md) | How do I reach my first ready session? |
 | [Development sessions](./docs/dev-sessions.md) | What does ADB Ready own, watch, recover, and clean up? |
 | [Targets and Wireless debugging](./docs/targets-and-wireless.md) | How are devices paired, connected, and selected safely? |
+| [Apps and evidence](./docs/apps-and-evidence.md) | How do I control one app and capture verified device evidence? |
 | [Logs and AI context](./docs/logs-and-context.md) | What is captured, redacted, saved, and exported? |
 | [Configuration](./docs/configuration.md) | How do projects, profiles, hooks, and precedence work? |
 | [Automation](./docs/automation.md) | What are the JSON, NDJSON, stdout, and exit-code contracts? |
@@ -195,7 +198,7 @@ Android transport backend.
 [Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md) ·
 [Security](./SECURITY.md) · [MIT License](./LICENSE)
 
-ADB Ready is Android-only. The `0.1.x` releases focus on target acquisition,
-ports, development-session recovery, logs, diagnostics, and automation. App
-lifecycle, files, screenshots, screen recording, and shell workflows come
-after this core is proven on real projects.
+ADB Ready is Android-only. The current development line combines target
+readiness, ports, session recovery, logs, verified app lifecycle, and local
+evidence capture. It intentionally exposes typed workflows instead of a generic
+remote shell.

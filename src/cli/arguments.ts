@@ -6,6 +6,7 @@ import type { PortDirection } from "../ports/model.js";
 export type CommandName =
   | "app"
   | "apps"
+  | "capture"
   | "config"
   | "connect"
   | "context"
@@ -91,6 +92,9 @@ export interface CliOptions {
   allowDestructive?: boolean;
   url?: string;
   packageFilter?: string;
+  captureKind?: "screen-record" | "screenshot";
+  outputPath?: string;
+  durationSeconds?: number;
 }
 
 export interface CliParseFailure {
@@ -110,6 +114,7 @@ export type CliParseResult = CliParseFailure | CliParseSuccess;
 const COMMANDS = new Set<CommandName>([
   "app",
   "apps",
+  "capture",
   "config",
   "connect",
   "context",
@@ -255,6 +260,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let packageOption: string | undefined;
   let appsListSeen = false;
   let packageFilter: string | undefined;
+  let captureKind: CliOptions["captureKind"];
+  let outputPath: string | undefined;
+  let durationSeconds: number | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -288,6 +296,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         if (
           candidate === "app" ||
           candidate === "apps" ||
+          candidate === "capture" ||
           candidate === "connect" ||
           candidate === "config" ||
           candidate === "context" ||
@@ -333,6 +342,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       if (command === "open" && url === undefined) {
         url = argument;
+        continue;
+      }
+      if (
+        command === "capture" &&
+        captureKind === undefined &&
+        (argument === "screenshot" || argument === "screen-record")
+      ) {
+        captureKind = argument;
         continue;
       }
       if (command === "sessions") {
@@ -633,6 +650,30 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       logDump = true;
     } else if (option === "--force") {
       force = true;
+    } else if (option === "--out") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() === "" || value.length > 1_024) {
+        return failure("CLI_INVALID_VALUE", "--out must be a non-empty relative path.", option);
+      }
+      outputPath = value;
+    } else if (option === "--duration") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const milliseconds = parseDuration(value);
+      if (
+        milliseconds === undefined ||
+        milliseconds % 1_000 !== 0 ||
+        milliseconds < 1_000 ||
+        milliseconds > 180_000
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid recording duration: ${value}. Use whole seconds from 1s to 180s.`,
+          option,
+        );
+      }
+      durationSeconds = milliseconds / 1_000;
     } else if (option === "--activity") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -761,6 +802,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   const targetCommand =
     command === "app" ||
     command === "apps" ||
+    command === "capture" ||
     command === "dev" ||
     command === "devices" ||
     command === "logs" ||
@@ -847,6 +889,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     }
   }
   if (command === "open" && url === undefined) return failure("CLI_USAGE", "open requires a URL.");
+  if (command === "capture" && captureKind === undefined) {
+    return failure("CLI_USAGE", "capture requires screenshot or screen-record.");
+  }
+  if (outputPath !== undefined && command !== "capture") {
+    return failure("CLI_USAGE", "--out can only be used with capture.");
+  }
+  if (durationSeconds !== undefined && (command !== "capture" || captureKind !== "screen-record")) {
+    return failure("CLI_USAGE", "--duration can only be used with capture screen-record.");
+  }
   if (packageScope !== undefined && command !== "apps") {
     return failure("CLI_USAGE", "--user, --system, and --all can only be used with apps list.");
   }
@@ -916,8 +967,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (format === "markdown" && command !== "context") {
     return failure("CLI_USAGE", "Markdown output is only available for the context command.");
   }
-  if (force && command !== "init") {
-    return failure("CLI_USAGE", "--force can only be used with the init command.");
+  if (force && command !== "init" && command !== "capture") {
+    return failure("CLI_USAGE", "--force can only be used with init or capture.");
   }
 
   return {
@@ -982,6 +1033,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(allowDestructive ? { allowDestructive: true } : {}),
       ...(url === undefined ? {} : { url }),
       ...(packageFilter === undefined ? {} : { packageFilter }),
+      ...(captureKind === undefined ? {} : { captureKind }),
+      ...(outputPath === undefined ? {} : { outputPath }),
+      ...(durationSeconds === undefined ? {} : { durationSeconds }),
     },
   };
 }

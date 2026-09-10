@@ -829,6 +829,50 @@ describe("runCli", () => {
     expect(streams.error.value).not.toContain("requires confirmation");
   });
 
+  test("routes binary screenshot capture to a verified project-local file", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-capture-"));
+    const streams = io();
+    streams.cwd = root;
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+    );
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("screencap")) {
+        request.onStdoutChunk?.(png);
+        return result(request, "");
+      }
+      return result(request, "");
+    };
+    try {
+      const exitCode = await runCli(
+        ["capture", "screenshot", "--out", "artifacts/screen.png", "--json"],
+        streams,
+        fixture,
+      );
+      expect(exitCode).toBe(ExitCode.Success);
+      expect(JSON.parse(streams.output.value)).toMatchObject({
+        ok: true,
+        command: "capture screenshot",
+        data: { evidence: { path: "artifacts/screen.png", mediaType: "image/png" } },
+      });
+      expect(new Uint8Array(await readFile(path.join(root, "artifacts/screen.png")))).toEqual(png);
+      expect(streams.error.value).toBe("");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("acquires one unambiguous wireless target before starting dev", async () => {
     const streams = io();
     const fixture = dependencies();

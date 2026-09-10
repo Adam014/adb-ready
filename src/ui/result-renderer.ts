@@ -20,6 +20,7 @@ import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import type { CaptureData } from "../evidence/capture.js";
 import type { AndroidTarget } from "../target/model.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
@@ -126,6 +127,15 @@ function isOpenData(value: unknown): value is OpenData {
     isRecord(value.selected) &&
     typeof value.url === "string" &&
     typeof value.verified === "boolean"
+  );
+}
+
+function isCaptureData(value: unknown): value is CaptureData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    isRecord(value.evidence) &&
+    (value.kind === "screenshot" || value.kind === "screen-record")
   );
 }
 
@@ -394,6 +404,15 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     );
   }
 
+  if (result.command.startsWith("capture ") && isCaptureData(result.data)) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target  ${clean(result.data.selected.target.name)} · ${clean(result.data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} File    ${clean(result.data.evidence.path)}`,
+      `${style.success(glyphs.success, capabilities)} Type    ${clean(result.data.evidence.mediaType)} · ${String(result.data.evidence.bytes)} bytes`,
+      `${style.success(glyphs.success, capabilities)} SHA-256 ${clean(result.data.evidence.sha256)}`,
+    );
+  }
+
   if (result.command.startsWith("sessions ") && isSessionCommandData(result.data)) {
     const data = result.data;
     if (data.action === "list") {
@@ -627,6 +646,14 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     result.data.records.forEach((record, index) => {
       sink.write(`record_${String(index)}=${clean(record.raw)}\n`);
     });
+  }
+  if (isCaptureData(result.data)) {
+    sink.write(`kind=${clean(result.data.kind)}\n`);
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`path=${clean(result.data.evidence.path)}\n`);
+    sink.write(`media_type=${clean(result.data.evidence.mediaType)}\n`);
+    sink.write(`bytes=${String(result.data.evidence.bytes)}\n`);
+    sink.write(`sha256=${clean(result.data.evidence.sha256)}\n`);
   }
   if (isSessionCommandData(result.data)) {
     sink.write(`action=${clean(result.data.action)}\n`);
