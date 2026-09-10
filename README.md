@@ -2,17 +2,12 @@
 
 # ADB Ready
 
-### AI-FIRST · AGENTIC · MCP-NATIVE · LOCAL-FIRST
+**Make Android development accessible to coding agents.**
 
-**Give coding agents safe eyes and hands on Android.**
-
-One typed control plane for developers and agents to operate Android targets,
-apps, UI, logs, evidence, ports, and development sessions.
+An MCP-native, local-first CLI that gives agents and developers safe, typed
+control of Android targets, apps, UI, logs, evidence, and development sessions.
 
 [![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
-[![AI agents](https://img.shields.io/badge/AI_agents-ready-1f9db5)](./docs/agent-integration.md)
-[![Local first](https://img.shields.io/badge/local-first-334155)](./docs/threat-model.md)
-
 [![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
@@ -94,8 +89,8 @@ context and typed actions instead of guessing from an unstructured terminal.
 ADB Ready orchestrates the real ADB, framework, and package manager you already
 use. It does not replace Android Studio or force your project onto Bun.
 
-| Projects | Package managers | CLI runtimes |
-| --- | --- | --- |
+| Projects                              | Package managers        | CLI runtimes         |
+| ------------------------------------- | ----------------------- | -------------------- |
 | Expo · React Native · Gradle · custom | npm · pnpm · Yarn · Bun | Node.js · Bun · Deno |
 
 ## Quick start
@@ -129,23 +124,23 @@ Running `adb-ready` without a command opens the interactive workflow home.
 
 ## Find your workflow
 
-| I want to… | Start here |
-| --- | --- |
-| launch Expo, React Native, Gradle, or my own command | [`adb-ready dev`](./docs/dev-sessions.md) |
-| pair or reconnect an Android device over Wi-Fi | [Targets and Wireless debugging](./docs/targets-and-wireless.md) |
-| choose the right device when several are connected | [Deterministic target selection](./docs/targets-and-wireless.md#explicit-selection) |
-| expose Metro, a local API, or a debugger to Android | [Port workflows](./docs/dev-sessions.md#port-ownership) |
-| install, inspect, launch, restart, or deep-link my app | [App lifecycle](./docs/apps-and-evidence.md#app-lifecycle) |
-| save a verified screenshot or bounded screen recording | [Evidence capture](./docs/apps-and-evidence.md#evidence-capture) |
-| give a developer or agent one bounded app/UI snapshot | [Structured inspection](./docs/apps-and-evidence.md#structured-inspection) |
-| safely tap, type, swipe, press keys, or wait for Android UI | [Safe UI automation](./docs/ui-automation.md) |
-| see only the Android logs that matter | [Focused logcat](./docs/logs-and-context.md#focused-logcat) |
-| understand why the last session failed | [Session problems](./docs/logs-and-context.md#session-history) |
-| prepare safe evidence for an AI assistant | [Diagnostic context](./docs/logs-and-context.md#diagnostic-context) |
-| connect Codex, Claude Code, Cursor, Copilot, or Windsurf | [`adb-ready agent setup`](./docs/agent-integration.md#connect-an-agent) |
-| share project settings without a custom shell script | [Configuration](./docs/configuration.md) |
-| use ADB Ready from CI or another tool | [Automation contract](./docs/automation.md) |
-| fix a known setup or target problem | [Troubleshooting](./docs/troubleshooting.md) |
+| I want to…                                                  | Start here                                                                          |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| launch Expo, React Native, Gradle, or my own command        | [`adb-ready dev`](./docs/dev-sessions.md)                                           |
+| pair or reconnect an Android device over Wi-Fi              | [Targets and Wireless debugging](./docs/targets-and-wireless.md)                    |
+| choose the right device when several are connected          | [Deterministic target selection](./docs/targets-and-wireless.md#explicit-selection) |
+| expose Metro, a local API, or a debugger to Android         | [Port workflows](./docs/dev-sessions.md#port-ownership)                             |
+| install, inspect, launch, restart, or deep-link my app      | [App lifecycle](./docs/apps-and-evidence.md#app-lifecycle)                          |
+| save a verified screenshot or bounded screen recording      | [Evidence capture](./docs/apps-and-evidence.md#evidence-capture)                    |
+| give a developer or agent one bounded app/UI snapshot       | [Structured inspection](./docs/apps-and-evidence.md#structured-inspection)          |
+| safely tap, type, swipe, press keys, or wait for Android UI | [Safe UI automation](./docs/ui-automation.md)                                       |
+| see only the Android logs that matter                       | [Focused logcat](./docs/logs-and-context.md#focused-logcat)                         |
+| understand why the last session failed                      | [Session problems](./docs/logs-and-context.md#session-history)                      |
+| prepare safe evidence for an AI assistant                   | [Diagnostic context](./docs/logs-and-context.md#diagnostic-context)                 |
+| connect Codex, Claude Code, Cursor, Copilot, or Windsurf    | [`adb-ready agent setup`](./docs/agent-integration.md#connect-an-agent)             |
+| share project settings without a custom shell script        | [Configuration](./docs/configuration.md)                                            |
+| use ADB Ready from CI or another tool                       | [Automation contract](./docs/automation.md)                                         |
+| fix a known setup or target problem                         | [Troubleshooting](./docs/troubleshooting.md)                                        |
 
 ## What happens in `adb-ready dev`?
 
@@ -199,21 +194,21 @@ Ready itself. [Explore the agent contract →](./docs/agent-integration.md)
 
 ## Documentation
 
-| Guide | What it answers |
-| --- | --- |
-| [Getting started](./docs/getting-started.md) | How do I reach my first ready session? |
-| [Development sessions](./docs/dev-sessions.md) | What does ADB Ready own, watch, recover, and clean up? |
-| [Targets and Wireless debugging](./docs/targets-and-wireless.md) | How are devices paired, connected, and selected safely? |
-| [Apps and evidence](./docs/apps-and-evidence.md) | How do I control one app and capture verified device evidence? |
-| [AI agent integration](./docs/agent-integration.md) | How do Codex, Claude Code, Cursor, or Copilot use safe Android tools? |
-| [Safe UI automation](./docs/ui-automation.md) | How do humans and agents act on current UI with verifiable evidence? |
-| [Logs and AI context](./docs/logs-and-context.md) | What is captured, redacted, saved, and exported? |
-| [Configuration](./docs/configuration.md) | How do projects, profiles, hooks, and precedence work? |
-| [Automation](./docs/automation.md) | What are the JSON, NDJSON, stdout, and exit-code contracts? |
-| [Threat model](./docs/threat-model.md) | Which trust boundaries, controls, and residual risks apply? |
-| [Troubleshooting](./docs/troubleshooting.md) | What should I do for each common failure? |
-| [Compatibility](./COMPATIBILITY.md) | Which hosts, runtimes, and environments are covered? |
-| [Example configs](./examples/README.md) | What can I copy for Expo, React Native, Gradle, or custom projects? |
+| Guide                                                            | What it answers                                                       |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [Getting started](./docs/getting-started.md)                     | How do I reach my first ready session?                                |
+| [Development sessions](./docs/dev-sessions.md)                   | What does ADB Ready own, watch, recover, and clean up?                |
+| [Targets and Wireless debugging](./docs/targets-and-wireless.md) | How are devices paired, connected, and selected safely?               |
+| [Apps and evidence](./docs/apps-and-evidence.md)                 | How do I control one app and capture verified device evidence?        |
+| [AI agent integration](./docs/agent-integration.md)              | How do Codex, Claude Code, Cursor, or Copilot use safe Android tools? |
+| [Safe UI automation](./docs/ui-automation.md)                    | How do humans and agents act on current UI with verifiable evidence?  |
+| [Logs and AI context](./docs/logs-and-context.md)                | What is captured, redacted, saved, and exported?                      |
+| [Configuration](./docs/configuration.md)                         | How do projects, profiles, hooks, and precedence work?                |
+| [Automation](./docs/automation.md)                               | What are the JSON, NDJSON, stdout, and exit-code contracts?           |
+| [Threat model](./docs/threat-model.md)                           | Which trust boundaries, controls, and residual risks apply?           |
+| [Troubleshooting](./docs/troubleshooting.md)                     | What should I do for each common failure?                             |
+| [Compatibility](./COMPATIBILITY.md)                              | Which hosts, runtimes, and environments are covered?                  |
+| [Example configs](./examples/README.md)                          | What can I copy for Expo, React Native, Gradle, or custom projects?   |
 
 Run `adb-ready --help` for the full command list or
 `adb-ready help COMMAND` for focused options.
