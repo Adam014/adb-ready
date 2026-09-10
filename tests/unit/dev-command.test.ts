@@ -516,6 +516,11 @@ describe("runDev", () => {
     expect(execution.result.data?.journal.events.map(({ type }) => type)).toContain(
       "recovery.completed",
     );
+    const backgroundProbeSources = execution.result.data?.journal.events
+      .filter(({ data }) => data?.presentation === "background")
+      .map(({ source }) => source);
+    expect(backgroundProbeSources).toContain("adb.get-state");
+    expect(backgroundProbeSources).toContain("adb.reverse-list");
   });
 
   test("restarts an unexpectedly ended log stream without restarting the development child", async () => {

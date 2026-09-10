@@ -212,6 +212,37 @@ describe("ProgressRenderer", () => {
     expect(sink.value).toBe("! Android target disconnected.\n✓ Development session recovered.\n");
   });
 
+  test("does not render background ADB probes even in verbose mode", () => {
+    const sink = new MemorySink();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const renderer = new ProgressRenderer({
+      bus,
+      sink,
+      capabilities: { ...interactiveCapabilities, animation: false },
+      verbose: true,
+    });
+
+    bus.emit({
+      type: "operation.started",
+      source: "adb.get-state",
+      severity: "debug",
+      message: "Verifying Android target R5CT-001",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { presentation: "background" },
+    });
+    bus.emit({
+      type: "operation.completed",
+      source: "adb.get-state",
+      severity: "debug",
+      message: "Verifying Android target R5CT-001 completed",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { presentation: "background" },
+    });
+    renderer.dispose();
+
+    expect(sink.value).toBe("");
+  });
+
   test("turns session state transitions into concise live status", () => {
     const sink = new MemorySink();
     const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));

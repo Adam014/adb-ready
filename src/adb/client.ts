@@ -37,6 +37,7 @@ export interface AdbClientOptions {
   timeoutMs?: number;
   runner?: ProcessRunner;
   idFactory?: () => string;
+  presentation?: "foreground" | "background";
 }
 
 export interface AdbObservation<T> {
@@ -290,6 +291,7 @@ export class AdbClient {
   ): Promise<AdbObservation<T>> {
     const operationId = this.#idFactory();
     const correlation = { ...this.#options.correlation, operationId };
+    const background = this.#options.presentation === "background";
     const finalArgs = [
       ...(options.useServerArguments === false ? [] : this.#serverArguments()),
       ...args,
@@ -298,12 +300,13 @@ export class AdbClient {
     this.#options.bus.emit({
       type: "operation.started",
       source: `adb.${operation}`,
-      severity: "info",
+      severity: background ? "debug" : "info",
       message,
       correlation,
       data: {
         executable: redactText(this.#options.executable).value,
         args: finalArgs.map((argument) => redactText(argument).value),
+        ...(background ? { presentation: "background" } : {}),
       },
     });
 
@@ -332,10 +335,13 @@ export class AdbClient {
     this.#options.bus.emit({
       type: succeeded ? "operation.completed" : "operation.failed",
       source: `adb.${operation}`,
-      severity: succeeded ? "info" : "error",
+      severity: succeeded ? (background ? "debug" : "info") : "error",
       message: succeeded ? `${message} completed` : `${message} failed`,
       correlation,
-      data: processMetadata(result),
+      data: {
+        ...processMetadata(result),
+        ...(background ? { presentation: "background" } : {}),
+      },
     });
 
     return {

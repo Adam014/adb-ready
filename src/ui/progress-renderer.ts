@@ -28,6 +28,8 @@ export class ProgressRenderer {
   }
 
   private onEvent(event: AdbReadyEvent): void {
+    if (event.data?.presentation === "background") return;
+
     if (event.type === "operation.started") {
       this.#spinner.start(event.message);
     } else if (event.type === "operation.completed") {
