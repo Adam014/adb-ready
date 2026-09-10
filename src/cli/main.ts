@@ -743,34 +743,59 @@ async function runCliInternal(
     });
   }
 
-  if (options.command === "connect" && execution.result.ok && execution.result.data !== null) {
-    const data = execution.result.data as Awaited<ReturnType<typeof runConnect>>["result"]["data"];
-    if (data !== null && "serial" in data) {
-      const stored = await (dependencies.writeRememberedTarget ?? writeRememberedTarget)(
-        {
+  let selectedTarget:
+    | {
+        serial: string;
+        hardwareSerial?: string;
+      }
+    | undefined;
+  if (execution.result.ok && execution.result.data !== null) {
+    if (options.command === "connect") {
+      const data = execution.result.data as Awaited<
+        ReturnType<typeof runConnect>
+      >["result"]["data"];
+      if (data !== null && "serial" in data) {
+        selectedTarget = {
           serial: data.serial,
           ...(data.hardwareSerial === undefined ? {} : { hardwareSerial: data.hardwareSerial }),
-          updatedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
-        },
-        {
-          env: io.env,
-          ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
-          ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
-        },
-      );
-      if (!stored.ok) {
-        execution.result.problems.push({
-          code: stored.code,
-          category: "state.persistence",
-          severity: "warning",
-          summary: stored.message,
-          detail: "The connection is ready, but ADB Ready could not remember it for --last.",
-          retryable: true,
-          evidence: [{ source: "state", field: "path", value: redactText(stored.path).value }],
-          actions: [],
-          correlation: { commandId: execution.result.commandId },
-        });
+        };
       }
+    } else if (options.command === "devices") {
+      const data = execution.result.data as DevicesData;
+      if (data.selected !== undefined) {
+        selectedTarget = {
+          serial: data.selected.transport.serial,
+          ...(data.selected.target.hardwareSerial === undefined
+            ? {}
+            : { hardwareSerial: data.selected.target.hardwareSerial }),
+        };
+      }
+    }
+  }
+  if (selectedTarget !== undefined) {
+    const stored = await (dependencies.writeRememberedTarget ?? writeRememberedTarget)(
+      {
+        ...selectedTarget,
+        updatedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
+      },
+      {
+        env: io.env,
+        ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
+        ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
+      },
+    );
+    if (!stored.ok) {
+      execution.result.problems.push({
+        code: stored.code,
+        category: "state.persistence",
+        severity: "warning",
+        summary: stored.message,
+        detail: "The connection is ready, but ADB Ready could not remember it for --last.",
+        retryable: true,
+        evidence: [{ source: "state", field: "path", value: redactText(stored.path).value }],
+        actions: [],
+        correlation: { commandId: execution.result.commandId },
+      });
     }
   }
 

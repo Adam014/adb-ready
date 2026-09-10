@@ -101,6 +101,12 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
       },
     }),
     locateAdb: async () => "/sdk/platform-tools/adb",
+    readTargetState: async () => ({
+      ok: true,
+      path: "/state.json",
+      document: { version: 1, targets: {} },
+    }),
+    writeRememberedTarget: async () => ({ ok: true, path: "/state.json" }),
     runner: async (request) => {
       const args = request.args ?? [];
       if (args.includes("version")) {
@@ -182,6 +188,21 @@ describe("runCli", () => {
     expect(streams.error.value).not.toContain("\u001b");
   });
 
+  test("does not change remembered state for a passive device listing", async () => {
+    const streams = io();
+    const fixture = dependencies("List of devices attached\nUSB-1 device model:Pixel_9\n");
+    let writes = 0;
+    fixture.writeRememberedTarget = async () => {
+      writes += 1;
+      return { ok: true, path: "/state.json" };
+    };
+
+    const exitCode = await runCli(["devices", "--json", "--non-interactive"], streams, fixture);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(writes).toBe(0);
+  });
+
   test("returns parse failures as the same envelope in JSON mode", async () => {
     const streams = io();
     const exitCode = await runCli(["unknown", "--json"], streams, dependencies());
@@ -216,16 +237,23 @@ describe("runCli", () => {
       "List of devices attached\n" +
       "usb-1 device model:Pixel_9 transport_id:1\n" +
       "wifi-1 offline model:Pixel_8 transport_id:2\n";
+    const fixture = dependencies(devices);
+    let remembered: { serial: string; hardwareSerial?: string } | undefined;
+    fixture.writeRememberedTarget = async (target) => {
+      remembered = target;
+      return { ok: true, path: "/state.json" };
+    };
     const exitCode = await runCli(
       ["devices", "--select", "--no-animation", "--no-color"],
       streams,
-      dependencies(devices),
+      fixture,
     );
 
     expect(exitCode).toBe(ExitCode.Success);
     expect(streams.error.value).toContain("Select an Android target");
     expect(streams.error.value).toContain("Pixel 8  · unavailable");
     expect(streams.error.value).toContain("Selected Pixel 9 · usb-1 · device");
+    expect(remembered).toMatchObject({ serial: "usb-1" });
     expect(input.isRaw).toBe(false);
   });
 
@@ -401,6 +429,11 @@ describe("runCli", () => {
         },
       },
     });
+    let remembered: { serial: string; hardwareSerial?: string } | undefined;
+    fixture.writeRememberedTarget = async (target) => {
+      remembered = target;
+      return { ok: true, path: "/state.json" };
+    };
 
     const exitCode = await runCli(
       ["devices", "--last", "--json", "--non-interactive"],
@@ -413,6 +446,10 @@ describe("runCli", () => {
     expect(payload.data.selected).toMatchObject({
       reason: "remembered-identity",
       transport: { serial: "192.168.1.20:44191" },
+    });
+    expect(remembered).toMatchObject({
+      serial: "192.168.1.20:44191",
+      hardwareSerial: "PHONE-1",
     });
   });
 
