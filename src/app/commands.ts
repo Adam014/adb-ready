@@ -56,7 +56,12 @@ import { type SessionState, SessionStateMachine } from "../session/state-machine
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { type SessionHealth, type SessionWatchSummary, watchSession } from "../session/watcher.js";
 import { SessionRecorder, type SessionStoreOptions } from "../state/session-store.js";
-import { type AndroidTarget, buildTargetInventory, isStableAdbSerial } from "../target/model.js";
+import {
+  type AndroidTarget,
+  buildTargetInventory,
+  correlateMdnsTransportIdentities,
+  isStableAdbSerial,
+} from "../target/model.js";
 import { type SelectedTarget, selectTarget } from "../target/selection.js";
 
 export interface CommandConfig {
@@ -559,14 +564,15 @@ async function inspectTargets(
     }
   });
   const services = mdnsAvailable ? mdns.value : [];
+  const observations = devices.map((device) => {
+    const hardwareSerial = identityBySerial.get(device.serial);
+    return {
+      device,
+      ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
+    };
+  });
   const inventory = buildTargetInventory(
-    devices.map((device) => {
-      const hardwareSerial = identityBySerial.get(device.serial);
-      return {
-        device,
-        ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
-      };
-    }),
+    correlateMdnsTransportIdentities(observations, services),
     services,
   );
 
