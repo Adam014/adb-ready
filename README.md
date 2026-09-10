@@ -3,19 +3,31 @@
 > Make an Android target ready, then keep the development session working.
 
 ADB Ready is an early-alpha, Android-only developer CLI built around the real
-`adb` executable. It provides one predictable interface for inspecting an ADB
-environment, finding Android targets, and establishing verified wireless
-connections without taking control of unrelated Android Studio sessions.
+`adb` executable. It selects one target, prepares verified ports, starts the
+project's development command, and keeps the target identity and useful output
+inside one structured session.
 
 ## Try the alpha
 
-ADB Ready currently requires Node.js 22 or newer and an installed Android SDK
-Platform-Tools `adb` executable.
+The standard npm entrypoint requires Node.js 22 or newer and Android SDK
+Platform-Tools. The same package is also exercised directly with Bun and Deno.
 
 ```bash
 npx adb-ready@alpha
 npx adb-ready@alpha doctor
 npx adb-ready@alpha devices
+```
+
+The registry alpha is the last published preview and may lag the current source.
+Until the next alpha is published, use the repository build below to exercise
+the complete command set documented here.
+
+To run the current repository build:
+
+```bash
+bun install --frozen-lockfile
+bun run build
+node dist/cli.js dev
 ```
 
 The package also exposes the shorter `adbr` command. Both names invoke the same
@@ -28,13 +40,74 @@ CLI entrypoint.
 - Unified USB, emulator, and wireless target discovery with `devices`.
 - Guided or explicit wireless connection with `connect`.
 - Secure Android Wireless debugging pairing with `pair`.
+- Verified, conflict-safe TCP reverse and forward port management.
+- One-command Expo, React Native, native Gradle, or custom development sessions.
+- Automatic project and package-manager detection with explicit overrides.
+- One selected target propagated to child tools through `ANDROID_SERIAL`.
+- Correlated, bounded, redacted child output and targeted logcat events.
+- Direct lifecycle hooks with timeouts and `fail`, `warn`, or `ignore` policies.
 - Deterministic selection by serial, alias, transport ID, or last verified
   target.
 - Named project and user profiles with validated configuration.
 - Human, plain, JSON, and NDJSON output.
 - Portable execution through Node, Bun, and Deno.
 
-Run `npx adb-ready@alpha --help` for the complete command reference.
+Run `adb-ready --help` for the complete command reference.
+
+## Development sessions
+
+From an Expo, React Native, or native Gradle project, the default workflow is:
+
+```bash
+adb-ready dev
+```
+
+Expo and React Native receive a verified reverse mapping for TCP port 8081 by
+default. Add or replace the configured port set by repeating `--port`:
+
+```bash
+adb-ready dev --port 8081 --port 8000
+```
+
+Any project can use a direct custom command. Arguments after `--` are passed as
+an argument array without a command shell:
+
+```bash
+adb-ready dev -- pnpm run android:local
+adb-ready dev -- bun x expo start --host lan --port 8081 --android
+```
+
+ADB Ready refuses to replace an existing conflicting reverse mapping. At exit
+it removes only mappings created by that session and independently verifies the
+result. Ctrl-C is forwarded to owned processes and returns the interrupted exit
+code after cleanup.
+
+Use `--dry-run` to inspect the exact target-bound ADB and child-process plan
+without running hooks, changing ports, or starting the project command:
+
+```bash
+adb-ready dev --port 8081 --dry-run --json
+```
+
+## Port workflows
+
+Forward and reverse mappings use explicit host/device semantics and are always
+verified after a mutation:
+
+```bash
+adb-ready ports reverse list
+adb-ready ports reverse add 8081
+adb-ready ports reverse add 8000 3000
+adb-ready ports reverse remove 8081
+
+adb-ready ports forward list
+adb-ready ports forward add 9229 3000
+adb-ready ports forward remove 9229
+```
+
+The current command family intentionally supports TCP endpoints. Other ADB
+socket families remain available through raw ADB until they receive an equally
+clear public contract.
 
 ## Wireless connection
 
@@ -102,7 +175,30 @@ JSON schema is included in the package as `schema/config-v1.schema.json`.
   },
   "profiles": {
     "local": {
-      "timeoutMs": 8000
+      "timeoutMs": 8000,
+      "dev": {
+        "preset": "expo",
+        "packageManager": "pnpm",
+        "reversePorts": [8081, 8000],
+        "logs": true,
+        "cleanupPorts": true,
+        "journal": {
+          "maxEntries": 2000,
+          "maxBytes": 2097152,
+          "minimumSeverity": "info",
+          "redactEnvironment": ["PRIVATE_API_TOKEN"]
+        },
+        "hooks": {
+          "onReady": [
+            {
+              "run": ["node", "scripts/android-ready.mjs"],
+              "timeoutMs": 5000,
+              "failure": "warn",
+              "envAllowlist": ["CI"]
+            }
+          ]
+        }
+      }
     },
     "ci": {
       "extends": "local",
@@ -120,6 +216,13 @@ Select a profile with `--profile NAME` or `ADB_READY_PROFILE`. Precedence is
 command-line options, environment variables, selected profile, project config,
 user config, then built-in defaults. Invalid keys, values, references, and
 profile cycles fail early with actionable errors.
+
+Project command resolution is deterministic: explicit config or CLI choice,
+then `packageManager`, npm `devEngines.packageManager`, lockfiles, and finally
+an available executable. Conflicting metadata is reported instead of guessed.
+Hook commands are direct executable/argument arrays; they do not invoke a shell,
+inherit only a small platform environment plus explicitly allowlisted names,
+and send their output through the session redactor.
 
 ## Automation output
 
@@ -195,12 +298,12 @@ bun run verify:real-adb
 The real-ADB check is read-only. It reports the local ADB environment and never
 requires a device mutation.
 
-## Current scope
+## Alpha boundary
 
-Reverse and forward ports, app lifecycle, logs, Expo and React Native presets,
-and the flagship `adb-ready dev` session are the next product layer. They are
-not presented as available until their end-to-end behavior is implemented and
-verified.
+The current dev session prepares and verifies its initial state; it does not yet
+watch and repair a device or mapping after a later disconnect. App install and
+lifecycle commands, persistent session files, broader logcat filtering, and
+automatic reconnect recovery are intentionally not claimed as available yet.
 
 The source repository remains private during early implementation. The alpha is
 currently distributed as `UNLICENSED` software.
