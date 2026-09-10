@@ -170,5 +170,5 @@ if (errors.length > 0) {
 process.stdout.write(
   publishMode
     ? `Release ${manifest.version} is structurally ready for npm publishing.\n`
-    : `Release preparation is safe; publishing remains blocked for ${manifest.version}.\n`,
+    : `Release ${manifest.version} is structurally ready; tagged CI performs publishing.\n`,
 );

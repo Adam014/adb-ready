@@ -4,7 +4,8 @@
 
 | Version | Supported |
 | --- | --- |
-| `0.1.x` | Yes |
+| `0.2.x` | Yes |
+| `0.1.x` | No |
 | `< 0.1.0` | No |
 
 Security fixes target the latest published minor release. Because ADB Ready is

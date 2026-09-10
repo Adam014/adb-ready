@@ -260,6 +260,21 @@ try {
     }
     assertions += 1;
 
+    const appResolution = command(
+      alias,
+      ["app", "resolve", "com.example.app", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(appResolution, 0, `${alias} local app resolution`);
+    const appPayload = parseJson(appResolution.stdout, `${alias} local app resolution`);
+    if (
+      appPayload.data?.resolution?.applicationId !== "com.example.app" ||
+      appPayload.data?.selected !== undefined
+    ) {
+      throw new Error(`${alias} app resolve: local identity unexpectedly required a target`);
+    }
+    assertions += 1;
+
     const uiPlan = command(
       alias,
       ["ui", "press", "back", "--dry-run", "--json", "--non-interactive"],

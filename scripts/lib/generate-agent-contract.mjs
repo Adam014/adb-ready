@@ -35,7 +35,8 @@ export async function generateAgentContract(options) {
   ];
   child.stdout.on("data", (chunk) => {
     stdout += chunk.toString("utf8");
-    if (!closedInput && stdout.includes('"id":2')) {
+    const completedResponses = stdout.split(/\r?\n/u).filter(Boolean).length;
+    if (!closedInput && completedResponses >= 2) {
       closedInput = true;
       child.stdin.end();
     }
@@ -71,7 +72,7 @@ export async function generateAgentContract(options) {
   if (!Array.isArray(tools) || tools.length === 0) {
     throw new Error("MCP contract generation returned no tools");
   }
-  tools.sort((left, right) => left.name.localeCompare(right.name));
+  tools.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
   const artifact = {
     title: "ADB Ready agent tool contract",
     schemaVersion: 1,

@@ -1,6 +1,6 @@
 {
   "name": "adb-ready",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Make an Android target ready, then keep the development session working.",
   "private": false,
   "type": "module",
@@ -57,7 +57,9 @@
   "homepage": "https://github.com/Adam014/adb-ready#readme",
   "keywords": [
     "adb",
+    "ai-agents",
     "android",
+    "android-automation",
     "adb-forward",
     "adb-reverse",
     "android-debugging",
@@ -67,6 +69,7 @@
     "logcat",
     "localhost",
     "metro",
+    "mcp",
     "port-forwarding",
     "react-native",
     "wireless-adb",

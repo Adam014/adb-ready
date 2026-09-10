@@ -9,6 +9,8 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-10
+
 ### Added
 
 - Resolve Android application IDs with provenance, enumerate installed
@@ -77,7 +79,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Adam014/adb-ready/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Adam014/adb-ready/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Adam014/adb-ready/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Adam014/adb-ready/compare/v0.0.1-alpha.0...v0.1.0
