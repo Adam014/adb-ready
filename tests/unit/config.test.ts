@@ -194,6 +194,99 @@ describe("loadConfig", () => {
     });
   });
 
+  test("validates and merges declarative dev session configuration", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "dev.json");
+    await writeJson(projectFile, {
+      version: 1,
+      dev: {
+        preset: "expo",
+        packageManager: "pnpm",
+        command: { executable: "pnpm", args: ["run", "start"], cwd: "mobile" },
+        reversePorts: [8081, { device: 8000, host: 8001 }],
+        logs: true,
+        cleanupPorts: true,
+        journal: {
+          maxEntries: 500,
+          maxBytes: 100000,
+          sources: ["child.stdout", "logcat"],
+          minimumSeverity: "info",
+        },
+      },
+    });
+    const loaded = await loadConfig({
+      cwd: directory,
+      env: {
+        ADB_READY_PRESET: "react-native",
+        ADB_READY_REVERSE_PORTS: "3000,8081",
+        ADB_READY_DEV_LOGS: "false",
+      },
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+      cli: { packageManager: "bun", devCleanupPorts: false },
+    });
+
+    expect(loaded).toMatchObject({
+      ok: true,
+      config: {
+        values: {
+          devPreset: "react-native",
+          packageManager: "bun",
+          devCommand: { executable: "pnpm", args: ["run", "start"], cwd: "mobile" },
+          devReversePorts: [{ device: 3000 }, { device: 8081 }],
+          devLogs: false,
+          devCleanupPorts: false,
+          journalMaxEntries: 500,
+          journalMaxBytes: 100000,
+          journalSources: ["child.stdout", "logcat"],
+          journalMinimumSeverity: "info",
+        },
+        provenance: {
+          devPreset: { source: "environment" },
+          packageManager: { source: "cli" },
+          devReversePorts: { source: "environment" },
+          devCleanupPorts: { source: "cli" },
+        },
+      },
+    });
+  });
+
+  test("returns all invalid dev fields", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "bad-dev.json");
+    await writeJson(projectFile, {
+      version: 1,
+      dev: {
+        preset: "magic",
+        packageManager: "other",
+        command: { executable: "", args: "start", shell: true },
+        reversePorts: [0, { device: 8081, host: 70000, extra: true }],
+        logs: "yes",
+        journal: { maxEntries: 0, minimumSeverity: "fatal", extra: true },
+        extra: true,
+      },
+    });
+    const loaded = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+    expect(loaded.ok).toBe(false);
+    if (!loaded.ok) {
+      const paths = loaded.errors.map(({ path: errorPath }) => errorPath);
+      expect(paths).toContain("dev.extra");
+      expect(paths).toContain("dev.command.shell");
+      expect(paths).toContain("dev.reversePorts.0.device");
+      expect(paths).toContain("dev.reversePorts.1.host");
+      expect(paths).toContain("dev.journal.minimumSeverity");
+    }
+  });
+
   test("loads an environment-selected project file as required", async () => {
     const directory = await temporaryDirectory();
     const selected = path.join(directory, "selected.json");

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { runDev } from "../../src/app/commands.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { type CommandDependencies, runDev } from "../../src/app/commands.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import { ProblemCode } from "../../src/domain/problems.js";
 import type {
@@ -29,7 +32,7 @@ function result(request: ProcessRequest, overrides: Partial<ProcessResult> = {})
   };
 }
 
-function dependencies(runner: ProcessRunner) {
+function dependencies(runner: ProcessRunner): CommandDependencies {
   let id = 0;
   return {
     runner,
@@ -223,5 +226,73 @@ describe("runDev", () => {
     expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.PortMappingConflict);
     expect(requests.some(({ args }) => args?.includes("--no-rebind"))).toBe(false);
     expect(requests.some(({ executable }) => executable === "dev-server")).toBe(false);
+  });
+
+  test("plans first-party Expo and React Native presets with their project manager", async () => {
+    for (const fixture of [
+      {
+        preset: "expo" as const,
+        manager: "npm" as const,
+        script: "start",
+        expected: ["run", "start", "--", "--android"],
+      },
+      {
+        preset: "react-native" as const,
+        manager: "pnpm" as const,
+        script: "android",
+        expected: ["run", "android"],
+      },
+    ]) {
+      const deps = dependencies(async (request) => targetProbe(request) ?? result(request));
+      deps.detectProject = async () => ({
+        root: "/workspace/app",
+        preset: fixture.preset,
+        presetEvidence: [`dependency: ${fixture.preset}`],
+        packageJson: {
+          path: "/workspace/app/package.json",
+          scripts: { [fixture.script]: "fixture" },
+        },
+        packageManager: {
+          name: fixture.manager,
+          executable: `/bin/${fixture.manager}`,
+          source: "package-json",
+          conflicts: [],
+        },
+      });
+      const execution = await runDev({ cwd: "/workspace/app" }, { dryRun: true }, deps);
+      expect(execution.result.data).toMatchObject({
+        preset: fixture.preset,
+        ports: { requested: [{ device: "tcp:8081", host: "tcp:8081" }] },
+        command: { executable: `/bin/${fixture.manager}`, args: fixture.expected },
+      });
+    }
+  });
+
+  test("runs the native Gradle wrapper through Java without a command shell", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-gradle-"));
+    try {
+      const wrapper = path.join(root, "gradle", "wrapper", "gradle-wrapper.jar");
+      await mkdir(path.dirname(wrapper), { recursive: true });
+      await writeFile(wrapper, "fixture");
+      const deps = dependencies(async (request) => targetProbe(request) ?? result(request));
+      deps.detectProject = async () => ({
+        root,
+        preset: "gradle",
+        presetEvidence: ["Gradle wrapper"],
+        packageManager: { conflicts: [] },
+      });
+      deps.locateExecutable = async (name) => (name === "java" ? "/jdk/bin/java" : undefined);
+      const execution = await runDev({ cwd: root }, { dryRun: true }, deps);
+      expect(execution.result.data).toMatchObject({
+        preset: "gradle",
+        command: {
+          executable: "/jdk/bin/java",
+          args: ["-classpath", wrapper, "org.gradle.wrapper.GradleWrapperMain", "installDebug"],
+        },
+        ports: { requested: [] },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

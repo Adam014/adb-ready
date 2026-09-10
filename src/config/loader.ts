@@ -44,13 +44,26 @@ const ROOT_KEYS = new Set([
   "timeoutMs",
   "output",
   "targets",
+  "dev",
   "defaultProfile",
   "profiles",
 ]);
-const PROFILE_KEYS = new Set(["extends", "adb", "timeoutMs", "output", "targets"]);
+const PROFILE_KEYS = new Set(["extends", "adb", "timeoutMs", "output", "targets", "dev"]);
 const ADB_KEYS = new Set(["path", "host", "port"]);
 const OUTPUT_KEYS = new Set(["color", "unicode", "animation", "interactive"]);
 const TARGET_KEYS = new Set(["aliases"]);
+const DEV_KEYS = new Set([
+  "preset",
+  "packageManager",
+  "command",
+  "reversePorts",
+  "logs",
+  "cleanupPorts",
+  "journal",
+]);
+const COMMAND_KEYS = new Set(["executable", "args", "cwd"]);
+const PORT_KEYS = new Set(["device", "host"]);
+const JOURNAL_KEYS = new Set(["maxEntries", "maxBytes", "sources", "minimumSeverity"]);
 const PROFILE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -230,6 +243,259 @@ function validateDocument(
     }
   }
 
+  if (document.dev !== undefined) {
+    if (!isObject(document.dev)) {
+      errors.push(error(source, location, "dev", "dev must be an object."));
+    } else {
+      validateUnknownKeys(document.dev, DEV_KEYS, "dev.", source, location, errors);
+      if (document.dev.preset !== undefined) {
+        if (
+          !new Set(["custom", "expo", "gradle", "react-native"]).has(document.dev.preset as string)
+        ) {
+          errors.push(
+            error(
+              source,
+              location,
+              "dev.preset",
+              "dev.preset must be custom, expo, gradle, or react-native.",
+            ),
+          );
+        } else {
+          values.devPreset = document.dev.preset as NonNullable<ConfigValues["devPreset"]>;
+        }
+      }
+      if (document.dev.packageManager !== undefined) {
+        if (!new Set(["bun", "npm", "pnpm", "yarn"]).has(document.dev.packageManager as string)) {
+          errors.push(
+            error(
+              source,
+              location,
+              "dev.packageManager",
+              "dev.packageManager must be bun, npm, pnpm, or yarn.",
+            ),
+          );
+        } else {
+          values.packageManager = document.dev.packageManager as NonNullable<
+            ConfigValues["packageManager"]
+          >;
+        }
+      }
+      if (document.dev.command !== undefined) {
+        if (!isObject(document.dev.command)) {
+          errors.push(error(source, location, "dev.command", "dev.command must be an object."));
+        } else {
+          validateUnknownKeys(
+            document.dev.command,
+            COMMAND_KEYS,
+            "dev.command.",
+            source,
+            location,
+            errors,
+          );
+          const executable = document.dev.command.executable;
+          const args = document.dev.command.args;
+          const cwd = document.dev.command.cwd;
+          if (typeof executable !== "string" || executable.trim() === "") {
+            errors.push(
+              error(
+                source,
+                location,
+                "dev.command.executable",
+                "dev.command.executable must be a non-empty string.",
+              ),
+            );
+          }
+          if (!Array.isArray(args) || !args.every((item) => typeof item === "string")) {
+            errors.push(
+              error(
+                source,
+                location,
+                "dev.command.args",
+                "dev.command.args must be an array of strings.",
+              ),
+            );
+          }
+          if (cwd !== undefined && (typeof cwd !== "string" || cwd.trim() === "")) {
+            errors.push(
+              error(
+                source,
+                location,
+                "dev.command.cwd",
+                "dev.command.cwd must be a non-empty string.",
+              ),
+            );
+          }
+          if (
+            typeof executable === "string" &&
+            executable.trim() !== "" &&
+            Array.isArray(args) &&
+            args.every((item) => typeof item === "string") &&
+            (cwd === undefined || (typeof cwd === "string" && cwd.trim() !== ""))
+          ) {
+            values.devCommand = {
+              executable,
+              args,
+              ...(cwd === undefined ? {} : { cwd }),
+            };
+          }
+        }
+      }
+      if (document.dev.reversePorts !== undefined) {
+        if (!Array.isArray(document.dev.reversePorts)) {
+          errors.push(
+            error(source, location, "dev.reversePorts", "dev.reversePorts must be an array."),
+          );
+        } else {
+          const ports: NonNullable<ConfigValues["devReversePorts"]> = [];
+          document.dev.reversePorts.forEach((candidate, index) => {
+            const port = typeof candidate === "number" ? { device: candidate } : candidate;
+            if (!isObject(port)) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `dev.reversePorts.${String(index)}`,
+                  "Each reverse port must be an integer or an object.",
+                ),
+              );
+              return;
+            }
+            validateUnknownKeys(
+              port,
+              PORT_KEYS,
+              `dev.reversePorts.${String(index)}.`,
+              source,
+              location,
+              errors,
+            );
+            if (
+              !Number.isSafeInteger(port.device) ||
+              (port.device as number) < 1 ||
+              (port.device as number) > 65_535
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `dev.reversePorts.${String(index)}.device`,
+                  "Device port must be an integer from 1 to 65535.",
+                ),
+              );
+              return;
+            }
+            if (
+              port.host !== undefined &&
+              (!Number.isSafeInteger(port.host) ||
+                (port.host as number) < 1 ||
+                (port.host as number) > 65_535)
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `dev.reversePorts.${String(index)}.host`,
+                  "Host port must be an integer from 1 to 65535.",
+                ),
+              );
+              return;
+            }
+            ports.push({
+              device: port.device as number,
+              ...(port.host === undefined ? {} : { host: port.host as number }),
+            });
+          });
+          values.devReversePorts = ports;
+        }
+      }
+      for (const [key, configKey] of [
+        ["logs", "devLogs"],
+        ["cleanupPorts", "devCleanupPorts"],
+      ] as const) {
+        const candidate = document.dev[key];
+        if (candidate !== undefined) {
+          if (typeof candidate !== "boolean") {
+            errors.push(error(source, location, `dev.${key}`, `dev.${key} must be a boolean.`));
+          } else {
+            values[configKey] = candidate;
+          }
+        }
+      }
+      if (document.dev.journal !== undefined) {
+        if (!isObject(document.dev.journal)) {
+          errors.push(error(source, location, "dev.journal", "dev.journal must be an object."));
+        } else {
+          validateUnknownKeys(
+            document.dev.journal,
+            JOURNAL_KEYS,
+            "dev.journal.",
+            source,
+            location,
+            errors,
+          );
+          for (const [key, configKey] of [
+            ["maxEntries", "journalMaxEntries"],
+            ["maxBytes", "journalMaxBytes"],
+          ] as const) {
+            const candidate = document.dev.journal[key];
+            if (!Number.isSafeInteger(candidate) || (candidate as number) < 1) {
+              if (candidate !== undefined) {
+                errors.push(
+                  error(
+                    source,
+                    location,
+                    `dev.journal.${key}`,
+                    `dev.journal.${key} must be a positive integer.`,
+                  ),
+                );
+              }
+            } else {
+              values[configKey] = candidate as number;
+            }
+          }
+          if (document.dev.journal.sources !== undefined) {
+            if (
+              !Array.isArray(document.dev.journal.sources) ||
+              !document.dev.journal.sources.every(
+                (item) => typeof item === "string" && item.trim() !== "",
+              )
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  "dev.journal.sources",
+                  "dev.journal.sources must be an array of non-empty strings.",
+                ),
+              );
+            } else {
+              values.journalSources = [...new Set(document.dev.journal.sources as string[])];
+            }
+          }
+          if (document.dev.journal.minimumSeverity !== undefined) {
+            if (
+              !new Set(["debug", "info", "warning", "error"]).has(
+                document.dev.journal.minimumSeverity as string,
+              )
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  "dev.journal.minimumSeverity",
+                  "dev.journal.minimumSeverity must be debug, info, warning, or error.",
+                ),
+              );
+            } else {
+              values.journalMinimumSeverity = document.dev.journal.minimumSeverity as NonNullable<
+                ConfigValues["journalMinimumSeverity"]
+              >;
+            }
+          }
+        }
+      }
+    }
+  }
+
   let defaultProfile: string | undefined;
   if (document.defaultProfile !== undefined) {
     if (
@@ -284,7 +550,7 @@ function validateDocument(
           }
         }
         const profileDocument: Record<string, unknown> = { version: 1 };
-        for (const key of ["adb", "timeoutMs", "output", "targets"] as const) {
+        for (const key of ["adb", "timeoutMs", "output", "targets", "dev"] as const) {
           if (candidate[key] !== undefined) {
             profileDocument[key] = candidate[key];
           }
@@ -483,9 +749,54 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
     }
   }
 
+  const enumStrings = [
+    ["ADB_READY_PRESET", "devPreset", new Set(["custom", "expo", "gradle", "react-native"])],
+    ["ADB_READY_PACKAGE_MANAGER", "packageManager", new Set(["bun", "npm", "pnpm", "yarn"])],
+    [
+      "ADB_READY_JOURNAL_MINIMUM_SEVERITY",
+      "journalMinimumSeverity",
+      new Set(["debug", "info", "warning", "error"]),
+    ],
+  ] as const;
+  for (const [name, key, allowed] of enumStrings) {
+    const candidate = env[name];
+    if (candidate !== undefined) {
+      if (!allowed.has(candidate)) {
+        errors.push(
+          error("environment", name, name, `${name} must be one of: ${[...allowed].join(", ")}.`),
+        );
+      } else {
+        Object.assign(values, { [key]: candidate });
+      }
+    }
+  }
+
+  if (env.ADB_READY_REVERSE_PORTS !== undefined) {
+    const rawPorts = env.ADB_READY_REVERSE_PORTS.split(",").map((value) => value.trim());
+    const parsed = rawPorts.map((value) => Number(value));
+    if (
+      rawPorts.length === 0 ||
+      rawPorts.some((value) => value === "") ||
+      parsed.some((port) => !Number.isSafeInteger(port) || port < 1 || port > 65_535)
+    ) {
+      errors.push(
+        error(
+          "environment",
+          "ADB_READY_REVERSE_PORTS",
+          "ADB_READY_REVERSE_PORTS",
+          "ADB_READY_REVERSE_PORTS must be a comma-separated list of ports from 1 to 65535.",
+        ),
+      );
+    } else {
+      values.devReversePorts = parsed.map((device) => ({ device }));
+    }
+  }
+
   const integers = [
     ["ADB_READY_ADB_PORT", "adbPort", 65_535],
     ["ADB_READY_TIMEOUT_MS", "timeoutMs", 2_147_483_647],
+    ["ADB_READY_JOURNAL_MAX_ENTRIES", "journalMaxEntries", 2_147_483_647],
+    ["ADB_READY_JOURNAL_MAX_BYTES", "journalMaxBytes", 2_147_483_647],
   ] as const;
   for (const [name, key, maximum] of integers) {
     const candidate = env[name];
@@ -506,6 +817,8 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
     ["ADB_READY_UNICODE", "unicode"],
     ["ADB_READY_ANIMATION", "animation"],
     ["ADB_READY_INTERACTIVE", "interactive"],
+    ["ADB_READY_DEV_LOGS", "devLogs"],
+    ["ADB_READY_CLEANUP_PORTS", "devCleanupPorts"],
   ] as const;
   for (const [name, key] of booleans) {
     const candidate = env[name];

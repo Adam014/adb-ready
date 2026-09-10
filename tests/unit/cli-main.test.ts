@@ -83,10 +83,10 @@ function result(request: ProcessRequest, stdout: string): ProcessResult {
 function dependencies(devices = "List of devices attached\n"): CliDependencies {
   let id = 0;
   return {
-    loadConfig: async () => ({
+    loadConfig: async (options) => ({
       ok: true,
       config: {
-        values: { timeoutMs: 5_000 },
+        values: { timeoutMs: 5_000, ...options?.cli },
         provenance: {
           adbPath: undefined,
           adbHost: undefined,
@@ -101,6 +101,11 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
       },
     }),
     locateAdb: async () => "/sdk/platform-tools/adb",
+    detectProject: async () => ({
+      root: "/project",
+      presetEvidence: [],
+      packageManager: { conflicts: [] },
+    }),
     readTargetState: async () => ({
       ok: true,
       path: "/state.json",
@@ -139,7 +144,7 @@ describe("runCli", () => {
   test("keeps a bare interactive session open and returns to a compact menu", async () => {
     const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
     streams.env.ADB_READY_REDUCED_MOTION = "1";
-    streams.input.autoInputs = ["\r", "\u001B"];
+    streams.input.autoInputs = ["2\r", "\u001B"];
     const exitCode = await runCli([], streams, dependencies());
 
     expect(exitCode).toBe(ExitCode.Success);
@@ -148,7 +153,7 @@ describe("runCli", () => {
     expect(streams.error.value).toContain("· doctor");
     expect(streams.error.value).toContain("####");
     expect(streams.error.value).toContain("ACTIONS");
-    expect(streams.error.value.match(/Android setup\. No guesswork\./gu)).toHaveLength(1);
+    expect(streams.error.value).toContain("Android setup. No guesswork.");
     expect(streams.input.isRaw).toBe(false);
   });
 
@@ -473,6 +478,61 @@ describe("runCli", () => {
     expect(exitCode).toBe(ExitCode.Success);
     expect(payload.data.plan).toMatchObject({ dryRun: true, steps: [{ id: "pair" }] });
     expect(streams.error.value).toBe("");
+  });
+
+  test("runs a custom dev command with clean JSON and remembers its one target", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    let remembered: { serial: string; hardwareSerial?: string } | undefined;
+    fixture.writeRememberedTarget = async (target) => {
+      remembered = target;
+      return { ok: true, path: "/state.json" };
+    };
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+      }
+      if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) {
+        return result(request, "List of discovered mdns services\n");
+      }
+      if (args.includes("--list")) return result(request, "");
+      if (request.executable === "node") {
+        request.onStdoutChunk?.(new TextEncoder().encode("server ready\n"));
+        expect(request.env?.ANDROID_SERIAL).toBe("USB-1");
+        return result(request, "server ready\n");
+      }
+      return result(request, "");
+    };
+
+    const exitCode = await runCli(
+      ["dev", "--no-logs", "--json", "--non-interactive", "--", "node", "server.mjs"],
+      streams,
+      fixture,
+    );
+    const payload = JSON.parse(streams.output.value);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload).toMatchObject({
+      command: "dev",
+      ok: true,
+      data: {
+        preset: "custom",
+        selected: { transport: { serial: "USB-1" } },
+        command: { executable: "node", args: ["server.mjs"] },
+        child: { exitCode: 0 },
+      },
+    });
+    expect(streams.output.value.trim().split("\n")).toHaveLength(1);
+    expect(streams.error.value).toBe("");
+    expect(remembered).toMatchObject({ serial: "USB-1", hardwareSerial: "PHONE-1" });
   });
 
   test("automatically uses one discovered endpoint in an interactive connect flow", async () => {

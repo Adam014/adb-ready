@@ -34,7 +34,12 @@ export class ProgressRenderer {
       this.#spinner.succeed(event.message.replace(/ completed$/u, ""));
     } else if (event.type === "operation.failed") {
       this.#spinner.fail(event.message.replace(/ failed$/u, ""));
-    } else if (this.#verbose) {
+    } else if (
+      this.#verbose &&
+      event.source !== "child.stdout" &&
+      event.source !== "child.stderr" &&
+      event.source !== "logcat"
+    ) {
       this.#sink.write(`› ${event.message}\n`);
     }
   }

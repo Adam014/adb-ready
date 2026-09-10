@@ -5,9 +5,11 @@ import type { AdbMdnsService } from "../adb/parsers.js";
 import {
   type CommandDependencies,
   type CommandExecution,
+  type DevData,
   type DevicesData,
   type PortsData,
   runConnect,
+  runDev,
   runDevices,
   runDoctor,
   runPair,
@@ -53,6 +55,7 @@ Usage:
 
 Commands:
   connect [HOST:PORT]    Connect and verify a wireless Android target
+  dev [OPTIONS] [-- CMD] Prepare one target and run a development session
   doctor                 Inspect the local ADB environment
   devices                List visible Android targets
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
@@ -94,6 +97,21 @@ const COMMAND_HELP = {
 
 Connects a TLS/legacy wireless endpoint and verifies its stable ADB serial.
 When the endpoint is omitted, exactly one mDNS connect service must be visible.
+`,
+  dev: `Usage: adb-ready dev [options] [-- EXECUTABLE ARG...]
+
+Selects one Android target, verifies reverse ports, starts an Expo, React
+Native, native Gradle, or custom command with ANDROID_SERIAL, and correlates
+child output with targeted logcat. Ctrl-C stops owned processes and removes
+only mappings created by this session.
+
+Development options:
+  --preset NAME          expo, react-native, gradle, or custom
+  --package-manager PM   npm, pnpm, yarn, or bun
+  --port PORT            Add a reverse TCP port; repeat for more ports
+  --[no-]logs            Enable or disable targeted logcat
+  --[no-]cleanup-ports   Keep or remove session-created mappings on exit
+  -- EXECUTABLE ARG...   Run a direct custom command without a shell
 `,
   doctor: `Usage: adb-ready doctor [options]
 
@@ -271,6 +289,14 @@ function cliConfig(options: CliOptions): ConfigValues {
     ...(options.unicode === undefined ? {} : { unicode: options.unicode }),
     ...(options.animation === undefined ? {} : { animation: options.animation }),
     ...(options.nonInteractive ? { interactive: false } : {}),
+    ...(options.preset === undefined ? {} : { devPreset: options.preset }),
+    ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
+    ...(options.reversePorts === undefined
+      ? {}
+      : { devReversePorts: options.reversePorts.map((device) => ({ device: Number(device) })) }),
+    ...(options.logs === undefined ? {} : { devLogs: options.logs }),
+    ...(options.cleanupPorts === undefined ? {} : { devCleanupPorts: options.cleanupPorts }),
+    ...(options.customCommand === undefined ? {} : { devCommand: options.customCommand }),
   };
 }
 
@@ -500,8 +526,8 @@ async function runCliInternal(
   let lastTarget: RememberedTarget | undefined;
   let stateWarning: Problem | undefined;
   if (
-    (options.command === "devices" || options.command === "ports") &&
-    (options.select || options.remembered)
+    (options.command === "dev" || options.command === "devices" || options.command === "ports") &&
+    (options.command === "dev" || options.select || options.remembered)
   ) {
     const state = await (dependencies.readTargetState ?? readTargetState)({
       env: io.env,
@@ -553,26 +579,43 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
-  if (options.command === "ports" && options.select) {
+  if (
+    (options.command === "ports" && options.select) ||
+    (options.command === "dev" &&
+      errorCapabilities.interactive &&
+      options.device === undefined &&
+      options.transportId === undefined)
+  ) {
     const inventory = await runDevices(config, commandDependencies, signal);
-    const selected = await selectDevice(inventory, io, errorCapabilities, lastTarget, signal);
+    const selectable =
+      inventory.result.data?.targets.filter((target) =>
+        target.transports.some(({ stable, state }) => stable && state === "device"),
+      ) ?? [];
+    const shouldPrompt =
+      options.select || (inventory.result.data?.selected === undefined && selectable.length !== 1);
+    const selected = shouldPrompt
+      ? await selectDevice(inventory, io, errorCapabilities, lastTarget, signal)
+      : inventory;
     if (!selected.result.ok || selected.result.data?.selected === undefined) {
-      renderResult(
-        { ...selected.result, command: "ports" },
-        {
-          format: "human",
-          capabilities: errorCapabilities,
-          sink: io.error,
-          verbose: options.verbose,
-        },
-      );
-      return selected.exitCode;
-    }
-    const transport = selected.result.data.selected.transport;
-    if (transport.transportId === undefined) {
-      config.targetSelector = transport.serial;
+      if (shouldPrompt || selectable.length === 0) {
+        renderResult(
+          { ...selected.result, command: options.command },
+          {
+            format: "human",
+            capabilities: errorCapabilities,
+            sink: io.error,
+            verbose: options.verbose,
+          },
+        );
+        return selected.exitCode;
+      }
     } else {
-      config.targetTransportId = transport.transportId;
+      const transport = selected.result.data.selected.transport;
+      if (transport.transportId === undefined) {
+        config.targetSelector = transport.serial;
+      } else {
+        config.targetTransportId = transport.transportId;
+      }
     }
   }
   let endpoint = options.endpoint;
@@ -723,12 +766,46 @@ async function runCliInternal(
   let execution:
     | CommandExecution<DevicesData>
     | Awaited<ReturnType<typeof runConnect>>
+    | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
     | Awaited<ReturnType<typeof runPair>>
     | Awaited<ReturnType<typeof runPorts>>;
   try {
     if (options.command === "doctor") {
       execution = await runDoctor(config, commandDependencies, signal);
+    } else if (options.command === "dev") {
+      execution = await runDev(
+        {
+          cwd: io.cwd,
+          ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
+          ...(values.packageManager === undefined ? {} : { packageManager: values.packageManager }),
+          ...(values.devCommand === undefined ? {} : { command: values.devCommand }),
+          ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
+          ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
+          ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
+          journal: {
+            ...(values.journalMaxEntries === undefined
+              ? {}
+              : { maxEntries: values.journalMaxEntries }),
+            ...(values.journalMaxBytes === undefined ? {} : { maxBytes: values.journalMaxBytes }),
+            ...(values.journalSources === undefined ? {} : { sources: values.journalSources }),
+            ...(values.journalMinimumSeverity === undefined
+              ? {}
+              : { minimumSeverity: values.journalMinimumSeverity }),
+          },
+          childStdin: errorCapabilities.interactive ? "inherit" : "ignore",
+          ...(options.format === "human" && !options.quiet
+            ? {
+                onChildLine: (stream: "stderr" | "stdout", line: string) => {
+                  io.error.write(`${stream === "stderr" ? "│" : " "} ${line}\n`);
+                },
+              }
+            : {}),
+        },
+        config,
+        commandDependencies,
+        signal,
+      );
     } else if (options.command === "devices") {
       execution = await runDevices(config, commandDependencies, signal);
     } else if (options.command === "connect") {
@@ -825,6 +902,16 @@ async function runCliInternal(
         selectedTarget = {
           serial: data.serial,
           ...(data.hardwareSerial === undefined ? {} : { hardwareSerial: data.hardwareSerial }),
+        };
+      }
+    } else if (options.command === "dev") {
+      const data = execution.result.data as DevData | null;
+      if (data !== null) {
+        selectedTarget = {
+          serial: data.selected.transport.serial,
+          ...(data.selected.target.hardwareSerial === undefined
+            ? {}
+            : { hardwareSerial: data.selected.target.hardwareSerial }),
         };
       }
     } else if (options.command === "devices") {

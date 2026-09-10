@@ -74,7 +74,7 @@ const interactive: TerminalCapabilities = {
 };
 
 describe("home screen", () => {
-  test("clears first, renders product value, and opens on the recommended doctor", async () => {
+  test("clears first, renders product value, and opens on the flagship dev workflow", async () => {
     const sink = new MemorySink();
     const input = new AutoInput("\r");
     const selected = await showHomeScreen({
@@ -85,7 +85,7 @@ describe("home screen", () => {
       refreshIntervalMs: 1,
     });
 
-    expect(selected).toEqual({ kind: "action", action: "doctor" });
+    expect(selected).toEqual({ kind: "action", action: "dev" });
     expect(sink.value).toStartWith("\u001B[2J\u001B[H");
     expect(sink.value).toContain("ADB READY");
     expect(sink.value).toContain("Android setup. No guesswork.");
@@ -98,7 +98,7 @@ describe("home screen", () => {
   test("supports the version menu shortcut", async () => {
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("5", "\r"),
+      input: new AutoInput("6", "\r"),
       sink: new MemorySink(),
       capabilities: { ...interactive, animation: false },
     });

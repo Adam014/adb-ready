@@ -42,6 +42,9 @@
           },
           "targets": {
             "$ref": "#/$defs/targets"
+          },
+          "dev": {
+            "$ref": "#/$defs/dev"
           }
         }
       }
@@ -103,6 +106,9 @@
           }
         }
       }
+    },
+    "dev": {
+      "$ref": "#/$defs/dev"
     }
   },
   "$defs": {
@@ -135,6 +141,61 @@
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"
           },
           "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "dev": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "enum": ["custom", "expo", "gradle", "react-native"]
+        },
+        "packageManager": {
+          "enum": ["bun", "npm", "pnpm", "yarn"]
+        },
+        "command": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["executable", "args"],
+          "properties": {
+            "executable": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "cwd": { "type": "string", "minLength": 1 }
+          }
+        },
+        "reversePorts": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "integer", "minimum": 1, "maximum": 65535 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["device"],
+                "properties": {
+                  "device": { "type": "integer", "minimum": 1, "maximum": 65535 },
+                  "host": { "type": "integer", "minimum": 1, "maximum": 65535 }
+                }
+              }
+            ]
+          }
+        },
+        "logs": { "type": "boolean" },
+        "cleanupPorts": { "type": "boolean" },
+        "journal": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxEntries": { "type": "integer", "minimum": 1 },
+            "maxBytes": { "type": "integer", "minimum": 1 },
+            "sources": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            },
+            "minimumSeverity": { "enum": ["debug", "info", "warning", "error"] }
+          }
         }
       }
     }

@@ -150,6 +150,70 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses zero-config and fully custom development sessions", () => {
+    expect(parseArguments(["dev"])).toMatchObject({
+      ok: true,
+      options: { command: "dev" },
+    });
+    expect(
+      parseArguments([
+        "dev",
+        "--preset",
+        "expo",
+        "--package-manager",
+        "bun",
+        "--port",
+        "8081",
+        "--port=8000",
+        "--no-logs",
+        "--no-cleanup-ports",
+        "--dry-run",
+        "--",
+        "node",
+        "scripts/dev.mjs",
+        "--literal=value",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "dev",
+        preset: "expo",
+        packageManager: "bun",
+        reversePorts: ["8081", "8000"],
+        logs: false,
+        cleanupPorts: false,
+        dryRun: true,
+        customCommand: {
+          executable: "node",
+          args: ["scripts/dev.mjs", "--literal=value"],
+        },
+      },
+    });
+    expect(parseArguments(["dev", "--help"])).toMatchObject({
+      ok: true,
+      options: { command: "help", helpTarget: "dev" },
+    });
+  });
+
+  test("rejects invalid or misplaced development options", () => {
+    expect(parseArguments(["dev", "--preset", "flutter"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["dev", "--port", "0"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["doctor", "--no-logs"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["dev", "--"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("rejects incomplete and over-specified port workflows", () => {
     expect(parseArguments(["ports"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
     expect(parseArguments(["ports", "sideways", "list"])).toMatchObject({

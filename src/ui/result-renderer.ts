@@ -1,6 +1,7 @@
 import type { AdbDevice, AdbMdnsService } from "../adb/parsers.js";
 import type {
   ConnectedData,
+  DevData,
   DevicesData,
   DoctorData,
   PairedData,
@@ -67,6 +68,18 @@ function isPortsData(value: unknown): value is PortsData {
     (value.direction === "forward" || value.direction === "reverse") &&
     Array.isArray(value.mappings) &&
     isRecord(value.selected)
+  );
+}
+
+function isDevData(value: unknown): value is DevData {
+  return (
+    isRecord(value) &&
+    typeof value.sessionId === "string" &&
+    isRecord(value.selected) &&
+    isRecord(value.project) &&
+    isRecord(value.command) &&
+    isRecord(value.ports) &&
+    isRecord(value.journal)
   );
 }
 
@@ -160,6 +173,24 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
         `${style.success(glyphs.success, capabilities)} Identity  ${clean(result.data.hardwareSerial)}`,
       );
     }
+  }
+
+  if (result.command === "dev" && isDevData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} Project  ${clean(data.project.name ?? data.project.root)} · ${clean(data.preset)}`,
+      `${style.success(glyphs.success, capabilities)} Ports    ${String(data.ports.requested.length)} ready · ${String(data.ports.created.length)} created · ${String(data.ports.reused.length)} reused`,
+      `${style.success(glyphs.success, capabilities)} Command  ${clean(data.command.executable)} ${data.command.args.map(clean).join(" ")}`,
+    );
+    if (data.child !== undefined) {
+      lines.push(
+        `${data.child.exitCode === 0 ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Child    ${data.child.exitCode === null ? clean(data.child.signal) : `exit ${String(data.child.exitCode)}`}`,
+      );
+    }
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Journal  ${String(data.journal.events.length)} events${data.journal.dropped === 0 ? "" : ` · ${String(data.journal.dropped)} dropped`}`,
+    );
   }
 
   if (result.command === "pair" && isPairData(result.data)) {
@@ -261,6 +292,19 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`state=${clean(result.data.state)}\n`);
     if (result.data.hardwareSerial !== undefined) {
       sink.write(`hardware_serial=${clean(result.data.hardwareSerial)}\n`);
+    }
+  }
+  if (isDevData(result.data)) {
+    sink.write(`session_id=${clean(result.data.sessionId)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`preset=${clean(result.data.preset)}\n`);
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`project_root=${clean(result.data.project.root)}\n`);
+    sink.write(`port_count=${String(result.data.ports.requested.length)}\n`);
+    sink.write(`journal_event_count=${String(result.data.journal.events.length)}\n`);
+    sink.write(`journal_dropped=${String(result.data.journal.dropped)}\n`);
+    if (result.data.child !== undefined) {
+      sink.write(`child_exit_code=${String(result.data.child.exitCode)}\n`);
     }
   }
   if (isPairData(result.data)) {

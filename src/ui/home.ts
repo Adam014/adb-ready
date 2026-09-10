@@ -4,7 +4,15 @@ import type { TextSink } from "./spinner.js";
 import { style } from "./style.js";
 import type { TerminalCapabilities } from "./terminal.js";
 
-export type HomeAction = "connect" | "devices" | "doctor" | "exit" | "help" | "pair" | "version";
+export type HomeAction =
+  | "connect"
+  | "dev"
+  | "devices"
+  | "doctor"
+  | "exit"
+  | "help"
+  | "pair"
+  | "version";
 export type HomeResult =
   | { kind: "action"; action: HomeAction }
   | { kind: "cancelled"; reason: "interrupt" | "signal" }
@@ -142,10 +150,15 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     title: presentation === "full" ? "WHAT DO YOU WANT TO DO?" : "ACTIONS",
     options: [
       {
+        value: "dev" as const,
+        label: "Start development session",
+        description: "Prepare one target, ports, logs, and your project command",
+        recommended: true,
+      },
+      {
         value: "doctor" as const,
         label: "Check my setup",
         description: "Validate runtime, ADB, server, and target access",
-        recommended: true,
       },
       {
         value: "devices" as const,

@@ -5,6 +5,20 @@ export interface ConfigProvenance {
   location?: string;
 }
 
+export type ConfigDevPreset = "custom" | "expo" | "gradle" | "react-native";
+export type ConfigPackageManager = "bun" | "npm" | "pnpm" | "yarn";
+
+export interface ConfigDevCommand {
+  executable: string;
+  args: string[];
+  cwd?: string;
+}
+
+export interface ConfigDevPort {
+  device: number;
+  host?: number;
+}
+
 export interface ConfigValues {
   adbPath?: string;
   adbHost?: string;
@@ -15,6 +29,16 @@ export interface ConfigValues {
   animation?: boolean;
   interactive?: boolean;
   targetAliases?: Record<string, string>;
+  devPreset?: ConfigDevPreset;
+  packageManager?: ConfigPackageManager;
+  devCommand?: ConfigDevCommand;
+  devReversePorts?: ConfigDevPort[];
+  devLogs?: boolean;
+  devCleanupPorts?: boolean;
+  journalMaxEntries?: number;
+  journalMaxBytes?: number;
+  journalSources?: string[];
+  journalMinimumSeverity?: "debug" | "error" | "info" | "warning";
 }
 
 export interface ResolvedConfig extends ConfigValues {

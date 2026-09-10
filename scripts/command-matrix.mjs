@@ -197,6 +197,7 @@ try {
       ["doctor help", ["help", "doctor"], "adb-ready doctor"],
       ["devices help", ["devices", "--help"], "adb-ready devices"],
       ["connect help", ["connect", "--help"], "adb-ready connect"],
+      ["dev help", ["dev", "--help"], "adb-ready dev"],
       ["pair help", ["help", "pair"], "adb-ready pair"],
       ["ports help", ["ports", "--help"], "adb-ready ports reverse"],
       ["version flag", ["--version"], manifest.version],
@@ -279,6 +280,36 @@ try {
       "-t 1 reverse --no-rebind tcp:8081 tcp:8081"
     ) {
       throw new Error(`${alias} ports: invalid dry-run plan`);
+    }
+    assertions += 1;
+
+    const dev = command(
+      alias,
+      [
+        "dev",
+        "--no-logs",
+        "--json",
+        "--non-interactive",
+        "--",
+        process.execPath,
+        "-e",
+        "process.stdout.write('target=' + process.env.ANDROID_SERIAL)",
+      ],
+      env,
+    );
+    expectStatus(dev, 0, `${alias} custom dev`);
+    const devPayload = parseJson(dev.stdout, `${alias} custom dev`);
+    const devEvents = /** @type {Array<{type?: string, message?: string}>} */ (
+      devPayload.data?.journal?.events ?? []
+    );
+    if (
+      devPayload.data?.preset !== "custom" ||
+      devPayload.data?.child?.exitCode !== 0 ||
+      !devEvents.some(
+        (event) => event.type === "child.stdout" && event.message === "target=fixture-usb",
+      )
+    ) {
+      throw new Error(`${alias} dev: custom child was not correlated with the selected target`);
     }
     assertions += 1;
 

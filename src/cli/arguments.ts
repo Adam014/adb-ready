@@ -1,7 +1,16 @@
 import type { PortAction } from "../app/commands.js";
+import type { DevPreset, PackageManagerName } from "../dev/project.js";
 import type { PortDirection } from "../ports/model.js";
 
-export type CommandName = "connect" | "devices" | "doctor" | "help" | "pair" | "ports" | "version";
+export type CommandName =
+  | "connect"
+  | "dev"
+  | "devices"
+  | "doctor"
+  | "help"
+  | "pair"
+  | "ports"
+  | "version";
 export type OutputFormat = "human" | "json" | "ndjson" | "plain";
 
 export interface CliOptions {
@@ -31,6 +40,12 @@ export interface CliOptions {
   portAction?: PortAction;
   primaryPort?: string;
   secondaryPort?: string;
+  preset?: DevPreset;
+  packageManager?: PackageManagerName;
+  reversePorts?: string[];
+  logs?: boolean;
+  cleanupPorts?: boolean;
+  customCommand?: { executable: string; args: string[] };
 }
 
 export interface CliParseFailure {
@@ -49,6 +64,7 @@ export type CliParseResult = CliParseFailure | CliParseSuccess;
 
 const COMMANDS = new Set<CommandName>([
   "connect",
+  "dev",
   "devices",
   "doctor",
   "help",
@@ -75,6 +91,10 @@ const BOOLEAN_OPTIONS = new Set([
   "--pairing-code-stdin",
   "--last",
   "--dry-run",
+  "--logs",
+  "--no-logs",
+  "--cleanup-ports",
+  "--no-cleanup-ports",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -128,11 +148,29 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let portAction: PortAction | undefined;
   let primaryPort: string | undefined;
   let secondaryPort: string | undefined;
+  let preset: DevPreset | undefined;
+  let packageManager: PackageManagerName | undefined;
+  const reversePorts: string[] = [];
+  let logs: boolean | undefined;
+  let cleanupPorts: boolean | undefined;
+  let customCommand: CliOptions["customCommand"];
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === undefined) {
       continue;
+    }
+
+    if (argument === "--") {
+      if (command !== "dev") {
+        return failure("CLI_USAGE", "-- command passthrough can only be used with dev.");
+      }
+      const executable = argv[index + 1];
+      if (executable === undefined || executable.trim() === "") {
+        return failure("CLI_USAGE", "dev -- requires an executable.");
+      }
+      customCommand = { executable, args: argv.slice(index + 2) };
+      break;
     }
 
     if (!argument.startsWith("-")) {
@@ -148,6 +186,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         const candidate = argument as CommandName;
         if (
           candidate === "connect" ||
+          candidate === "dev" ||
           candidate === "devices" ||
           candidate === "doctor" ||
           candidate === "pair"
@@ -204,6 +243,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     if (option === "-h" || option === "--help") {
       if (
         command === "connect" ||
+        command === "dev" ||
         command === "doctor" ||
         command === "devices" ||
         command === "pair" ||
@@ -273,6 +313,50 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       remembered = true;
     } else if (option === "--dry-run") {
       dryRun = true;
+    } else if (option === "--preset") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (
+        !new Set<DevPreset>(["custom", "expo", "gradle", "react-native"]).has(value as DevPreset)
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid preset: ${value}. Expected custom, expo, gradle, or react-native.`,
+          option,
+        );
+      }
+      preset = value as DevPreset;
+    } else if (option === "--package-manager") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (
+        !new Set<PackageManagerName>(["bun", "npm", "pnpm", "yarn"]).has(
+          value as PackageManagerName,
+        )
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid package manager: ${value}. Expected bun, npm, pnpm, or yarn.`,
+          option,
+        );
+      }
+      packageManager = value as PackageManagerName;
+    } else if (option === "--port") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65_535) {
+        return failure("CLI_INVALID_VALUE", `Invalid reverse port: ${value}.`, option);
+      }
+      reversePorts.push(value);
+    } else if (option === "--logs") {
+      logs = true;
+    } else if (option === "--no-logs") {
+      logs = false;
+    } else if (option === "--cleanup-ports") {
+      cleanupPorts = true;
+    } else if (option === "--no-cleanup-ports") {
+      cleanupPorts = false;
     } else if (option === "--timeout") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -342,7 +426,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
-  const targetCommand = command === "devices" || command === "ports";
+  const targetCommand = command === "dev" || command === "devices" || command === "ports";
   if (select && !targetCommand) {
     return failure(
       "CLI_USAGE",
@@ -381,10 +465,16 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (remembered && (select || device !== undefined || transportId !== undefined)) {
     return failure("CLI_USAGE", "--last cannot be combined with another target selector.");
   }
-  if (dryRun && command !== "connect" && command !== "pair" && command !== "ports") {
+  if (
+    dryRun &&
+    command !== "connect" &&
+    command !== "dev" &&
+    command !== "pair" &&
+    command !== "ports"
+  ) {
     return failure(
       "CLI_USAGE",
-      "--dry-run can only be used with connect, pair, or ports.",
+      "--dry-run can only be used with connect, dev, pair, or ports.",
       "--dry-run",
     );
   }
@@ -404,6 +494,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     if (portAction === "remove" && secondaryPort !== undefined) {
       return failure("CLI_USAGE", `ports ${portDirection} remove accepts one port.`);
     }
+  }
+  if (
+    command !== "dev" &&
+    (preset !== undefined ||
+      packageManager !== undefined ||
+      reversePorts.length > 0 ||
+      logs !== undefined ||
+      cleanupPorts !== undefined ||
+      customCommand !== undefined)
+  ) {
+    return failure("CLI_USAGE", "Development options can only be used with the dev command.");
   }
 
   return {
@@ -435,6 +536,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(portAction === undefined ? {} : { portAction }),
       ...(primaryPort === undefined ? {} : { primaryPort }),
       ...(secondaryPort === undefined ? {} : { secondaryPort }),
+      ...(preset === undefined ? {} : { preset }),
+      ...(packageManager === undefined ? {} : { packageManager }),
+      ...(reversePorts.length === 0 ? {} : { reversePorts }),
+      ...(logs === undefined ? {} : { logs }),
+      ...(cleanupPorts === undefined ? {} : { cleanupPorts }),
+      ...(customCommand === undefined ? {} : { customCommand }),
     },
   };
 }
