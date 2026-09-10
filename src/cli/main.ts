@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import process from "node:process";
 import manifest from "../../package.json" with { type: "json" };
 import type { AdbMdnsService } from "../adb/parsers.js";
+import { runMcpStdio } from "../agent/mcp-server.js";
 import {
   type AppData,
   type AppsData,
@@ -44,6 +45,12 @@ import {
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import { type CaptureData, runCapture } from "../evidence/capture.js";
+import {
+  type InspectAppData,
+  type InspectUiData,
+  runInspectApp,
+  runInspectUi,
+} from "../evidence/inspect.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
 import {
@@ -84,8 +91,10 @@ Commands:
   dev [OPTIONS] [-- CMD] Prepare one target and run a development session
   doctor                 Inspect the local ADB environment
   init                   Create a detected project configuration
+  inspect ACTION         Build a bounded app or UI evidence snapshot
   devices                List visible Android targets
   logs [OPTIONS]         Stream focused logs from one Android target
+  mcp                    Serve typed tools over local stdio
   open URL               Open a deep link or web URL on one target
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
@@ -196,6 +205,14 @@ Runs read-only host, ADB capability, server, and target diagnostics.
 Creates adb-ready.config.json from detected project signals. Existing files are
 never replaced unless --force is explicit. Use --dry-run to preview the file.
 `,
+  inspect: `Usage:
+  adb-ready inspect app [APP_ID] [options]
+  adb-ready inspect ui [--interactive-only] [--max-depth N] [options]
+
+Returns a bounded evidence snapshot for one deterministic target. UI text and
+hierarchy data are explicitly marked sensitive and are never added to AI
+context implicitly.
+`,
   devices: `Usage: adb-ready devices [options]
 
 Lists every target visible to ADB. Add --select to open the keyboard picker.
@@ -216,6 +233,11 @@ Log options:
   --since TIMESTAMP      Start at an Android logcat timestamp
   --dump                 Read the current buffer and exit instead of following
   --max-records COUNT    Bound records retained in the final result
+`,
+  mcp: `Usage: adb-ready mcp
+
+Starts the local MCP stdio server. Standard output is reserved for the MCP
+protocol; the command never opens a network listener or exposes raw shell/ADB.
 `,
   open: `Usage: adb-ready open URL [--package APP_ID] [options]
 
@@ -493,8 +515,26 @@ async function runInteractiveSession(
       return ExitCode.Success;
     }
 
+    const actionArguments: Record<Exclude<typeof home.action, "exit">, string[]> = {
+      "app-info": ["app", "info"],
+      "app-restart": ["app", "restart"],
+      "capture-screenshot": ["capture", "screenshot"],
+      connect: ["connect"],
+      context: ["context"],
+      dev: ["dev"],
+      devices: ["devices"],
+      doctor: ["doctor"],
+      help: ["help"],
+      init: ["init"],
+      "inspect-app": ["inspect", "app"],
+      "inspect-ui": ["inspect", "ui", "--interactive-only"],
+      logs: ["logs"],
+      pair: ["pair"],
+      sessions: ["sessions"],
+      version: ["version"],
+    };
     clearInteractiveScreen(io.error, terminal);
-    await runCliInternal([home.action], io, dependencies, signal);
+    await runCliInternal(actionArguments[home.action], io, dependencies, signal);
     if (signal?.aborted === true) {
       return ExitCode.Interrupted;
     }
@@ -632,6 +672,10 @@ async function runCliInternal(
     io.output.write(`${VERSION}\n`);
     return ExitCode.Success;
   }
+  if (options.command === "mcp") {
+    await runMcpStdio({ cwd: io.cwd, env: io.env, dependencies, version: VERSION }, signal);
+    return ExitCode.Success;
+  }
   if (options.command === "init") {
     const execution = await runInit(
       {
@@ -734,6 +778,7 @@ async function runCliInternal(
       options.command === "capture" ||
       options.command === "dev" ||
       options.command === "devices" ||
+      options.command === "inspect" ||
       options.command === "logs" ||
       options.command === "open" ||
       options.command === "ports") &&
@@ -741,6 +786,7 @@ async function runCliInternal(
       options.command === "apps" ||
       options.command === "capture" ||
       options.command === "dev" ||
+      options.command === "inspect" ||
       options.command === "logs" ||
       options.command === "open" ||
       options.select ||
@@ -801,6 +847,7 @@ async function runCliInternal(
     options.command === "apps" ||
     options.command === "capture" ||
     options.command === "dev" ||
+    options.command === "inspect" ||
     options.command === "logs" ||
     options.command === "open" ||
     (options.command === "ports" && options.select)
@@ -858,6 +905,7 @@ async function runCliInternal(
         options.command === "apps" ||
         options.command === "capture" ||
         options.command === "dev" ||
+        options.command === "inspect" ||
         options.command === "logs" ||
         options.command === "open") &&
         errorCapabilities.interactive &&
@@ -1038,6 +1086,8 @@ async function runCliInternal(
     | CommandExecution<AppsData>
     | CommandExecution<CaptureData>
     | CommandExecution<DevicesData>
+    | CommandExecution<InspectAppData>
+    | CommandExecution<InspectUiData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
@@ -1132,6 +1182,39 @@ async function runCliInternal(
         commandDependencies,
         signal,
       );
+    } else if (options.command === "inspect") {
+      execution =
+        options.inspectKind === "ui"
+          ? await runInspectUi(
+              {
+                ...(options.interactiveOnly === undefined
+                  ? {}
+                  : { interactiveOnly: options.interactiveOnly }),
+                ...(options.maxDepth === undefined ? {} : { maxDepth: options.maxDepth }),
+              },
+              config,
+              commandDependencies,
+              signal,
+            )
+          : await runInspectApp(
+              {
+                cwd: io.cwd,
+                ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+                ...(values.appPackage === undefined
+                  ? {}
+                  : {
+                      configuredPackage: {
+                        value: values.appPackage,
+                        ...(loaded.config.provenance.appPackage?.location === undefined
+                          ? {}
+                          : { location: loaded.config.provenance.appPackage.location }),
+                      },
+                    }),
+              },
+              config,
+              commandDependencies,
+              signal,
+            );
     } else if (options.command === "open") {
       execution = await runOpen(
         options.url ?? "",
@@ -1382,9 +1465,17 @@ async function runCliInternal(
       options.command === "app" ||
       options.command === "apps" ||
       options.command === "capture" ||
+      options.command === "inspect" ||
       options.command === "open"
     ) {
-      const data = execution.result.data as AppData | AppsData | CaptureData | OpenData | null;
+      const data = execution.result.data as
+        | AppData
+        | AppsData
+        | CaptureData
+        | InspectAppData
+        | InspectUiData
+        | OpenData
+        | null;
       if (data !== null && "selected" in data) {
         selectedTarget = {
           serial: data.selected.transport.serial,

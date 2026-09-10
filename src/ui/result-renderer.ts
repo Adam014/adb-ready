@@ -21,6 +21,7 @@ import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import type { CaptureData } from "../evidence/capture.js";
+import type { InspectAppData, InspectUiData } from "../evidence/inspect.js";
 import type { AndroidTarget } from "../target/model.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
@@ -136,6 +137,16 @@ function isCaptureData(value: unknown): value is CaptureData {
     isRecord(value.selected) &&
     isRecord(value.evidence) &&
     (value.kind === "screenshot" || value.kind === "screen-record")
+  );
+}
+
+function isInspectAppData(value: unknown): value is InspectAppData {
+  return isRecord(value) && value.kind === "app" && isRecord(value.selected) && isRecord(value.app);
+}
+
+function isInspectUiData(value: unknown): value is InspectUiData {
+  return (
+    isRecord(value) && value.kind === "ui" && isRecord(value.selected) && isRecord(value.snapshot)
   );
 }
 
@@ -413,6 +424,35 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     );
   }
 
+  if (result.command === "inspect app" && isInspectAppData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target     ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} App        ${clean(data.app.package.applicationId)}${data.app.package.versionName === undefined ? "" : ` · ${clean(data.app.package.versionName)}`}`,
+      `${style.success(glyphs.success, capabilities)} Foreground ${data.app.foreground === undefined ? "not observed" : `${clean(data.app.foreground.applicationId)}/${clean(data.app.foreground.activity)}`}`,
+      `${data.logs.available ? style.success(glyphs.success, capabilities) : style.warning(glyphs.warning, capabilities)} Logs       ${data.logs.available ? `${String(data.logs.records.length)} records · ${String(data.logs.findings.length)} findings` : clean(data.logs.reason)}`,
+      `${style.warning(glyphs.warning, capabilities)} Screenshot explicit capture required · adb-ready capture screenshot`,
+      `${style.warning(glyphs.warning, capabilities)} Privacy    sensitive device evidence`,
+    );
+  }
+
+  if (result.command === "inspect ui" && isInspectUiData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target    ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} Snapshot  ${clean(data.snapshot.digest)}`,
+      `${data.snapshot.complete ? style.success(glyphs.success, capabilities) : style.warning(glyphs.warning, capabilities)} Nodes     ${String(data.snapshot.returnedNodes)} returned · ${String(data.snapshot.totalNodes)} observed${data.snapshot.truncated ? " · truncated" : ""}`,
+      `${style.warning(glyphs.warning, capabilities)} Privacy   UI text and hierarchy are sensitive`,
+    );
+    data.snapshot.nodes.slice(0, 20).forEach((node, index) => {
+      const branch =
+        index === Math.min(data.snapshot.nodes.length, 20) - 1 ? glyphs.end : glyphs.branch;
+      const label =
+        node.resourceId ?? node.contentDescription ?? node.text ?? node.className ?? "node";
+      lines.push(`${style.dim(branch, capabilities)} ${clean(node.ref)} · ${clean(label)}`);
+    });
+  }
+
   if (result.command.startsWith("sessions ") && isSessionCommandData(result.data)) {
     const data = result.data;
     if (data.action === "list") {
@@ -654,6 +694,25 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`media_type=${clean(result.data.evidence.mediaType)}\n`);
     sink.write(`bytes=${String(result.data.evidence.bytes)}\n`);
     sink.write(`sha256=${clean(result.data.evidence.sha256)}\n`);
+  }
+  if (isInspectAppData(result.data)) {
+    sink.write("kind=app\n");
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`package=${clean(result.data.app.package.applicationId)}\n`);
+    sink.write(`logs_available=${String(result.data.logs.available)}\n`);
+    if (result.data.logs.available) {
+      sink.write(`record_count=${String(result.data.logs.records.length)}\n`);
+      sink.write(`finding_count=${String(result.data.logs.findings.length)}\n`);
+    }
+    sink.write("sensitive=true\n");
+  }
+  if (isInspectUiData(result.data)) {
+    sink.write("kind=ui\n");
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`digest=${clean(result.data.snapshot.digest)}\n`);
+    sink.write(`node_count=${String(result.data.snapshot.returnedNodes)}\n`);
+    sink.write(`truncated=${String(result.data.snapshot.truncated)}\n`);
+    sink.write("sensitive=true\n");
   }
   if (isSessionCommandData(result.data)) {
     sink.write(`action=${clean(result.data.action)}\n`);

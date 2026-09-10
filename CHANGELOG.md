@@ -18,6 +18,11 @@ breaking changes.
   verification.
 - Capture verified PNG screenshots and bounded MP4 screen recordings into
   atomically published project-local evidence files with SHA-256 metadata.
+- Inspect one app and the current accessibility hierarchy as bounded,
+  explicitly sensitive snapshots with digest-scoped UI references.
+- Give local AI agents 13 typed Android tools and saved-session context over a
+  tested Node.js, Bun, and Deno MCP stdio server without exposing raw shell/ADB
+  or destructive app removal.
 - Replace the command-heavy interactive home with focused workflow categories
   and progressive disclosure.
 

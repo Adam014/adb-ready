@@ -71,6 +71,37 @@ adb-ready app clear-data --dry-run
 confirmation; automation must pass `--allow-destructive`. A dry run never asks
 for destructive approval because it performs no mutation.
 
+## Structured inspection
+
+Build a compact snapshot of the project app, foreground state, and a small
+classified log window:
+
+```bash
+adb-ready inspect app
+adb-ready inspect app com.example.app --json --non-interactive
+```
+
+Screenshots are deliberately not captured by this read-only command. The
+result reports `adb-ready capture screenshot` as the explicit next action so
+sensitive pixels never enter evidence or AI context implicitly.
+
+Read the current Android accessibility hierarchy:
+
+```bash
+adb-ready inspect ui --interactive-only
+adb-ready inspect ui --max-depth 20 --json --non-interactive
+```
+
+The snapshot is capped at 2,000 nodes and includes a SHA-256 digest. Each node
+reference contains a prefix of that digest, so callers can distinguish stale
+references after the UI changes. `--interactive-only` keeps enabled actionable
+nodes; `--max-depth` accepts 1–100. Secure windows and missing accessibility
+data are reported as unavailable rather than as an empty successful snapshot.
+
+UI text and hierarchy data are marked `sensitive: true`. They are returned only
+by the explicit inspect command and are never included in diagnostic AI context
+automatically.
+
 ## Evidence capture
 
 Capture a PNG directly from the selected target:

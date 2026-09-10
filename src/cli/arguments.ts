@@ -15,7 +15,9 @@ export type CommandName =
   | "doctor"
   | "help"
   | "init"
+  | "inspect"
   | "logs"
+  | "mcp"
   | "open"
   | "pair"
   | "ports"
@@ -95,6 +97,9 @@ export interface CliOptions {
   captureKind?: "screen-record" | "screenshot";
   outputPath?: string;
   durationSeconds?: number;
+  inspectKind?: "app" | "ui";
+  interactiveOnly?: boolean;
+  maxDepth?: number;
 }
 
 export interface CliParseFailure {
@@ -123,7 +128,9 @@ const COMMANDS = new Set<CommandName>([
   "doctor",
   "help",
   "init",
+  "inspect",
   "logs",
+  "mcp",
   "open",
   "pair",
   "ports",
@@ -172,6 +179,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--user",
   "--system",
   "--all",
+  "--interactive-only",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -263,6 +271,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let captureKind: CliOptions["captureKind"];
   let outputPath: string | undefined;
   let durationSeconds: number | undefined;
+  let inspectKind: CliOptions["inspectKind"];
+  let interactiveOnly = false;
+  let maxDepth: number | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -304,8 +315,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "devices" ||
           candidate === "doctor" ||
           candidate === "logs" ||
+          candidate === "mcp" ||
           candidate === "open" ||
           candidate === "init" ||
+          candidate === "inspect" ||
           candidate === "pair" ||
           candidate === "ports" ||
           candidate === "problems" ||
@@ -350,6 +363,21 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         (argument === "screenshot" || argument === "screen-record")
       ) {
         captureKind = argument;
+        continue;
+      }
+      if (
+        command === "inspect" &&
+        inspectKind === undefined &&
+        (argument === "app" || argument === "ui")
+      ) {
+        inspectKind = argument;
+        continue;
+      }
+      if (command === "inspect" && inspectKind === "app" && appId === undefined) {
+        if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(argument)) {
+          return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
+        }
+        appId = argument;
         continue;
       }
       if (command === "sessions") {
@@ -674,6 +702,16 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         );
       }
       durationSeconds = milliseconds / 1_000;
+    } else if (option === "--interactive-only") {
+      interactiveOnly = true;
+    } else if (option === "--max-depth") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {
+        return failure("CLI_INVALID_VALUE", `Invalid UI depth: ${value}. Expected 1-100.`, option);
+      }
+      maxDepth = parsed;
     } else if (option === "--activity") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -792,8 +830,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   command ??= "help";
   if (packageOption !== undefined) {
     if (command === "logs") logPackage = packageOption;
-    else if (command === "app" || command === "open") appId = packageOption;
-    else return failure("CLI_USAGE", "--package can only be used with app, logs, or open.");
+    else if (
+      command === "app" ||
+      command === "open" ||
+      (command === "inspect" && inspectKind === "app")
+    )
+      appId = packageOption;
+    else
+      return failure(
+        "CLI_USAGE",
+        "--package can only be used with app, inspect app, logs, or open.",
+      );
   }
   if (command === "apps") packageScope ??= "user";
   if (command === "config") configAction ??= "validate";
@@ -805,6 +852,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command === "capture" ||
     command === "dev" ||
     command === "devices" ||
+    command === "inspect" ||
     command === "logs" ||
     command === "open" ||
     command === "ports";
@@ -892,6 +940,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (command === "capture" && captureKind === undefined) {
     return failure("CLI_USAGE", "capture requires screenshot or screen-record.");
   }
+  if (command === "inspect" && inspectKind === undefined) {
+    return failure("CLI_USAGE", "inspect requires app or ui.");
+  }
+  if (interactiveOnly && (command !== "inspect" || inspectKind !== "ui")) {
+    return failure("CLI_USAGE", "--interactive-only can only be used with inspect ui.");
+  }
+  if (maxDepth !== undefined && (command !== "inspect" || inspectKind !== "ui")) {
+    return failure("CLI_USAGE", "--max-depth can only be used with inspect ui.");
+  }
   if (outputPath !== undefined && command !== "capture") {
     return failure("CLI_USAGE", "--out can only be used with capture.");
   }
@@ -967,6 +1024,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (format === "markdown" && command !== "context") {
     return failure("CLI_USAGE", "Markdown output is only available for the context command.");
   }
+  if (command === "mcp" && argv.some((argument) => argument !== "mcp")) {
+    return failure(
+      "CLI_USAGE",
+      "mcp does not accept CLI output or target options; configure the spawned stdio server through the project and environment.",
+    );
+  }
   if (force && command !== "init" && command !== "capture") {
     return failure("CLI_USAGE", "--force can only be used with init or capture.");
   }
@@ -1036,6 +1099,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(captureKind === undefined ? {} : { captureKind }),
       ...(outputPath === undefined ? {} : { outputPath }),
       ...(durationSeconds === undefined ? {} : { durationSeconds }),
+      ...(inspectKind === undefined ? {} : { inspectKind }),
+      ...(interactiveOnly ? { interactiveOnly: true } : {}),
+      ...(maxDepth === undefined ? {} : { maxDepth }),
     },
   };
 }

@@ -35,3 +35,29 @@ selection, file permissions, redaction, session persistence, configuration,
 archive contents, and release provenance. Vulnerabilities in Android
 Platform-Tools or a third-party runtime should also be reported to the relevant
 upstream project.
+
+## Local agent and MCP trust model
+
+`adb-ready mcp` is a local stdio server. It does not bind a network port, make
+itself remotely discoverable, or upload device data. The configured AI client
+starts the process and decides which returned data is sent to its model
+provider.
+
+The MCP surface is intentionally narrower than the CLI:
+
+- it exposes schema-validated Android workflows, not a generic shell or raw ADB;
+- one verified target is bound per connection and cannot be switched silently;
+- APK paths must resolve to existing project-local files;
+- UI hierarchy, logs, identifiers, and screenshots are treated as sensitive;
+- capture is explicit and never implied by an inspection call; and
+- data clearing and app uninstall are not available as MCP tools.
+
+MCP annotations are hints for the client approval interface, not a security
+boundary. ADB Ready enforces target selection, path containment, bounded output,
+and destructive-action policy inside the server. Users should still review the
+MCP configuration, pin the npm dependency, and keep mutating tools behind their
+client's approval or sandbox policy.
+
+ADB itself can access USB devices, emulators, or configured network/remote ADB
+servers. That existing ADB authority remains the outer device-access boundary;
+the MCP server does not expand it.

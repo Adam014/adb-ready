@@ -5,6 +5,9 @@ import { style } from "./style.js";
 import type { TerminalCapabilities } from "./terminal.js";
 
 export type HomeAction =
+  | "app-info"
+  | "app-restart"
+  | "capture-screenshot"
   | "connect"
   | "context"
   | "dev"
@@ -13,6 +16,8 @@ export type HomeAction =
   | "exit"
   | "help"
   | "init"
+  | "inspect-app"
+  | "inspect-ui"
   | "logs"
   | "pair"
   | "sessions"
@@ -183,6 +188,16 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         description: "See connected devices, emulators, and unavailable targets.",
       },
       {
+        value: "app-info",
+        label: "Project app details",
+        description: "Resolve the project app and check its installed state.",
+      },
+      {
+        value: "app-restart",
+        label: "Restart project app",
+        description: "Verify a clean stop and launch on the selected target.",
+      },
+      {
         value: "connect",
         label: "Connect wirelessly",
         description: "Discover and verify an already paired Wireless debugging target.",
@@ -194,6 +209,21 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
       },
     ],
     debug: [
+      {
+        value: "inspect-app",
+        label: "Inspect project app",
+        description: "Collect app state and a small classified log window.",
+      },
+      {
+        value: "inspect-ui",
+        label: "Inspect current UI",
+        description: "Read a bounded, sensitive accessibility snapshot.",
+      },
+      {
+        value: "capture-screenshot",
+        label: "Capture screenshot",
+        description: "Save a verified PNG inside this project.",
+      },
       {
         value: "logs",
         label: "Follow app logs",

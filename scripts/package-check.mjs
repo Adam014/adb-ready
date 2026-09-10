@@ -46,6 +46,7 @@ for (const required of [
   "CHANGELOG.md",
   "COMPATIBILITY.md",
   "LICENSE",
+  "llms.txt",
   "README.md",
   "dist/cli.js",
   "docs/getting-started.md",

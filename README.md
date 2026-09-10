@@ -105,9 +105,11 @@ Running `adb-ready` without a command opens the interactive workflow home.
 | expose Metro, a local API, or a debugger to Android | [Port workflows](./docs/dev-sessions.md#port-ownership) |
 | install, inspect, launch, restart, or deep-link my app | [App lifecycle](./docs/apps-and-evidence.md#app-lifecycle) |
 | save a verified screenshot or bounded screen recording | [Evidence capture](./docs/apps-and-evidence.md#evidence-capture) |
+| give a developer or agent one bounded app/UI snapshot | [Structured inspection](./docs/apps-and-evidence.md#structured-inspection) |
 | see only the Android logs that matter | [Focused logcat](./docs/logs-and-context.md#focused-logcat) |
 | understand why the last session failed | [Session problems](./docs/logs-and-context.md#session-history) |
 | prepare safe evidence for an AI assistant | [Diagnostic context](./docs/logs-and-context.md#diagnostic-context) |
+| let Codex, Claude Code, Cursor, or Copilot operate typed Android workflows | [AI agent integration](./docs/agent-integration.md) |
 | share project settings without a custom shell script | [Configuration](./docs/configuration.md) |
 | use ADB Ready from CI or another tool | [Automation contract](./docs/automation.md) |
 | fix a known setup or target problem | [Troubleshooting](./docs/troubleshooting.md) |
@@ -157,6 +159,10 @@ adb-ready context --since 5m --only problems,recovery,logs
 - stable problem categories, meaningful exit codes, timeouts, and dry runs; and
 - explicit target, ADB path, and remote ADB server overrides.
 
+Local AI agents can use the same contracts through a schema-validated MCP stdio
+server. It exposes focused Android workflows, not a generic shell or raw ADB.
+[Connect an agent →](./docs/agent-integration.md)
+
 ## Documentation
 
 | Guide | What it answers |
@@ -165,6 +171,7 @@ adb-ready context --since 5m --only problems,recovery,logs
 | [Development sessions](./docs/dev-sessions.md) | What does ADB Ready own, watch, recover, and clean up? |
 | [Targets and Wireless debugging](./docs/targets-and-wireless.md) | How are devices paired, connected, and selected safely? |
 | [Apps and evidence](./docs/apps-and-evidence.md) | How do I control one app and capture verified device evidence? |
+| [AI agent integration](./docs/agent-integration.md) | How do Codex, Claude Code, Cursor, or Copilot use safe Android tools? |
 | [Logs and AI context](./docs/logs-and-context.md) | What is captured, redacted, saved, and exported? |
 | [Configuration](./docs/configuration.md) | How do projects, profiles, hooks, and precedence work? |
 | [Automation](./docs/automation.md) | What are the JSON, NDJSON, stdout, and exit-code contracts? |
@@ -192,6 +199,8 @@ Android transport backend.
 - Session data is bounded, redacted, private to the user, and never uploaded.
 - Package contents are allowlisted and checked before release.
 - npm publication is prepared for short-lived OIDC credentials and provenance.
+- AI clients receive typed bounded tools; raw shell/ADB and destructive app
+  removal are not exposed through MCP.
 
 ## Project
 

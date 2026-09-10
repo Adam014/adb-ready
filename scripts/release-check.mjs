@@ -61,6 +61,7 @@ for (const name of [
   "COMPATIBILITY.md",
   "CONTRIBUTING.md",
   "LICENSE",
+  "llms.txt",
   "README.md",
   "SECURITY.md",
 ]) {
@@ -136,6 +137,7 @@ if (packed.exitCode !== 0) {
       "CHANGELOG.md",
       "COMPATIBILITY.md",
       "LICENSE",
+      "llms.txt",
       "README.md",
       "dist/cli.js",
       "docs/getting-started.md",

@@ -391,6 +391,45 @@ describe("parseArguments", () => {
     });
   });
 
+  test("reserves MCP stdout for the protocol", () => {
+    expect(parseArguments(["mcp"])).toMatchObject({
+      ok: true,
+      options: { command: "mcp", format: "human" },
+    });
+    expect(parseArguments(["mcp", "--json"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
+  test("parses bounded app and UI inspection", () => {
+    expect(parseArguments(["inspect", "app", "com.example.app", "--last"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "inspect",
+        inspectKind: "app",
+        appId: "com.example.app",
+        remembered: true,
+      },
+    });
+    expect(
+      parseArguments(["inspect", "ui", "--interactive-only", "--max-depth", "12", "--json"]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "inspect",
+        inspectKind: "ui",
+        interactiveOnly: true,
+        maxDepth: 12,
+        format: "json",
+      },
+    });
+    expect(parseArguments(["inspect", "app", "--interactive-only"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("rejects incomplete and mismatched app options", () => {
     expect(parseArguments(["app"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
     expect(parseArguments(["app", "install"])).toMatchObject({ ok: false, code: "CLI_USAGE" });

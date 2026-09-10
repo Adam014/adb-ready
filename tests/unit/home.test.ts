@@ -108,6 +108,21 @@ describe("home screen", () => {
     expect(selected).toEqual({ kind: "action", action: "version" });
   });
 
+  test("keeps new app and evidence workflows behind focused categories", async () => {
+    const sink = new MemorySink();
+    const selected = await showHomeScreen({
+      version: "0.0.0",
+      input: new AutoInput("3\r", "2\r"),
+      sink,
+      capabilities: { ...interactive, animation: false },
+    });
+
+    expect(selected).toEqual({ kind: "action", action: "inspect-ui" });
+    expect(sink.value).toContain("HOME / DEBUG & EVIDENCE");
+    expect(sink.value).toContain("Inspect project app");
+    expect(sink.value).toContain("Capture screenshot");
+  });
+
   test("returns from a section with escape and closes only from home", async () => {
     const sink = new MemorySink();
     const selected = await showHomeScreen({
