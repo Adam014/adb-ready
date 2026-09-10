@@ -7,11 +7,13 @@ import { fileURLToPath } from "node:url";
 import { xSync } from "tinyexec";
 
 import { readNpmPackEntry } from "./lib/npm-pack-report.mjs";
+import { createPackageConsumerEnvironment } from "./lib/package-manager-environment.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const temp = await mkdtemp(path.join(tmpdir(), "adb-ready-command-matrix-"));
 const fakeAdb = path.join(temp, process.platform === "win32" ? "fake-adb.exe" : "fake-adb");
 const consumer = path.join(temp, "consumer");
+const consumerNpmConfig = path.join(temp, "consumer.npmrc");
 const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
 /**
@@ -106,6 +108,8 @@ function assertMachineClean(result, label) {
 
 await mkdir(consumer, { recursive: true });
 try {
+  await writeFile(consumerNpmConfig, "registry=https://registry.npmjs.org/\n");
+  const consumerEnvironment = createPackageConsumerEnvironment(process.env, consumerNpmConfig);
   checked("bun", [
     "build",
     path.join(root, "tests", "fixtures", "fake-adb.ts"),
@@ -117,7 +121,7 @@ try {
   const packed = checked(
     "npm",
     ["pack", "--json", "--ignore-scripts", "--pack-destination", temp],
-    { cwd: root },
+    { cwd: root, env: consumerEnvironment },
   );
   const packReport = parseJson(packed.stdout, "npm pack");
   const filename = readNpmPackEntry(packReport, manifest.name).filename;
@@ -127,6 +131,7 @@ try {
   const tarball = path.join(temp, filename);
   checked("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
     cwd: consumer,
+    env: consumerEnvironment,
   });
 
   if (manifest.bin?.["adb-ready"] !== "dist/cli.js" || manifest.bin?.adbr !== "dist/cli.js") {
@@ -134,7 +139,7 @@ try {
   }
 
   const env = {
-    ...process.env,
+    ...consumerEnvironment,
     ADB_READY_ADB_PATH: fakeAdb,
     ADB_READY_INTERACTIVE: "false",
     ADB_READY_FAKE_SCENARIO: "ready",
