@@ -150,7 +150,7 @@ describe("runCli", () => {
   test("keeps a bare interactive session open and returns to a compact menu", async () => {
     const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
     streams.env.ADB_READY_REDUCED_MOTION = "1";
-    streams.input.autoInputs = ["2\r", "\u001B"];
+    streams.input.autoInputs = ["3\r", "\u001B"];
     const exitCode = await runCli([], streams, dependencies());
 
     expect(exitCode).toBe(ExitCode.Success);
@@ -159,7 +159,7 @@ describe("runCli", () => {
     expect(streams.error.value).toContain("· doctor");
     expect(streams.error.value).toContain("####");
     expect(streams.error.value).toContain("ACTIONS");
-    expect(streams.error.value).toContain("Android setup. No guesswork.");
+    expect(streams.error.value).toContain("Android sessions. Kept ready.");
     expect(streams.input.isRaw).toBe(false);
   });
 

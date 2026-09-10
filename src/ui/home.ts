@@ -6,12 +6,16 @@ import type { TerminalCapabilities } from "./terminal.js";
 
 export type HomeAction =
   | "connect"
+  | "context"
   | "dev"
   | "devices"
   | "doctor"
   | "exit"
   | "help"
+  | "init"
+  | "logs"
   | "pair"
+  | "sessions"
   | "version";
 export type HomeResult =
   | { kind: "action"; action: HomeAction }
@@ -44,11 +48,11 @@ function productPanel(version: string, capabilities: TerminalCapabilities): stri
   const side = unicode ? "│" : "|";
   const rows = [
     "ADB READY",
-    "Android setup. No guesswork.",
+    "Android sessions. Kept ready.",
     "",
-    "CHECK  ADB and your local setup",
-    "SEE    every visible target",
-    "LINK   Wireless debugging",
+    "RUN    one target and dev command",
+    "WATCH  ports, target, and logs",
+    "SHARE  redacted AI context",
     "",
     `adb-ready  v${version}`,
   ];
@@ -88,7 +92,7 @@ function homePreamble(
       ...core.map((line) => style.accent(center(line, capabilities.columns), capabilities)),
       "",
       style.strong(center("ADB READY", capabilities.columns), capabilities),
-      style.dim(center("Android setup. No guesswork.", capabilities.columns), capabilities),
+      style.dim(center("Android sessions. Kept ready.", capabilities.columns), capabilities),
       style.dim(center(`v${version}`, capabilities.columns), capabilities),
       "",
     ];
@@ -156,6 +160,11 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         recommended: true,
       },
       {
+        value: "logs" as const,
+        label: "Inspect app logs",
+        description: "Stream or dump redacted logs by package, PID, tag, and level",
+      },
+      {
         value: "doctor" as const,
         label: "Check my setup",
         description: "Validate runtime, ADB, server, and target access",
@@ -176,9 +185,24 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         description: "Use Android's hidden six-digit pairing code",
       },
       {
+        value: "sessions" as const,
+        label: "Browse saved sessions",
+        description: "Review private run summaries and diagnostic timelines",
+      },
+      {
+        value: "context" as const,
+        label: "Create AI debug context",
+        description: "Export a bounded redacted Markdown brief from the latest run",
+      },
+      {
         value: "version" as const,
         label: "Show version",
         description: `ADB Ready ${options.version}`,
+      },
+      {
+        value: "init" as const,
+        label: "Initialize this project",
+        description: "Create a validated config from detected project signals",
       },
       {
         value: "help" as const,

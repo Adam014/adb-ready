@@ -88,8 +88,10 @@ describe("home screen", () => {
     expect(selected).toEqual({ kind: "action", action: "dev" });
     expect(sink.value).toStartWith("\u001B[2J\u001B[H");
     expect(sink.value).toContain("ADB READY");
-    expect(sink.value).toContain("Android setup. No guesswork.");
-    expect(sink.value).toContain("CHECK  ADB and your local setup");
+    expect(sink.value).toContain("Android sessions. Kept ready.");
+    expect(sink.value).toContain("RUN    one target and dev com...");
+    expect(sink.value).toContain("Inspect app logs");
+    expect(sink.value).toContain("Create AI debug context");
     expect(sink.value).toContain("WHAT DO YOU WANT TO DO?");
     expect(sink.value).toEndWith("\u001B[?25h");
     expect(input.isRaw).toBe(false);
@@ -98,7 +100,7 @@ describe("home screen", () => {
   test("supports the version menu shortcut", async () => {
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("6", "\r"),
+      input: new AutoInput("9", "\r"),
       sink: new MemorySink(),
       capabilities: { ...interactive, animation: false },
     });
@@ -121,7 +123,7 @@ describe("home screen", () => {
     expect(sink.value).toContain("####");
     expect(sink.value).toStartWith("\u001B[?25l\u001B[2K\n");
     expect(sink.value).not.toContain("\u001B[2J\u001B[H");
-    expect(sink.value).not.toContain("Android setup. No guesswork.");
+    expect(sink.value).not.toContain("Android sessions. Kept ready.");
     expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 45)).toBe(
       true,
     );
@@ -163,7 +165,7 @@ describe("home screen", () => {
     });
 
     expect(sink.value).toContain("ADB READY");
-    expect(sink.value).toContain("Android setup. No guesswork.");
+    expect(sink.value).toContain("Android sessions. Kept ready.");
     expect(sink.value).not.toContain("\u001B[36m");
     expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 40)).toBe(
       true,

@@ -34,8 +34,23 @@ export class ProgressRenderer {
       this.#spinner.succeed(event.message.replace(/ completed$/u, ""));
     } else if (event.type === "operation.failed") {
       this.#spinner.fail(event.message.replace(/ failed$/u, ""));
+    } else if (event.type === "session.degraded") {
+      this.#spinner.warn(event.message);
+    } else if (event.type === "recovery.started") {
+      this.#spinner.start(
+        event.data?.attempt === undefined
+          ? "Recovering development session"
+          : `Recovering development session · attempt ${String(event.data.attempt)}`,
+      );
+    } else if (event.type === "recovery.completed") {
+      this.#spinner.succeed(event.message);
+    } else if (event.type === "recovery.failed") {
+      this.#spinner.warn(event.message);
+    } else if (event.type === "watch.failed") {
+      this.#spinner.fail(event.message);
     } else if (
       this.#verbose &&
+      event.type !== "health.checked" &&
       event.source !== "child.stdout" &&
       event.source !== "child.stderr" &&
       event.source !== "logcat"

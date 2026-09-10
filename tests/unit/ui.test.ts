@@ -167,4 +167,48 @@ describe("ProgressRenderer", () => {
 
     expect(sink.value).toBe("✓ Discovering Android targets\n");
   });
+
+  test("surfaces recovery state without printing background health checks", () => {
+    const sink = new MemorySink();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const renderer = new ProgressRenderer({
+      bus,
+      sink,
+      capabilities: { ...interactiveCapabilities, animation: false },
+      verbose: true,
+    });
+
+    bus.emit({
+      type: "health.checked",
+      source: "dev.watch",
+      severity: "debug",
+      message: "Development session remains healthy.",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+    });
+    bus.emit({
+      type: "session.degraded",
+      source: "dev.watch",
+      severity: "warning",
+      message: "Android target disconnected.",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+    });
+    bus.emit({
+      type: "recovery.started",
+      source: "dev.recovery",
+      severity: "info",
+      message: "Recovering development session.",
+      data: { attempt: 2 },
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+    });
+    bus.emit({
+      type: "recovery.completed",
+      source: "dev.recovery",
+      severity: "info",
+      message: "Development session recovered.",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+    });
+    renderer.dispose();
+
+    expect(sink.value).toBe("! Android target disconnected.\n✓ Development session recovered.\n");
+  });
 });

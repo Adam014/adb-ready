@@ -143,10 +143,11 @@ function renderMenu<T>(
           ? style.strong(label, capabilities)
           : label;
     lines.push(`  ${pointer} ${number}  ${styledLabel}`);
-    if (option.description !== undefined) {
+    if (isSelected && option.description !== undefined) {
       for (const description of wrap(option.description, Math.max(10, capabilities.columns - 9))) {
-        const descriptionRail = isSelected ? style.accent(rail, capabilities) : " ";
-        lines.push(`  ${descriptionRail}      ${style.dim(description, capabilities)}`);
+        lines.push(
+          `  ${style.accent(rail, capabilities)}      ${style.dim(description, capabilities)}`,
+        );
       }
     }
   });
