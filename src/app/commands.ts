@@ -2292,7 +2292,7 @@ export async function runDev(
   if (normalizedPorts.problems.length > 0) return await complete(null);
 
   const targetCorrelation = { ...correlation, targetId: selected.target.id };
-  const client = new AdbClient({
+  const clientOptions = {
     executable,
     bus,
     correlation: targetCorrelation,
@@ -2301,7 +2301,9 @@ export async function runDev(
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
     idFactory,
-  });
+  };
+  const client = new AdbClient(clientOptions);
+  const healthClient = new AdbClient({ ...clientOptions, presentation: "background" });
   const listed = await client.listPortMappings(target, "reverse", signal);
   if (!processSucceeded(listed.process)) {
     problems.push(operationProblem("reverse-list", listed, context.commandId));
@@ -2752,7 +2754,7 @@ export async function runDev(
   const abortWatcher = () => watchController.abort();
   signal?.addEventListener("abort", abortWatcher, { once: true });
   const observeSession = async (watchSignal: AbortSignal): Promise<SessionHealth> => {
-    const state = await client.getState(target.serial, watchSignal);
+    const state = await healthClient.getState(target.serial, watchSignal);
     if (!processSucceeded(state.process) || state.value !== "device") {
       return {
         targetReady: false,
@@ -2763,7 +2765,7 @@ export async function runDev(
         detail: `Target ${target.serial} is not ready.`,
       };
     }
-    const mappings = await client.listPortMappings(target, "reverse", watchSignal);
+    const mappings = await healthClient.listPortMappings(target, "reverse", watchSignal);
     if (!processSucceeded(mappings.process)) {
       return {
         targetReady: true,

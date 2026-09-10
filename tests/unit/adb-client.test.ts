@@ -66,6 +66,34 @@ describe("AdbClient", () => {
     expect(events).toEqual(["operation.started", "operation.completed"]);
   });
 
+  test("retains background probe evidence without presenting foreground progress", async () => {
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events: Array<{ severity: string; data?: Record<string, unknown> }> = [];
+    bus.subscribe((event) => events.push(event));
+    const client = new AdbClient({
+      executable: "adb",
+      bus,
+      correlation: { commandId: "command-1" },
+      runner: async (request) =>
+        processResult({ args: [...(request.args ?? [])], stdout: "device\n" }),
+      idFactory: () => "operation-1",
+      presentation: "background",
+    });
+
+    await client.getState("R5CT-001");
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        severity: "debug",
+        data: expect.objectContaining({ presentation: "background" }),
+      }),
+      expect.objectContaining({
+        severity: "debug",
+        data: expect.objectContaining({ presentation: "background", exitCode: 0 }),
+      }),
+    ]);
+  });
+
   test("keeps client version independent from a configured remote server", async () => {
     const requests: ProcessRequest[] = [];
     const runner: ProcessRunner = async (request) => {
