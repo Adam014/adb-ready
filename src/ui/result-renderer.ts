@@ -9,6 +9,7 @@ import type {
   PortsData,
   TargetDiscoveryData,
 } from "../app/commands.js";
+import type { ConfigReportData, InitData } from "../app/config-commands.js";
 import type {
   ContextCommandData,
   ProblemsCommandData,
@@ -122,6 +123,24 @@ function isContextCommandData(value: unknown): value is ContextCommandData {
     typeof value.markdown === "string" &&
     typeof value.characterCount === "number" &&
     typeof value.includedEvents === "number"
+  );
+}
+
+function isInitData(value: unknown): value is InitData {
+  return (
+    isRecord(value) &&
+    (value.status === "created" || value.status === "planned" || value.status === "replaced") &&
+    typeof value.path === "string" &&
+    isRecord(value.document)
+  );
+}
+
+function isConfigReportData(value: unknown): value is ConfigReportData {
+  return (
+    isRecord(value) &&
+    (value.action === "validate" || value.action === "explain") &&
+    value.valid === true &&
+    isRecord(value.files)
   );
 }
 
@@ -307,6 +326,36 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     );
   }
 
+  if (result.command === "init" && isInitData(result.data)) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Config   ${clean(result.data.path)}`,
+      `${style.success(glyphs.success, capabilities)} Status   ${clean(result.data.status)}`,
+      ...(result.data.detectedPreset === undefined
+        ? []
+        : [
+            `${style.success(glyphs.success, capabilities)} Preset   ${clean(result.data.detectedPreset)}`,
+          ]),
+    );
+  }
+
+  if (result.command.startsWith("config ") && isConfigReportData(result.data)) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Config   valid`,
+      `${style.success(glyphs.success, capabilities)} Project  ${clean(result.data.files.project ?? "not found")}`,
+      `${style.success(glyphs.success, capabilities)} User     ${clean(result.data.files.user ?? "not found")}`,
+    );
+    if (result.data.action === "explain") {
+      const values = result.data.values ?? [];
+      lines.push("", style.strong(`Resolved values (${String(values.length)})`, capabilities));
+      values.forEach((value, index) => {
+        const branch = index === values.length - 1 ? glyphs.end : glyphs.branch;
+        lines.push(
+          `${style.dim(branch, capabilities)} ${clean(value.key)} = ${clean(JSON.stringify(value.value))} · ${clean(value.source)}${value.location === undefined ? "" : ` · ${clean(value.location)}`}`,
+        );
+      });
+    }
+  }
+
   if (result.command === "pair" && isPairData(result.data)) {
     lines.push(
       `${style.success(glyphs.success, capabilities)} Paired ${clean(result.data.endpoint)}`,
@@ -470,6 +519,28 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`character_count=${String(result.data.characterCount)}\n`);
     sink.write(`included_events=${String(result.data.includedEvents)}\n`);
     sink.write(`omitted_events=${String(result.data.omittedEvents)}\n`);
+  }
+  if (isInitData(result.data)) {
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`path=${clean(result.data.path)}\n`);
+    if (result.data.detectedPreset !== undefined) {
+      sink.write(`detected_preset=${clean(result.data.detectedPreset)}\n`);
+    }
+  }
+  if (isConfigReportData(result.data)) {
+    sink.write(`action=${clean(result.data.action)}\n`);
+    sink.write("valid=true\n");
+    if (result.data.files.project !== undefined) {
+      sink.write(`project_config=${clean(result.data.files.project)}\n`);
+    }
+    if (result.data.files.user !== undefined) {
+      sink.write(`user_config=${clean(result.data.files.user)}\n`);
+    }
+    for (const value of result.data.values ?? []) {
+      sink.write(
+        `value=${clean(value.key)}:${clean(JSON.stringify(value.value))}:${clean(value.source)}\n`,
+      );
+    }
   }
   if (isPairData(result.data)) {
     sink.write(`endpoint=${clean(result.data.endpoint)}\n`);

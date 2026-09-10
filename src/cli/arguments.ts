@@ -3,12 +3,14 @@ import type { DevPreset, PackageManagerName } from "../dev/project.js";
 import type { PortDirection } from "../ports/model.js";
 
 export type CommandName =
+  | "config"
   | "connect"
   | "context"
   | "dev"
   | "devices"
   | "doctor"
   | "help"
+  | "init"
   | "logs"
   | "pair"
   | "ports"
@@ -59,6 +61,8 @@ export interface CliOptions {
   logDump?: boolean;
   logMaxRecords?: number;
   contextBudget?: number;
+  configAction?: "explain" | "validate";
+  force?: boolean;
 }
 
 export interface CliParseFailure {
@@ -76,12 +80,14 @@ export interface CliParseSuccess {
 export type CliParseResult = CliParseFailure | CliParseSuccess;
 
 const COMMANDS = new Set<CommandName>([
+  "config",
   "connect",
   "context",
   "dev",
   "devices",
   "doctor",
   "help",
+  "init",
   "logs",
   "pair",
   "ports",
@@ -113,6 +119,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--cleanup-ports",
   "--no-cleanup-ports",
   "--dump",
+  "--force",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -181,6 +188,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logDump = false;
   let logMaxRecords: number | undefined;
   let contextBudget: number | undefined;
+  let configAction: CliOptions["configAction"];
+  let force = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -213,12 +222,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         const candidate = argument as CommandName;
         if (
           candidate === "connect" ||
+          candidate === "config" ||
           candidate === "context" ||
           candidate === "dev" ||
           candidate === "devices" ||
           candidate === "doctor" ||
           candidate === "logs" ||
+          candidate === "init" ||
           candidate === "pair" ||
+          candidate === "ports" ||
           candidate === "problems" ||
           candidate === "sessions"
         ) {
@@ -246,6 +258,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           sessionId = argument;
           continue;
         }
+      }
+      if (
+        command === "config" &&
+        configAction === undefined &&
+        (argument === "explain" || argument === "validate")
+      ) {
+        configAction = argument;
+        continue;
       }
       if (
         command === "problems" &&
@@ -457,6 +477,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       logPriority = normalized as NonNullable<CliOptions["logPriority"]>;
     } else if (option === "--dump") {
       logDump = true;
+    } else if (option === "--force") {
+      force = true;
     } else if (option === "--max-records") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -546,6 +568,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
+  if (command === "config") configAction ??= "validate";
   if (command === "context" && format === "human") format = "markdown";
   if (command === "sessions") sessionAction ??= "list";
   const targetCommand =
@@ -593,11 +616,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command !== "connect" &&
     command !== "dev" &&
     command !== "pair" &&
-    command !== "ports"
+    command !== "ports" &&
+    command !== "init"
   ) {
     return failure(
       "CLI_USAGE",
-      "--dry-run can only be used with connect, dev, pair, or ports.",
+      "--dry-run can only be used with connect, dev, init, pair, or ports.",
       "--dry-run",
     );
   }
@@ -620,6 +644,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (
     command !== "dev" &&
+    command !== "init" &&
     (preset !== undefined ||
       packageManager !== undefined ||
       reversePorts.length > 0 ||
@@ -648,6 +673,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (format === "markdown" && command !== "context") {
     return failure("CLI_USAGE", "Markdown output is only available for the context command.");
+  }
+  if (force && command !== "init") {
+    return failure("CLI_USAGE", "--force can only be used with the init command.");
   }
 
   return {
@@ -694,6 +722,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logDump ? { logDump: true } : {}),
       ...(logMaxRecords === undefined ? {} : { logMaxRecords }),
       ...(contextBudget === undefined ? {} : { contextBudget }),
+      ...(configAction === undefined ? {} : { configAction }),
+      ...(force ? { force: true } : {}),
     },
   };
 }

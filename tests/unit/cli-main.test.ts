@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { type CliDependencies, type CliInput, type CliIo, runCli } from "../../src/cli/main.js";
@@ -232,6 +232,80 @@ describe("runCli", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("initializes a detected project without loading ADB or existing configuration", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-init-"));
+    try {
+      const streams = io();
+      streams.cwd = root;
+      const exitCode = await runCli(["init", "--json", "--non-interactive"], streams, {
+        loadConfig: async () => {
+          throw new Error("init must not load existing configuration");
+        },
+        locateAdb: async () => {
+          throw new Error("init must not locate ADB");
+        },
+        detectProject: async () => ({
+          root,
+          preset: "expo",
+          presetEvidence: ["dependency: expo"],
+          packageManager: {
+            name: "npm",
+            executable: "/bin/npm",
+            source: "lockfile",
+            conflicts: [],
+          },
+        }),
+        idFactory: () => "command-1",
+        clock: () => new Date("2026-09-10T10:00:00.000Z"),
+      });
+      expect(exitCode).toBe(ExitCode.Success);
+      expect(JSON.parse(streams.output.value).data).toMatchObject({
+        status: "created",
+        detectedPreset: "expo",
+        detectedPackageManager: "npm",
+      });
+      expect(
+        JSON.parse(await readFile(path.join(root, "adb-ready.config.json"), "utf8")),
+      ).toMatchObject({ version: 1, dev: { preset: "expo", packageManager: "npm" } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("explains resolved configuration without invoking ADB", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.locateAdb = async () => {
+      throw new Error("config explain must not locate ADB");
+    };
+    fixture.loadConfig = async () => ({
+      ok: true,
+      config: {
+        values: { timeoutMs: 5000, devPreset: "expo" },
+        provenance: {
+          timeoutMs: { source: "default" },
+          devPreset: { source: "project", location: "/project/adb-ready.config.json" },
+        },
+        files: { project: "/project/adb-ready.config.json" },
+      },
+    });
+    const exitCode = await runCli(
+      ["config", "explain", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value).data).toMatchObject({
+      action: "explain",
+      valid: true,
+      values: [
+        { key: "devPreset", value: "expo", source: "project" },
+        { key: "timeoutMs", value: 5000, source: "default" },
+      ],
+    });
+    expect(streams.error.value).toBe("");
   });
 
   test("keeps JSON stdout to one complete result and stderr empty", async () => {

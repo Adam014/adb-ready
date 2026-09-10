@@ -18,6 +18,7 @@ import {
   runPorts,
   runWirelessDiscovery,
 } from "../app/commands.js";
+import { runConfigReport, runInit } from "../app/config-commands.js";
 import {
   runContextCommand,
   runProblemsCommand,
@@ -63,10 +64,12 @@ Usage:
   adbr [command] [options]
 
 Commands:
+  config ACTION          Validate or explain resolved configuration
   connect [HOST:PORT]    Connect and verify a wireless Android target
   context [SESSION]      Export bounded AI-ready diagnostic context
   dev [OPTIONS] [-- CMD] Prepare one target and run a development session
   doctor                 Inspect the local ADB environment
+  init                   Create a detected project configuration
   devices                List visible Android targets
   logs [OPTIONS]         Stream focused logs from one Android target
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
@@ -106,6 +109,13 @@ Other:
 `;
 
 const COMMAND_HELP = {
+  config: `Usage:
+  adb-ready config validate [options]
+  adb-ready config explain [options]
+
+Validates all configuration layers or explains every resolved value and its
+winning source. Use --config PATH and --profile NAME for explicit inspection.
+`,
   connect: `Usage: adb-ready connect [HOST:PORT] [options]
 
 Connects a TLS/legacy wireless endpoint and verifies its stable ADB serial.
@@ -138,6 +148,11 @@ Development options:
   doctor: `Usage: adb-ready doctor [options]
 
 Runs read-only host, ADB capability, server, and target diagnostics.
+`,
+  init: `Usage: adb-ready init [options]
+
+Creates adb-ready.config.json from detected project signals. Existing files are
+never replaced unless --force is explicit. Use --dry-run to preview the file.
 `,
   devices: `Usage: adb-ready devices [options]
 
@@ -565,6 +580,30 @@ async function runCliInternal(
     io.output.write(`${VERSION}\n`);
     return ExitCode.Success;
   }
+  if (options.command === "init") {
+    const execution = await runInit(
+      {
+        cwd: io.cwd,
+        ...(options.preset === undefined ? {} : { preset: options.preset }),
+        ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
+        ...(options.reversePorts === undefined
+          ? {}
+          : { reversePorts: options.reversePorts.map(Number) }),
+        ...(options.logs === undefined ? {} : { logs: options.logs }),
+        ...(options.cleanupPorts === undefined ? {} : { cleanupPorts: options.cleanupPorts }),
+        ...(options.force === undefined ? {} : { force: options.force }),
+        ...(options.dryRun ? { dryRun: true } : {}),
+      },
+      dependencies,
+    );
+    renderResult(execution.result, {
+      format: options.format,
+      capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return execution.exitCode;
+  }
   if (
     options.command === "context" ||
     options.command === "sessions" ||
@@ -611,6 +650,21 @@ async function runCliInternal(
     const failure = failureResult(options.command, configProblems(loaded.errors), dependencies);
     renderFailure(failure, options.format, io);
     return ExitCode.InvalidInput;
+  }
+
+  if (options.command === "config") {
+    const execution = runConfigReport(
+      options.configAction ?? "validate",
+      loaded.config,
+      dependencies,
+    );
+    renderResult(execution.result, {
+      format: options.format,
+      capabilities: capabilities(options, loaded.config.values, io, "output", options.format),
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return execution.exitCode;
   }
 
   const values = loaded.config.values;

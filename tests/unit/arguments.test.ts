@@ -288,6 +288,50 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses configuration initialization and inspection", () => {
+    expect(
+      parseArguments([
+        "init",
+        "--preset",
+        "expo",
+        "--package-manager",
+        "pnpm",
+        "--port",
+        "8081",
+        "--no-logs",
+        "--force",
+        "--dry-run",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "init",
+        preset: "expo",
+        packageManager: "pnpm",
+        reversePorts: ["8081"],
+        logs: false,
+        force: true,
+        dryRun: true,
+      },
+    });
+    expect(parseArguments(["config"])).toMatchObject({
+      ok: true,
+      options: { command: "config", configAction: "validate" },
+    });
+    expect(parseArguments(["config", "explain", "--config", "custom.json"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "config",
+        configAction: "explain",
+        configPath: "custom.json",
+      },
+    });
+    expect(parseArguments(["doctor", "--force"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("rejects invalid or misplaced development options", () => {
     expect(parseArguments(["dev", "--preset", "flutter"])).toMatchObject({
       ok: false,
