@@ -126,7 +126,29 @@ try {
       throw new Error(`${runtime.name} dev returned an invalid dry-run plan`);
     }
 
-    process.stdout.write(`✓ ${runtime.name}: version, dev, target propagation, journal, dry-run\n`);
+    const failedChild = invoke(runtime, [
+      "dev",
+      "--no-logs",
+      "--json",
+      "--non-interactive",
+      "--",
+      "node",
+      "-e",
+      "process.exit(23)",
+    ]);
+    if (failedChild.error !== undefined || failedChild.status !== 23) {
+      throw new Error(
+        `${runtime.name} dev did not preserve child exit 23: ${failedChild.error?.message ?? String(failedChild.status)}`,
+      );
+    }
+    const failedPayload = JSON.parse(failedChild.stdout);
+    if (failedPayload.ok !== false || failedPayload.data?.child?.exitCode !== 23) {
+      throw new Error(`${runtime.name} dev did not report its failed child structurally`);
+    }
+
+    process.stdout.write(
+      `✓ ${runtime.name}: version, dev, target propagation, journal, dry-run, child exit\n`,
+    );
   }
 } finally {
   rmSync(temporary, { force: true, recursive: true });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
 import path from "node:path";
 import { AdbClient } from "../adb/client.js";
 import {
@@ -81,7 +82,7 @@ export interface CommandDependencies {
 
 export interface CommandExecution<T> {
   result: ResultEnvelope<T>;
-  exitCode: ExitCode;
+  exitCode: number;
 }
 
 export interface DoctorData {
@@ -189,6 +190,13 @@ function processSucceeded(result: ProcessResult): boolean {
     !result.timedOut &&
     !result.aborted
   );
+}
+
+function preservedChildExitCode(result: ProcessResult): number | undefined {
+  if (result.exitCode !== null && result.exitCode !== 0) return result.exitCode;
+  if (result.signal === null) return undefined;
+  const signalNumber = osConstants.signals[result.signal];
+  return signalNumber === undefined ? undefined : 128 + signalNumber;
 }
 
 function exitCodeForProblems(problems: readonly Problem[]): ExitCode {
@@ -2325,7 +2333,7 @@ export async function runDev(
     message: "Development session ended",
     correlation: targetCorrelation,
   });
-  return complete({
+  const execution = complete({
     ...baseData,
     status: "completed",
     ports: {
@@ -2343,4 +2351,8 @@ export async function runDev(
     },
     hooks: hookSummary(),
   });
+  if (problems.some(({ code }) => code === ProblemCode.ChildProcessFailed)) {
+    execution.exitCode = preservedChildExitCode(child) ?? execution.exitCode;
+  }
+  return execution;
 }

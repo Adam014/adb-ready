@@ -174,7 +174,7 @@ describe("runDev", () => {
     expect(requests.some(({ executable }) => executable === "node")).toBe(false);
   });
 
-  test("returns the child exit code class and still cleans a created mapping", async () => {
+  test("preserves the child exit code and still cleans a created mapping", async () => {
     let mapped = false;
     const execution = await runDev(
       {
@@ -198,7 +198,7 @@ describe("runDev", () => {
         return result(request);
       }),
     );
-    expect(execution.exitCode).toBe(ExitCode.ChildProcess);
+    expect(execution.exitCode).toBe(17);
     expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.ChildProcessFailed);
     expect(execution.result.data?.ports.cleaned).toBe(true);
   });

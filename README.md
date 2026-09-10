@@ -79,8 +79,8 @@ adb-ready dev -- bun x expo start --host lan --port 8081 --android
 
 ADB Ready refuses to replace an existing conflicting reverse mapping. At exit
 it removes only mappings created by that session and independently verifies the
-result. Ctrl-C is forwarded to owned processes and returns the interrupted exit
-code after cleanup.
+result. A failed child keeps its exact exit code. Ctrl-C is forwarded to owned
+processes and returns the interrupted exit code after cleanup.
 
 Use `--dry-run` to inspect the exact target-bound ADB and child-process plan
 without running hooks, changing ports, or starting the project command:
