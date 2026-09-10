@@ -44,14 +44,17 @@ const ROOT_KEYS = new Set([
   "timeoutMs",
   "output",
   "targets",
+  "app",
   "dev",
   "defaultProfile",
   "profiles",
 ]);
-const PROFILE_KEYS = new Set(["extends", "adb", "timeoutMs", "output", "targets", "dev"]);
+const PROFILE_KEYS = new Set(["extends", "adb", "timeoutMs", "output", "targets", "app", "dev"]);
 const ADB_KEYS = new Set(["path", "host", "port"]);
 const OUTPUT_KEYS = new Set(["color", "unicode", "animation", "interactive"]);
 const TARGET_KEYS = new Set(["aliases"]);
+const APP_KEYS = new Set(["android"]);
+const ANDROID_APP_KEYS = new Set(["package"]);
 const DEV_KEYS = new Set([
   "preset",
   "packageManager",
@@ -259,6 +262,46 @@ function validateDocument(
             }
           }
           values.targetAliases = aliases;
+        }
+      }
+    }
+  }
+
+  if (document.app !== undefined) {
+    if (!isObject(document.app)) {
+      errors.push(error(source, location, "app", "app must be an object."));
+    } else {
+      validateUnknownKeys(document.app, APP_KEYS, "app.", source, location, errors);
+      if (document.app.android !== undefined) {
+        if (!isObject(document.app.android)) {
+          errors.push(error(source, location, "app.android", "app.android must be an object."));
+        } else {
+          validateUnknownKeys(
+            document.app.android,
+            ANDROID_APP_KEYS,
+            "app.android.",
+            source,
+            location,
+            errors,
+          );
+          const packageName = document.app.android.package;
+          if (packageName !== undefined) {
+            if (
+              typeof packageName !== "string" ||
+              !/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(packageName)
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  "app.android.package",
+                  "app.android.package must be a valid Android application ID.",
+                ),
+              );
+            } else {
+              values.appPackage = packageName;
+            }
+          }
         }
       }
     }
@@ -807,7 +850,7 @@ function validateDocument(
           }
         }
         const profileDocument: Record<string, unknown> = { version: 1 };
-        for (const key of ["adb", "timeoutMs", "output", "targets", "dev"] as const) {
+        for (const key of ["adb", "timeoutMs", "output", "targets", "app", "dev"] as const) {
           if (candidate[key] !== undefined) {
             profileDocument[key] = candidate[key];
           }
@@ -994,12 +1037,20 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
   const strings = [
     ["ADB_READY_ADB_PATH", "adbPath"],
     ["ADB_READY_ADB_HOST", "adbHost"],
+    ["ADB_READY_APP_PACKAGE", "appPackage"],
   ] as const;
   for (const [name, key] of strings) {
     const candidate = env[name];
     if (candidate !== undefined) {
       if (candidate.trim() === "") {
         errors.push(error("environment", name, name, `${name} cannot be empty.`));
+      } else if (
+        key === "appPackage" &&
+        !/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(candidate)
+      ) {
+        errors.push(
+          error("environment", name, name, `${name} must be a valid Android application ID.`),
+        );
       } else {
         values[key] = candidate;
       }

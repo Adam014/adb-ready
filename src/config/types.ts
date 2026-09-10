@@ -45,6 +45,7 @@ export interface ConfigValues {
   animation?: boolean;
   interactive?: boolean;
   targetAliases?: Record<string, string>;
+  appPackage?: string;
   devPreset?: ConfigDevPreset;
   packageManager?: ConfigPackageManager;
   devCommand?: ConfigDevCommand;
