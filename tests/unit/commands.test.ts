@@ -489,6 +489,64 @@ describe("wireless target commands", () => {
     });
   });
 
+  test("falls back only to bounded alternate addresses from the same discovered service", async () => {
+    const requests: ProcessRequest[] = [];
+    const primary = "192.168.1.20:37123";
+    const alternate = "[2001:db8::20]:37123";
+    const runner: ProcessRunner = async (request) => {
+      requests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("connect")) {
+        const endpoint = args.at(-1);
+        return processResult(request, {
+          stdout:
+            endpoint === primary
+              ? `failed to connect to ${primary}: Connection refused\n`
+              : `connected to ${alternate}\n`,
+        });
+      }
+      if (args.includes("get-state")) {
+        return processResult(request, { stdout: "device\n" });
+      }
+      return processResult(request);
+    };
+
+    const execution = await runConnect(
+      primary,
+      {
+        endpointWasDiscovered: true,
+        discoveredEndpointCandidates: [primary, alternate, primary, "0.0.0.0:1"],
+      },
+      deterministicDependencies(runner),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data).toMatchObject({
+      endpoint: alternate,
+      serial: alternate,
+      discovered: true,
+      attemptedEndpoints: [primary, alternate],
+    });
+    expect(
+      requests.filter(({ args }) => args?.includes("connect")).map(({ args }) => args?.at(-1)),
+    ).toEqual([primary, alternate]);
+    expect(requests.find(({ args }) => args?.includes("get-state"))?.args).toContain(alternate);
+  });
+
+  test("never applies discovered alternates to an explicit endpoint", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runConnect(
+      "192.168.1.20:37123",
+      { discoveredEndpointCandidates: ["192.168.1.21:37124"] },
+      deterministicDependencies(
+        fixtureRunner({ connect: "failed to connect: Connection refused\n" }, requests),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.AdbOperation);
+    expect(requests.filter(({ args }) => args?.includes("connect"))).toHaveLength(1);
+  });
+
   test("passes the pairing code only over stdin and never returns it", async () => {
     const requests: ProcessRequest[] = [];
     const execution = await runPair(

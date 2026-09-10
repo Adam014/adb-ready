@@ -44,6 +44,7 @@ export interface CommandConfig {
   rememberedOnly?: boolean;
   dryRun?: boolean;
   endpointWasDiscovered?: boolean;
+  discoveredEndpointCandidates?: readonly string[];
 }
 
 export interface CommandDependencies {
@@ -101,6 +102,7 @@ export interface ConnectedData {
   state: "device";
   hardwareSerial?: string;
   discovered: boolean;
+  attemptedEndpoints?: string[];
 }
 
 export interface PairedData {
@@ -313,6 +315,32 @@ interface TargetInspection {
 interface MdnsDiscovery {
   observation: Awaited<ReturnType<AdbClient["mdnsServices"]>>;
   method: TargetDiscoveryData["mdns"]["method"];
+}
+
+interface WirelessEndpointResolution {
+  endpoint?: string;
+  candidates: string[];
+  discovered: boolean;
+  problem?: Problem;
+}
+
+function serviceEndpointCandidates(service: AdbMdnsService): string[] {
+  return [
+    ...new Set([
+      service.endpoint.serial,
+      ...(service.alternateEndpoints ?? []).map(({ serial }) => serial),
+    ]),
+  ].slice(0, 3);
+}
+
+function normalizeEndpointCandidates(primary: string, candidates: readonly string[]): string[] {
+  return [
+    ...new Set(
+      [primary, ...candidates]
+        .map((candidate) => parseAdbNetworkEndpoint(candidate)?.serial)
+        .filter((candidate): candidate is string => candidate !== undefined),
+    ),
+  ].slice(0, 3);
 }
 
 async function discoverMdns(
@@ -610,11 +638,13 @@ async function resolveWirelessEndpoint(
   commandId: string,
   signal: AbortSignal | undefined,
   requestedWasDiscovered = false,
-): Promise<{ endpoint?: string; discovered: boolean; problem?: Problem }> {
+  requestedCandidates: readonly string[] = [],
+): Promise<WirelessEndpointResolution> {
   if (requested !== undefined) {
     const endpoint = parseAdbNetworkEndpoint(requested);
     return endpoint === undefined
       ? {
+          candidates: [],
           discovered: requestedWasDiscovered,
           problem: commandProblem(
             ProblemCode.InvalidEndpoint,
@@ -625,28 +655,37 @@ async function resolveWirelessEndpoint(
             [{ source: "input", field: "endpoint", value: requested }],
           ),
         }
-      : { endpoint: endpoint.serial, discovered: requestedWasDiscovered };
+      : {
+          endpoint: endpoint.serial,
+          candidates: requestedWasDiscovered
+            ? normalizeEndpointCandidates(endpoint.serial, requestedCandidates)
+            : [endpoint.serial],
+          discovered: requestedWasDiscovered,
+        };
   }
 
   const mdnsDiscovery = await discoverMdns(client, undefined, signal);
   const mdns = mdnsDiscovery.observation;
   if (!processSucceeded(mdns.process)) {
     return {
+      candidates: [],
       discovered: true,
       problem: operationProblem("mdns-services", mdns, commandId),
     };
   }
   const serviceKinds =
     serviceType === "connect" ? new Set(["connect", "legacy"]) : new Set(["pairing"]);
-  const endpoints = [
-    ...new Set(
-      mdns.value
-        .filter((service) => serviceKinds.has(service.serviceType))
-        .map(({ endpoint }) => endpoint.serial),
-    ),
-  ].sort();
-  if (endpoints.length === 0) {
+  const services = mdns.value.filter((service) => serviceKinds.has(service.serviceType));
+  const serviceGroups = new Map<string, AdbMdnsService[]>();
+  for (const service of services) {
+    const key = `${service.rawServiceType}\0${service.instance}`;
+    const group = serviceGroups.get(key) ?? [];
+    group.push(service);
+    serviceGroups.set(key, group);
+  }
+  if (serviceGroups.size === 0) {
     return {
+      candidates: [],
       discovered: true,
       problem: commandProblem(
         ProblemCode.WirelessEndpointNotFound,
@@ -659,8 +698,12 @@ async function resolveWirelessEndpoint(
       ),
     };
   }
-  if (endpoints.length > 1) {
+  if (serviceGroups.size > 1) {
+    const endpoints = [
+      ...new Set(services.flatMap((service) => serviceEndpointCandidates(service))),
+    ].sort();
     return {
+      candidates: [],
       discovered: true,
       problem: commandProblem(
         ProblemCode.MultipleWirelessEndpoints,
@@ -672,8 +715,14 @@ async function resolveWirelessEndpoint(
       ),
     };
   }
-  const endpoint = endpoints[0];
-  return endpoint === undefined ? { discovered: true } : { endpoint, discovered: true };
+  const serviceGroup = [...serviceGroups.values()][0] ?? [];
+  const candidates = [
+    ...new Set(serviceGroup.flatMap((service) => serviceEndpointCandidates(service))),
+  ].slice(0, 3);
+  const endpoint = candidates[0];
+  return endpoint === undefined
+    ? { candidates: [], discovered: true }
+    : { endpoint, candidates, discovered: true };
 }
 
 export async function runWirelessDiscovery(
@@ -755,6 +804,7 @@ export async function runConnect(
     context.commandId,
     signal,
     config.endpointWasDiscovered,
+    config.discoveredEndpointCandidates,
   );
   if (resolution.problem !== undefined || resolution.endpoint === undefined) {
     if (resolution.problem !== undefined) {
@@ -762,7 +812,19 @@ export async function runConnect(
     }
     return finish<ConnectData>(context, null, problems);
   }
+  const candidates =
+    resolution.candidates.length > 0 ? resolution.candidates : [resolution.endpoint];
   if (config.dryRun) {
+    const connectSteps = candidates.map((candidate, index) => ({
+      id: index === 0 ? "connect" : `connect-alternate-${String(index)}`,
+      title:
+        index === 0
+          ? `Connect wireless target ${candidate}`
+          : `If needed, try alternate address ${candidate}`,
+      risk: "local-additive" as const,
+      executable: redactedPath(executable),
+      args: ["connect", candidate],
+    }));
     return finish(
       context,
       {
@@ -772,19 +834,11 @@ export async function runConnect(
           schemaVersion: SCHEMA_VERSION,
           dryRun: true,
           steps: [
-            {
-              id: "connect",
-              title: `Connect wireless target ${resolution.endpoint}`,
-              risk: "local-additive",
-              executable: redactedPath(executable),
-              args: ["connect", resolution.endpoint],
-            },
+            ...connectSteps,
             {
               id: "verify",
-              title: "Verify the exact target reports device state",
+              title: "Verify the successful address reports device state",
               risk: "read-only",
-              executable: redactedPath(executable),
-              args: ["-s", resolution.endpoint, "get-state"],
             },
           ],
         },
@@ -793,26 +847,74 @@ export async function runConnect(
     );
   }
 
-  const connection = await client.connect(resolution.endpoint, signal);
-  if (!processSucceeded(connection.process)) {
-    problems.push(operationProblem("connect", connection, context.commandId));
-    return finish<ConnectData>(context, null, problems);
+  const attemptedEndpoints: string[] = [];
+  let connected:
+    | {
+        endpoint: string;
+        status: ConnectedData["status"];
+      }
+    | undefined;
+  let lastConnectionProblem: Problem | undefined;
+  for (const candidate of candidates) {
+    attemptedEndpoints.push(candidate);
+    const observation = await client.connect(candidate, signal);
+    if (!processSucceeded(observation.process)) {
+      lastConnectionProblem = operationProblem("connect", observation, context.commandId);
+      if (
+        lastConnectionProblem.code === ProblemCode.OperationInterrupted ||
+        lastConnectionProblem.code === ProblemCode.AdbServerUnavailable ||
+        lastConnectionProblem.code === ProblemCode.AdbFeatureUnavailable
+      ) {
+        break;
+      }
+      continue;
+    }
+    if (
+      observation.value.status === "connected" ||
+      observation.value.status === "already-connected"
+    ) {
+      connected = { endpoint: candidate, status: observation.value.status };
+      break;
+    }
+    lastConnectionProblem = commandProblem(
+      ProblemCode.WirelessConnectionFailed,
+      "adb.connect",
+      "ADB did not confirm the wireless connection.",
+      "The operation returned without a verified connected state.",
+      context.commandId,
+      [{ source: "adb.connect", field: "status", value: observation.value.status }],
+    );
   }
-  if (connection.value.status !== "connected" && connection.value.status !== "already-connected") {
-    problems.push(
+  if (connected === undefined) {
+    const problem =
+      lastConnectionProblem ??
       commandProblem(
         ProblemCode.WirelessConnectionFailed,
         "adb.connect",
-        "ADB did not confirm the wireless connection.",
-        "The operation returned without a verified connected state.",
+        "ADB could not connect to the discovered wireless target.",
+        "None of the bounded address candidates produced a connected state.",
         context.commandId,
-        [{ source: "adb.connect", field: "status", value: connection.value.status }],
-      ),
-    );
+      );
+    problem.evidence.push({
+      source: "adb.discovery",
+      field: "attemptedEndpoints",
+      value: attemptedEndpoints,
+    });
+    problems.push(problem);
     return finish<ConnectData>(context, null, problems);
   }
+  if (attemptedEndpoints.length > 1) {
+    context.bus.emit({
+      type: "recovery.completed",
+      source: "command.connect",
+      severity: "info",
+      message: `Connected through alternate address ${connected.endpoint}`,
+      correlation: { commandId: context.commandId },
+      data: { attemptedEndpoints, selectedEndpoint: connected.endpoint },
+    });
+  }
 
-  const state = await client.getState(resolution.endpoint, signal);
+  const state = await client.getState(connected.endpoint, signal);
   if (!processSucceeded(state.process)) {
     problems.push(operationProblem("get-state", state, context.commandId));
     return finish<ConnectData>(context, null, problems);
@@ -831,7 +933,7 @@ export async function runConnect(
     return finish<ConnectData>(context, null, problems);
   }
 
-  const identity = await client.getHardwareSerial(resolution.endpoint, signal);
+  const identity = await client.getHardwareSerial(connected.endpoint, signal);
   if (identity.process.aborted) {
     problems.push(operationProblem("hardware-serial", identity, context.commandId));
     return finish<ConnectData>(context, null, problems);
@@ -843,12 +945,13 @@ export async function runConnect(
     context,
     {
       adbPath: redactedPath(executable),
-      endpoint: resolution.endpoint,
-      status: connection.value.status,
-      serial: resolution.endpoint,
+      endpoint: connected.endpoint,
+      status: connected.status,
+      serial: connected.endpoint,
       state: "device",
       ...(hardwareSerial === undefined ? {} : { hardwareSerial }),
       discovered: resolution.discovered,
+      ...(attemptedEndpoints.length > 1 ? { attemptedEndpoints } : {}),
     },
     problems,
   );
@@ -901,6 +1004,7 @@ export async function runPair(
     context.commandId,
     signal,
     config.endpointWasDiscovered,
+    config.discoveredEndpointCandidates,
   );
   if (resolution.problem !== undefined || resolution.endpoint === undefined) {
     if (resolution.problem !== undefined) {

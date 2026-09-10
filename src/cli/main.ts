@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 import manifest from "../../package.json" with { type: "json" };
+import type { AdbMdnsService } from "../adb/parsers.js";
 import {
   type CommandDependencies,
   type CommandExecution,
@@ -333,6 +334,15 @@ function targetDescription(target: AndroidTarget): string {
   return `${target.serial} · ${target.state} · ${transports}`;
 }
 
+function discoveredCandidates(service: AdbMdnsService): string[] {
+  return [
+    ...new Set([
+      service.endpoint.serial,
+      ...(service.alternateEndpoints ?? []).map(({ serial }) => serial),
+    ]),
+  ].slice(0, 3);
+}
+
 async function selectDevice(
   execution: CommandExecution<DevicesData>,
   io: CliIo,
@@ -517,6 +527,7 @@ async function runCliInternal(
   };
   let endpoint = options.endpoint;
   let endpointWasDiscovered = false;
+  let discoveredEndpointCandidates: string[] | undefined;
   if (
     endpoint === undefined &&
     errorCapabilities.interactive &&
@@ -555,8 +566,11 @@ async function runCliInternal(
     }
     const services = discovery.result.data.services;
     if (services.length === 1) {
-      endpoint = services[0]?.endpoint.serial;
-      endpointWasDiscovered = endpoint !== undefined;
+      const service = services[0];
+      endpoint = service?.endpoint.serial;
+      endpointWasDiscovered = service !== undefined;
+      discoveredEndpointCandidates =
+        service === undefined ? undefined : discoveredCandidates(service);
     } else {
       const chosen = await selectOne({
         title:
@@ -564,7 +578,7 @@ async function runCliInternal(
         options: services.map((service) => {
           const identity = service.givenName ?? service.deviceModel;
           return {
-            value: service.endpoint.serial,
+            value: service,
             label: identity ?? service.endpoint.serial,
             description:
               identity === undefined
@@ -598,8 +612,9 @@ async function runCliInternal(
         );
         return failed.exitCode;
       }
-      endpoint = chosen.value;
+      endpoint = chosen.value.endpoint.serial;
       endpointWasDiscovered = true;
+      discoveredEndpointCandidates = discoveredCandidates(chosen.value);
     }
   }
   let pairingCode: string | undefined;
@@ -668,7 +683,15 @@ async function runCliInternal(
     } else if (options.command === "connect") {
       execution = await runConnect(
         endpoint,
-        endpointWasDiscovered ? { ...config, endpointWasDiscovered: true } : config,
+        endpointWasDiscovered
+          ? {
+              ...config,
+              endpointWasDiscovered: true,
+              ...(discoveredEndpointCandidates === undefined
+                ? {}
+                : { discoveredEndpointCandidates }),
+            }
+          : config,
         commandDependencies,
         signal,
       );
@@ -676,7 +699,15 @@ async function runCliInternal(
       execution = await runPair(
         endpoint,
         pairingCode ?? "",
-        endpointWasDiscovered ? { ...config, endpointWasDiscovered: true } : config,
+        endpointWasDiscovered
+          ? {
+              ...config,
+              endpointWasDiscovered: true,
+              ...(discoveredEndpointCandidates === undefined
+                ? {}
+                : { discoveredEndpointCandidates }),
+            }
+          : config,
         commandDependencies,
         signal,
       );
