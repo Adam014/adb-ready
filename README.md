@@ -195,7 +195,7 @@ Android transport backend.
 [Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md) ·
 [Security](./SECURITY.md) · [MIT License](./LICENSE)
 
-ADB Ready is Android-only. The `0.1.0` release focuses on target acquisition,
+ADB Ready is Android-only. The `0.1.x` releases focus on target acquisition,
 ports, development-session recovery, logs, diagnostics, and automation. App
 lifecycle, files, screenshots, screen recording, and shell workflows come
 after this core is proven on real projects.

@@ -9,6 +9,26 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-10
+
+### Changed
+
+- Start live log streams at the current buffer position by default, while
+  keeping explicit history available through `--tail`, `--since`, and `--dump`.
+- Color live logcat and child output by parsed severity and conservative message
+  semantics without treating every `stderr` line as an error.
+- Present a safely handled `Ctrl-C` as an interruption while preserving exit
+  code 130 and a failed machine result for automation.
+
+### Fixed
+
+- Correlate duplicate ADB 37 mDNS service-name and stable endpoint transports
+  only when exact discovery and observed hardware identity prove they match.
+- Prevent port-list results from being misclassified as saved-session results in
+  human and plain output.
+- Emit saved session timelines as one event per NDJSON line followed by a compact
+  result summary instead of duplicating the complete event array.
+
 ## [0.1.1] - 2026-09-10
 
 ### Fixed
@@ -32,6 +52,7 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Adam014/adb-ready/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Adam014/adb-ready/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Adam014/adb-ready/compare/v0.0.1-alpha.0...v0.1.0
