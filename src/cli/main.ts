@@ -902,7 +902,7 @@ async function runCliInternal(
     ...(options.dryRun ? { dryRun: true } : {}),
   };
   if (
-    options.command === "app" ||
+    (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||
     options.command === "apps" ||
     options.command === "capture" ||
     options.command === "dev" ||
@@ -961,7 +961,7 @@ async function runCliInternal(
     }
     const shouldPrompt =
       options.select ||
-      ((options.command === "app" ||
+      (((options.command === "app" && options.appAction !== "resolve") ||
         options.command === "apps" ||
         options.command === "capture" ||
         options.command === "dev" ||

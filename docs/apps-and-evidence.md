@@ -1,8 +1,8 @@
 # Apps and evidence
 
-ADB Ready binds app operations and evidence to the same deterministic Android
-target used by the rest of the CLI. It reports success only after the requested
-postcondition is observed.
+ADB Ready resolves project identity locally when possible, then binds
+target-based app operations and evidence to one deterministic Android target.
+It reports success only after the requested postcondition is observed.
 
 ## App identity
 
@@ -17,6 +17,10 @@ Resolution prefers an explicit `APP_ID`, then project configuration and
 detected Android project metadata. Every resolved result includes provenance.
 If equally valid candidates remain, ADB Ready asks for an explicit choice
 instead of selecting the first package.
+
+Explicit, configured, Gradle, Expo, and manifest identity can be resolved with
+no running emulator, connected phone, or ADB binary. Only the final
+installed-package fallback requires a target.
 
 Set a stable project value when detection is not sufficient:
 

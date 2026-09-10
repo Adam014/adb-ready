@@ -106,7 +106,8 @@ async function verifyRuntime(runtime) {
   };
   child.stdout.on("data", (chunk) => {
     stdout = collect(stdout, chunk);
-    if (!stdinEnded && stdout.includes('"id":6')) {
+    const completedResponses = stdout.split(/\r?\n/u).filter(Boolean).length;
+    if (!stdinEnded && completedResponses >= 6) {
       stdinEnded = true;
       child.stdin.end();
     }

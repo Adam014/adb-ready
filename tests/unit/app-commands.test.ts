@@ -92,10 +92,14 @@ describe("app commands", () => {
   });
 
   test("resolves explicit app identity and returns package/foreground evidence", async () => {
+    const requests: string[][] = [];
     const resolved = await runApp(
       { action: "resolve", cwd: "/project", applicationId: "com.example.app" },
       {},
-      fixture(),
+      fixture((request) => {
+        requests.push([...(request.args ?? [])]);
+        return undefined;
+      }),
     );
     expect(resolved.result).toMatchObject({
       ok: true,
@@ -107,6 +111,7 @@ describe("app commands", () => {
         },
       },
     });
+    expect(requests).toEqual([]);
 
     const info = await runApp(
       { action: "info", cwd: "/project", applicationId: "com.example.app" },

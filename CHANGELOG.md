@@ -13,6 +13,8 @@ breaking changes.
 
 - Resolve Android application IDs with provenance, enumerate installed
   packages, and inspect one project app on a deterministic target.
+- Resolve known project application IDs without requiring ADB or a connected
+  target; use installed packages only as the final fallback.
 - Install, launch, stop, restart, clear, uninstall, and deep-link apps with
   explicit destructive policy, mutation-free dry runs, and postcondition
   verification.

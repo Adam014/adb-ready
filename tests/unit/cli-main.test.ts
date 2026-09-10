@@ -308,6 +308,34 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
+  test("resolves a known project app without requiring ADB or a connected target", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.locateAdb = async () => {
+      throw new Error("must not locate ADB");
+    };
+    fixture.runner = async () => {
+      throw new Error("must not run ADB");
+    };
+    const exitCode = await runCli(
+      ["app", "resolve", "com.example.app", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      ok: true,
+      command: "app resolve",
+      data: {
+        resolution: {
+          kind: "resolved",
+          applicationId: "com.example.app",
+          provenance: { source: "cli" },
+        },
+      },
+    });
+  });
+
   test("keeps JSON stdout to one complete result and stderr empty", async () => {
     const streams = io();
     const exitCode = await runCli(["devices", "--json"], streams, dependencies());

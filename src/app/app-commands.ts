@@ -71,7 +71,7 @@ export interface AppsData {
 
 export interface AppResolutionData {
   action: "resolve";
-  selected: import("../target/selection.js").SelectedTarget;
+  selected?: import("../target/selection.js").SelectedTarget;
   resolution: ApplicationIdResolution;
 }
 
@@ -632,10 +632,24 @@ export async function runApp(
 ): Promise<CommandExecution<AppData>> {
   const current = context(`app ${request.action}`, dependencies);
   const problems: Problem[] = [];
-  const ready = await readyTarget(current, config, dependencies, problems, signal);
-  if (ready === undefined) return finish<AppData>(current, null, problems);
 
   if (request.action === "resolve") {
+    const project = await (dependencies.detectProject ?? detectProject)({ cwd: request.cwd });
+    const localResolution = await resolveApplicationId({
+      root: project.root,
+      ...(request.applicationId === undefined ? {} : { explicit: request.applicationId }),
+      ...(request.configuredPackage === undefined ? {} : { configured: request.configuredPackage }),
+    });
+    if (localResolution.kind !== "not-found") {
+      if (localResolution.kind !== "resolved")
+        problems.push(resolutionProblem(localResolution, current.commandId));
+      return finish(current, { action: "resolve", resolution: localResolution }, problems);
+    }
+    const ready = await readyTarget(current, config, dependencies, problems, signal);
+    if (ready === undefined) {
+      problems.push(resolutionProblem(localResolution, current.commandId));
+      return finish<AppData>(current, null, problems);
+    }
     const { resolution, packageObservation } = await applicationResolution(
       request,
       ready,
@@ -650,6 +664,9 @@ export async function runApp(
       problems.push(resolutionProblem(resolution, current.commandId));
     return finish(current, { action: "resolve", selected: ready.selected, resolution }, problems);
   }
+
+  const ready = await readyTarget(current, config, dependencies, problems, signal);
+  if (ready === undefined) return finish<AppData>(current, null, problems);
 
   if (request.action === "install") {
     const artifact =

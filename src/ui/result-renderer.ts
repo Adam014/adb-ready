@@ -118,9 +118,11 @@ function isAppsData(value: unknown): value is AppsData {
 function isAppData(value: unknown): value is AppData {
   return (
     isRecord(value) &&
-    isRecord(value.selected) &&
     typeof value.action === "string" &&
-    (isRecord(value.resolution) || typeof value.applicationId === "string")
+    (value.action === "resolve"
+      ? isRecord(value.resolution)
+      : isRecord(value.selected) &&
+        (isRecord(value.resolution) || typeof value.applicationId === "string"))
   );
 }
 
@@ -385,9 +387,11 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
 
   if (result.command.startsWith("app ") && isAppData(result.data)) {
     const data = result.data;
-    lines.push(
-      `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
-    );
+    if (data.selected !== undefined) {
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      );
+    }
     if (data.action === "resolve") {
       if (data.resolution.kind === "resolved") {
         lines.push(
