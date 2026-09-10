@@ -44,11 +44,12 @@ function candidateNames(name: string, platform: NodeJS.Platform, env: NodeJS.Pro
   return [name, ...windowsExtensions(env).map((extension) => `${name}${extension}`)];
 }
 
-async function resolveFromPath(
+export async function locateExecutable(
   name: string,
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
+  options: Pick<ExecutableSearchOptions, "env" | "platform"> = {},
 ): Promise<string | undefined> {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
   const pathValue = env.PATH ?? env.Path ?? env.path;
   if (pathValue === undefined) {
     return undefined;
@@ -117,10 +118,10 @@ export async function locateAdb(
       const candidate = pathApi.resolve(explicit);
       return (await isExecutable(candidate, platform)) ? candidate : undefined;
     }
-    return await resolveFromPath(explicit, env, platform);
+    return await locateExecutable(explicit, { env, platform });
   }
 
-  const fromPath = await resolveFromPath("adb", env, platform);
+  const fromPath = await locateExecutable("adb", { env, platform });
   if (fromPath !== undefined) {
     return fromPath;
   }
