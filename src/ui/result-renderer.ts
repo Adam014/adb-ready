@@ -101,10 +101,10 @@ function isLogsData(value: unknown): value is LogsData {
 }
 
 function isSessionCommandData(value: unknown): value is SessionCommandData {
-  return (
-    isRecord(value) &&
-    (value.action === "list" || value.action === "show" || value.action === "events")
-  );
+  if (!isRecord(value)) return false;
+  if (value.action === "list") return Array.isArray(value.sessions);
+  if (value.action === "show") return isRecord(value.session);
+  return value.action === "events" && isRecord(value.session) && Array.isArray(value.events);
 }
 
 function isProblemsCommandData(value: unknown): value is ProblemsCommandData {
@@ -617,7 +617,24 @@ export function renderResult(result: CommandResult, options: ResultRenderOptions
   } else if (options.format === "json") {
     options.sink.write(`${JSON.stringify(result)}\n`);
   } else if (options.format === "ndjson") {
-    options.sink.write(`${JSON.stringify({ kind: "result", ...result })}\n`);
+    if (isSessionCommandData(result.data) && result.data.action === "events") {
+      for (const event of result.data.events) {
+        options.sink.write(`${JSON.stringify({ kind: "event", ...event })}\n`);
+      }
+      options.sink.write(
+        `${JSON.stringify({
+          kind: "result",
+          ...result,
+          data: {
+            action: result.data.action,
+            session: result.data.session,
+            eventCount: result.data.events.length,
+          },
+        })}\n`,
+      );
+    } else {
+      options.sink.write(`${JSON.stringify({ kind: "result", ...result })}\n`);
+    }
   } else if (options.format === "plain") {
     renderPlain(result, options.sink);
   } else {
