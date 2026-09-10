@@ -233,6 +233,7 @@ describe("loadConfig", () => {
         ADB_READY_PRESET: "react-native",
         ADB_READY_REVERSE_PORTS: "3000,8081",
         ADB_READY_DEV_LOGS: "false",
+        ADB_READY_JOURNAL_REDACT_ENVIRONMENT: "CI_TOKEN,PRIVATE_TOKEN",
       },
       homeDirectory: directory,
       userConfigPath: path.join(directory, "missing-user.json"),
@@ -255,7 +256,7 @@ describe("loadConfig", () => {
           journalMaxBytes: 100000,
           journalSources: ["child.stdout", "logcat"],
           journalMinimumSeverity: "info",
-          journalRedactEnvironment: ["PRIVATE_TOKEN", "API_SECRET"],
+          journalRedactEnvironment: ["CI_TOKEN", "PRIVATE_TOKEN"],
           devHooks: {
             onReady: [
               {
@@ -274,6 +275,7 @@ describe("loadConfig", () => {
           packageManager: { source: "cli" },
           devReversePorts: { source: "environment" },
           devCleanupPorts: { source: "cli" },
+          journalRedactEnvironment: { source: "environment" },
         },
       },
     });

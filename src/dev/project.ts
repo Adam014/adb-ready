@@ -8,7 +8,7 @@ export type DevPreset = "custom" | "expo" | "gradle" | "react-native";
 export interface PackageManagerResolution {
   name?: PackageManagerName;
   executable?: string;
-  source?: "config" | "executable" | "lockfile" | "package-json";
+  source?: "config" | "dev-engines" | "executable" | "lockfile" | "package-json";
   conflicts: PackageManagerName[];
 }
 
@@ -101,6 +101,19 @@ function managerFromField(value: string | undefined): PackageManagerName | undef
   return value?.match(MANAGER_FIELD)?.[1] as PackageManagerName | undefined;
 }
 
+function managersFromDevEngines(value: unknown): PackageManagerName[] {
+  const candidates = Array.isArray(value) ? value : [value];
+  const managers: PackageManagerName[] = [];
+  for (const candidate of candidates) {
+    const document = record(candidate);
+    const name = document?.name;
+    if (name === "bun" || name === "npm" || name === "pnpm" || name === "yarn") {
+      managers.push(name);
+    }
+  }
+  return [...new Set(managers)];
+}
+
 export async function detectProject(options: DetectProjectOptions): Promise<ProjectDetection> {
   const exists = options.fileExists ?? defaultFileExists;
   const readText = options.readText ?? (async (file: string) => await readFile(file, "utf8"));
@@ -123,6 +136,9 @@ export async function detectProject(options: DetectProjectOptions): Promise<Proj
     typeof packageDocument?.packageManager === "string"
       ? packageDocument.packageManager
       : undefined;
+  const devEngineManagers = managersFromDevEngines(
+    record(packageDocument?.devEngines)?.packageManager,
+  );
 
   const presetEvidence: string[] = [];
   let preset: DevPreset | undefined;
@@ -169,6 +185,20 @@ export async function detectProject(options: DetectProjectOptions): Promise<Proj
         executable === undefined ? {} : { executable },
       )),
     };
+  } else if (devEngineManagers.length === 1) {
+    const name = devEngineManagers[0];
+    if (name !== undefined) {
+      packageManager = {
+        name,
+        source: "dev-engines",
+        conflicts: [],
+        ...(await locate(name).then((executable) =>
+          executable === undefined ? {} : { executable },
+        )),
+      };
+    }
+  } else if (devEngineManagers.length > 1) {
+    packageManager = { conflicts: [...devEngineManagers].sort() };
   } else {
     const foundLockfiles = new Set<PackageManagerName>();
     for (const [filename, manager] of LOCKFILES) {

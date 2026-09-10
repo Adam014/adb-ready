@@ -1824,10 +1824,10 @@ export async function runDev(
       commandProblem(
         ProblemCode.PackageManagerConflict,
         "input.dev.package-manager",
-        "Multiple package-manager lockfiles conflict.",
-        "Declare packageManager in package.json, use --package-manager, or remove stale lockfiles.",
+        "Multiple package-manager signals conflict.",
+        "Declare packageManager in package.json, use --package-manager, or remove stale metadata or lockfiles.",
         context.commandId,
-        [{ source: "project", field: "lockfiles", value: project.packageManager.conflicts }],
+        [{ source: "project", field: "candidates", value: project.packageManager.conflicts }],
       ),
     );
     return complete(null);

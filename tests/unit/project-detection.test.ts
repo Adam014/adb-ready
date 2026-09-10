@@ -51,6 +51,37 @@ describe("project detection", () => {
     expect(detected.packageManager).toMatchObject({ name: "yarn", source: "package-json" });
   });
 
+  test("uses npm devEngines packageManager before lockfiles without guessing arrays", async () => {
+    const root = path.resolve("/workspace/app");
+    const detected = await detectProject({
+      cwd: root,
+      ...fixture(
+        {
+          [path.join(root, "package.json")]: JSON.stringify({
+            devEngines: { packageManager: { name: "pnpm", version: ">=10" } },
+          }),
+          [path.join(root, "bun.lock")]: "",
+        },
+        ["pnpm", "bun"],
+      ),
+    });
+    expect(detected.packageManager).toMatchObject({
+      name: "pnpm",
+      executable: "/bin/pnpm",
+      source: "dev-engines",
+    });
+
+    const ambiguous = await detectProject({
+      cwd: root,
+      ...fixture({
+        [path.join(root, "package.json")]: JSON.stringify({
+          devEngines: { packageManager: [{ name: "npm" }, { name: "yarn" }] },
+        }),
+      }),
+    });
+    expect(ambiguous.packageManager).toEqual({ conflicts: ["npm", "yarn"] });
+  });
+
   test("refuses to guess between conflicting lockfiles", async () => {
     const root = path.resolve("/workspace/app");
     const detected = await detectProject({
