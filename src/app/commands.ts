@@ -815,16 +815,34 @@ export async function runConnect(
   const candidates =
     resolution.candidates.length > 0 ? resolution.candidates : [resolution.endpoint];
   if (config.dryRun) {
-    const connectSteps = candidates.map((candidate, index) => ({
-      id: index === 0 ? "connect" : `connect-alternate-${String(index)}`,
-      title:
-        index === 0
-          ? `Connect wireless target ${candidate}`
-          : `If needed, try alternate address ${candidate}`,
-      risk: "local-additive" as const,
-      executable: redactedPath(executable),
-      args: ["connect", candidate],
-    }));
+    const steps = candidates.flatMap((candidate, index) => {
+      const connectId = index === 0 ? "connect" : `connect-alternate-${String(index)}`;
+      const verifyId = index === 0 ? "verify" : `verify-alternate-${String(index)}`;
+      const previousConnectId = index <= 1 ? "connect" : `connect-alternate-${String(index - 1)}`;
+      return [
+        {
+          id: connectId,
+          title:
+            index === 0
+              ? `Connect wireless target ${candidate}`
+              : `Try alternate address ${candidate}`,
+          risk: "local-additive" as const,
+          ...(index === 0
+            ? {}
+            : { when: { stepId: previousConnectId, outcome: "failure" as const } }),
+          executable: redactedPath(executable),
+          args: ["connect", candidate],
+        },
+        {
+          id: verifyId,
+          title: `Verify ${candidate} reports device state`,
+          risk: "read-only" as const,
+          when: { stepId: connectId, outcome: "success" as const },
+          executable: redactedPath(executable),
+          args: ["-s", candidate, "get-state"],
+        },
+      ];
+    });
     return finish(
       context,
       {
@@ -833,14 +851,7 @@ export async function runConnect(
         plan: {
           schemaVersion: SCHEMA_VERSION,
           dryRun: true,
-          steps: [
-            ...connectSteps,
-            {
-              id: "verify",
-              title: "Verify the successful address reports device state",
-              risk: "read-only",
-            },
-          ],
+          steps,
         },
       },
       problems,

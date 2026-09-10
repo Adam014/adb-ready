@@ -68,6 +68,10 @@ export interface OperationPlanStep {
   id: string;
   title: string;
   risk: Risk;
+  when?: {
+    stepId: string;
+    outcome: "failure" | "success";
+  };
   executable?: string;
   args?: string[];
 }

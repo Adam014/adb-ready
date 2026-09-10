@@ -547,6 +547,43 @@ describe("wireless target commands", () => {
     expect(requests.filter(({ args }) => args?.includes("connect"))).toHaveLength(1);
   });
 
+  test("describes every conditional fallback with exact argv in a dry-run plan", async () => {
+    const primary = "192.168.1.20:37123";
+    const alternate = "[2001:db8::20]:37123";
+    const execution = await runConnect(
+      primary,
+      {
+        dryRun: true,
+        endpointWasDiscovered: true,
+        discoveredEndpointCandidates: [primary, alternate],
+      },
+      deterministicDependencies(fixtureRunner({})),
+    );
+
+    expect(execution.result.data).toMatchObject({
+      plan: {
+        steps: [
+          { id: "connect", args: ["connect", primary] },
+          {
+            id: "verify",
+            when: { stepId: "connect", outcome: "success" },
+            args: ["-s", primary, "get-state"],
+          },
+          {
+            id: "connect-alternate-1",
+            when: { stepId: "connect", outcome: "failure" },
+            args: ["connect", alternate],
+          },
+          {
+            id: "verify-alternate-1",
+            when: { stepId: "connect-alternate-1", outcome: "success" },
+            args: ["-s", alternate, "get-state"],
+          },
+        ],
+      },
+    });
+  });
+
   test("passes the pairing code only over stdin and never returns it", async () => {
     const requests: ProcessRequest[] = [];
     const execution = await runPair(
