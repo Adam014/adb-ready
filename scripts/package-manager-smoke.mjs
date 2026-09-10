@@ -5,6 +5,8 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { xSync } from "tinyexec";
 
+import { readNpmPackEntry } from "./lib/npm-pack-report.mjs";
+
 const root = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const temporary = await mkdtemp(path.join(tmpdir(), "adb-ready-package-managers-"));
@@ -91,7 +93,7 @@ try {
     "npm pack",
   );
   const report = JSON.parse(packed.stdout);
-  const filename = report[0]?.filename;
+  const filename = readNpmPackEntry(report, manifest.name).filename;
   if (typeof filename !== "string") {
     throw new Error("npm pack did not return an artifact filename");
   }

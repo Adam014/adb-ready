@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { xSync } from "tinyexec";
 
+import { readNpmPackEntry } from "./lib/npm-pack-report.mjs";
+
 const root = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
@@ -21,9 +23,14 @@ if (packed.exitCode !== 0) {
   throw new Error(`npm pack failed: ${packed.stderr.trim()}`);
 }
 
-/** @type {Array<{ files?: Array<{ path: string }> }>} */
 const report = JSON.parse(packed.stdout);
-const files = report[0]?.files?.map((entry) => entry.path).sort();
+const packEntry = readNpmPackEntry(report, manifest.name);
+const files = Array.isArray(packEntry.files)
+  ? packEntry.files
+      .map((entry) => (typeof entry === "object" && entry !== null ? entry.path : undefined))
+      .filter((entry) => typeof entry === "string")
+      .sort()
+  : undefined;
 if (!Array.isArray(files)) {
   throw new Error("npm pack did not return a file inventory");
 }
