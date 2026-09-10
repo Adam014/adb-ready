@@ -43,6 +43,7 @@ export interface CommandConfig {
   rememberedSerial?: string;
   rememberedOnly?: boolean;
   dryRun?: boolean;
+  endpointWasDiscovered?: boolean;
 }
 
 export interface CommandDependencies {
@@ -608,12 +609,13 @@ async function resolveWirelessEndpoint(
   serviceType: "connect" | "pairing",
   commandId: string,
   signal: AbortSignal | undefined,
+  requestedWasDiscovered = false,
 ): Promise<{ endpoint?: string; discovered: boolean; problem?: Problem }> {
   if (requested !== undefined) {
     const endpoint = parseAdbNetworkEndpoint(requested);
     return endpoint === undefined
       ? {
-          discovered: false,
+          discovered: requestedWasDiscovered,
           problem: commandProblem(
             ProblemCode.InvalidEndpoint,
             "input.endpoint",
@@ -623,7 +625,7 @@ async function resolveWirelessEndpoint(
             [{ source: "input", field: "endpoint", value: requested }],
           ),
         }
-      : { endpoint: endpoint.serial, discovered: false };
+      : { endpoint: endpoint.serial, discovered: requestedWasDiscovered };
   }
 
   const mdnsDiscovery = await discoverMdns(client, undefined, signal);
@@ -752,6 +754,7 @@ export async function runConnect(
     "connect",
     context.commandId,
     signal,
+    config.endpointWasDiscovered,
   );
   if (resolution.problem !== undefined || resolution.endpoint === undefined) {
     if (resolution.problem !== undefined) {
@@ -897,6 +900,7 @@ export async function runPair(
     "pairing",
     context.commandId,
     signal,
+    config.endpointWasDiscovered,
   );
   if (resolution.problem !== undefined || resolution.endpoint === undefined) {
     if (resolution.problem !== undefined) {

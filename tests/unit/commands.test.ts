@@ -471,6 +471,24 @@ describe("wireless target commands", () => {
     expect(several.result.problems[0]?.code).toBe(ProblemCode.MultipleWirelessEndpoints);
   });
 
+  test("preserves discovery provenance when an interactive caller supplies its chosen endpoint", async () => {
+    const execution = await runConnect(
+      "192.168.1.20:37123",
+      { endpointWasDiscovered: true },
+      deterministicDependencies(
+        fixtureRunner({
+          connect: "connected to 192.168.1.20:37123\n",
+          "get-state": "device\n",
+        }),
+      ),
+    );
+
+    expect(execution.result.data).toMatchObject({
+      endpoint: "192.168.1.20:37123",
+      discovered: true,
+    });
+  });
+
   test("passes the pairing code only over stdin and never returns it", async () => {
     const requests: ProcessRequest[] = [];
     const execution = await runPair(

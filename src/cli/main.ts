@@ -516,6 +516,7 @@ async function runCliInternal(
     ...(options.dryRun ? { dryRun: true } : {}),
   };
   let endpoint = options.endpoint;
+  let endpointWasDiscovered = false;
   if (
     endpoint === undefined &&
     errorCapabilities.interactive &&
@@ -555,15 +556,22 @@ async function runCliInternal(
     const services = discovery.result.data.services;
     if (services.length === 1) {
       endpoint = services[0]?.endpoint.serial;
+      endpointWasDiscovered = endpoint !== undefined;
     } else {
       const chosen = await selectOne({
         title:
           options.command === "pair" ? "Choose a pairing endpoint" : "Choose a wireless target",
-        options: services.map((service) => ({
-          value: service.endpoint.serial,
-          label: service.endpoint.serial,
-          description: `${service.instance} · ${service.rawServiceType}`,
-        })),
+        options: services.map((service) => {
+          const identity = service.givenName ?? service.deviceModel;
+          return {
+            value: service.endpoint.serial,
+            label: identity ?? service.endpoint.serial,
+            description:
+              identity === undefined
+                ? `${service.instance} · ${service.rawServiceType}`
+                : `${service.endpoint.serial} · ${service.rawServiceType}`,
+          };
+        }),
         input: io.input,
         sink: io.error,
         capabilities: errorCapabilities,
@@ -591,6 +599,7 @@ async function runCliInternal(
         return failed.exitCode;
       }
       endpoint = chosen.value;
+      endpointWasDiscovered = true;
     }
   }
   let pairingCode: string | undefined;
@@ -657,9 +666,20 @@ async function runCliInternal(
     } else if (options.command === "devices") {
       execution = await runDevices(config, commandDependencies, signal);
     } else if (options.command === "connect") {
-      execution = await runConnect(endpoint, config, commandDependencies, signal);
+      execution = await runConnect(
+        endpoint,
+        endpointWasDiscovered ? { ...config, endpointWasDiscovered: true } : config,
+        commandDependencies,
+        signal,
+      );
     } else {
-      execution = await runPair(endpoint, pairingCode ?? "", config, commandDependencies, signal);
+      execution = await runPair(
+        endpoint,
+        pairingCode ?? "",
+        endpointWasDiscovered ? { ...config, endpointWasDiscovered: true } : config,
+        commandDependencies,
+        signal,
+      );
     }
   } finally {
     progress?.dispose();
