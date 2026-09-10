@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { locateAdb } from "../../src/platform/executable.js";
+import { canSpawnWithoutShell, locateAdb } from "../../src/platform/executable.js";
 import { runProcess } from "../../src/platform/process-runner.js";
 import { detectRuntime } from "../../src/platform/runtime.js";
 
@@ -223,6 +223,16 @@ describe("runProcess", () => {
 });
 
 describe("locateAdb", () => {
+  test("never resolves Windows command shims that require an implicit shell", () => {
+    expect(canSpawnWithoutShell("adb.exe", "win32")).toBe(true);
+    expect(canSpawnWithoutShell("adb.COM", "win32")).toBe(true);
+    expect(canSpawnWithoutShell("adb", "win32")).toBe(true);
+    expect(canSpawnWithoutShell("adb.cmd", "win32")).toBe(false);
+    expect(canSpawnWithoutShell("adb.bat", "win32")).toBe(false);
+    expect(canSpawnWithoutShell("adb.ps1", "win32")).toBe(false);
+    expect(canSpawnWithoutShell("adb.cmd", "linux")).toBe(true);
+  });
+
   test("prefers an executable from PATH", async () => {
     const directory = await temporaryDirectory();
     const executable = path.join(directory, process.platform === "win32" ? "adb.exe" : "adb");

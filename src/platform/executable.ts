@@ -25,7 +25,15 @@ function windowsExtensions(env: NodeJS.ProcessEnv): string[] {
   return value
     .split(";")
     .map((extension) => extension.trim().toLowerCase())
-    .filter(Boolean);
+    .filter((extension) => extension === ".com" || extension === ".exe");
+}
+
+export function canSpawnWithoutShell(name: string, platform: NodeJS.Platform): boolean {
+  if (platform !== "win32") {
+    return true;
+  }
+  const extension = path.win32.extname(name).toLowerCase();
+  return extension === "" || extension === ".com" || extension === ".exe";
 }
 
 function candidateNames(name: string, platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string[] {
@@ -53,6 +61,9 @@ async function resolveFromPath(
       continue;
     }
     for (const candidateName of candidateNames(name, platform, env)) {
+      if (!canSpawnWithoutShell(candidateName, platform)) {
+        continue;
+      }
       const candidate = pathApi.resolve(directory.replace(/^"|"$/g, ""), candidateName);
       if (await isExecutable(candidate, platform)) {
         return candidate;
@@ -100,6 +111,9 @@ export async function locateAdb(
       return undefined;
     }
     if (pathApi.isAbsolute(explicit) || explicit.includes("/") || explicit.includes("\\")) {
+      if (!canSpawnWithoutShell(explicit, platform)) {
+        return undefined;
+      }
       const candidate = pathApi.resolve(explicit);
       return (await isExecutable(candidate, platform)) ? candidate : undefined;
     }
