@@ -470,6 +470,33 @@ describe("wireless target commands", () => {
     ]);
   });
 
+  test("verifies and returns the canonical endpoint confirmed by ADB", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runConnect(
+      "pixel.local:37123",
+      {},
+      deterministicDependencies(
+        fixtureRunner(
+          {
+            connect: "connected to 192.168.1.20:37123\n",
+            "get-state": "device\n",
+            "hardware-serial:192.168.1.20:37123": "PHONE-1\n",
+          },
+          requests,
+        ),
+      ),
+    );
+
+    expect(execution.result.data).toMatchObject({
+      endpoint: "192.168.1.20:37123",
+      serial: "192.168.1.20:37123",
+      hardwareSerial: "PHONE-1",
+    });
+    expect(requests.find(({ args }) => args?.includes("get-state"))?.args).toContain(
+      "192.168.1.20:37123",
+    );
+  });
+
   test("uses one discovered connect service but refuses to guess among several", async () => {
     const one = await runConnect(
       undefined,

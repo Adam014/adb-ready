@@ -889,7 +889,14 @@ export async function runConnect(
       observation.value.status === "connected" ||
       observation.value.status === "already-connected"
     ) {
-      connected = { endpoint: candidate, status: observation.value.status };
+      const confirmedEndpoint =
+        observation.value.endpoint === undefined
+          ? undefined
+          : parseAdbNetworkEndpoint(observation.value.endpoint)?.serial;
+      connected = {
+        endpoint: confirmedEndpoint ?? candidate,
+        status: observation.value.status,
+      };
       break;
     }
     lastConnectionProblem = commandProblem(
