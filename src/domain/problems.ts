@@ -44,6 +44,7 @@ export const ProblemCode = {
   PackageManagerNotFound: "PACKAGE_MANAGER_NOT_FOUND",
   ChildProcessFailed: "CHILD_PROCESS_FAILED",
   HookFailed: "HOOK_FAILED",
+  SessionRecoveryFailed: "SESSION_RECOVERY_FAILED",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {

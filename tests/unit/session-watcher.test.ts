@@ -91,6 +91,26 @@ describe("watchSession", () => {
     expect(observations).toBe(0);
     expect(summary.failed).toBeFalse();
   });
+
+  test("converts unexpected observer failures into a bounded watch failure", async () => {
+    const events: Array<{ type: string; detail?: string }> = [];
+    const summary = await watchSession({
+      signal: new AbortController().signal,
+      intervalMs: 1,
+      sleep: async () => true,
+      observe: async () => {
+        throw new Error("probe crashed");
+      },
+      recover: async () => ({ changedTarget: false }),
+      onEvent: ({ type, detail }) =>
+        events.push({ type, ...(detail === undefined ? {} : { detail }) }),
+    });
+
+    expect(summary).toMatchObject({ checks: 0, failed: true });
+    expect(events).toEqual([
+      { type: "watch.failed", detail: "Health operation failed: probe crashed" },
+    ]);
+  });
 });
 
 describe("abortableDelay", () => {

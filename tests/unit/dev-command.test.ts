@@ -393,6 +393,143 @@ describe("runDev", () => {
     expect(execution.result.data?.ports.cleaned).toBe(true);
   });
 
+  test("restores a lost reverse mapping while the development child stays alive", async () => {
+    let mapped = false;
+    let childStarted = false;
+    let recoveryAdds = 0;
+    let resolveChild: ((value: ProcessResult) => void) | undefined;
+    let sleepCalls = 0;
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("get-state")) return result(request, { stdout: "device\n" });
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        if (childStarted) recoveryAdds += 1;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        if (childStarted && recoveryAdds > 0 && mapped) {
+          resolveChild?.(result({ executable: "long-running", args: [] }));
+        }
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      if (request.executable === "long-running") {
+        childStarted = true;
+        mapped = false;
+        return await new Promise<ProcessResult>((resolve) => {
+          resolveChild = resolve;
+        });
+      }
+      return result(request);
+    });
+    deps.sleep = async (_milliseconds, signal) => {
+      sleepCalls += 1;
+      if (sleepCalls <= 2) return true;
+      if (signal.aborted) return false;
+      return await new Promise<boolean>((resolve) => {
+        signal.addEventListener("abort", () => resolve(false), { once: true });
+      });
+    };
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "long-running", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+        watchIntervalMs: 1,
+        recovery: { initialDelayMs: 1, maxDelayMs: 1 },
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(recoveryAdds).toBe(1);
+    expect(execution.result.data?.recovery).toMatchObject({
+      checks: 2,
+      degradations: 1,
+      recoveryAttempts: 1,
+      recoveries: 1,
+      failed: false,
+    });
+    expect(execution.result.data?.journal.events.map(({ type }) => type)).toContain(
+      "recovery.completed",
+    );
+  });
+
+  test("stops the owned child after the bounded recovery budget is exhausted", async () => {
+    let mapped = false;
+    let childStarted = false;
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("get-state")) return result(request, { stdout: "device\n" });
+      if (args.includes("--no-rebind")) {
+        if (childStarted) return result(request, { exitCode: 1, stderr: "cannot bind\n" });
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      if (request.executable === "long-running") {
+        childStarted = true;
+        mapped = false;
+        if (request.signal?.aborted === true) {
+          return result(request, { exitCode: null, signal: "SIGTERM", aborted: true });
+        }
+        return await new Promise<ProcessResult>((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+            { once: true },
+          );
+        });
+      }
+      return result(request);
+    });
+    deps.sleep = async () => true;
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "long-running", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+        watchIntervalMs: 1,
+        recovery: { maxAttempts: 2, initialDelayMs: 1, maxDelayMs: 1 },
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.result.data).toMatchObject({
+      status: "failed",
+      recovery: { recoveryAttempts: 2, recoveries: 0, failed: true },
+      child: { exitCode: null, signal: "SIGTERM" },
+    });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.SessionRecoveryFailed }),
+    );
+    expect(execution.result.problems).not.toContainEqual(
+      expect.objectContaining({ code: ProblemCode.ChildProcessFailed }),
+    );
+  });
+
   test("fails visibly when an owned reverse mapping cannot be cleaned", async () => {
     let mapped = false;
     const execution = await runDev(

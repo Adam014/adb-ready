@@ -74,6 +74,12 @@ export function sessionHealthy(health: SessionHealth): boolean {
   );
 }
 
+function failureDetail(error: unknown): string {
+  return error instanceof Error && error.message.trim() !== ""
+    ? `Health operation failed: ${error.message}`
+    : "Health operation failed unexpectedly.";
+}
+
 export async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<boolean> {
   positiveInteger(milliseconds, "milliseconds");
   if (signal.aborted) return false;
@@ -114,7 +120,14 @@ export async function watchSession(options: SessionWatchOptions): Promise<Sessio
 
   while (!options.signal.aborted) {
     if (!(await sleep(intervalMs, options.signal))) break;
-    const health = await options.observe(options.signal);
+    let health: SessionHealth;
+    try {
+      health = await options.observe(options.signal);
+    } catch (error) {
+      summary.failed = true;
+      options.onEvent?.({ type: "watch.failed", detail: failureDetail(error) });
+      return summary;
+    }
     summary.checks += 1;
     summary.lastHealth = health;
     options.onEvent?.({ type: "health.checked", health });
@@ -137,10 +150,27 @@ export async function watchSession(options: SessionWatchOptions): Promise<Sessio
       summary.recoveryAttempts += 1;
       options.onEvent?.({ type: "recovery.started", health: lastHealth, attempt });
       if (!(await sleep(recoveryDelayMs(policy, attempt), options.signal))) break;
-      const outcome = await options.recover(lastHealth, attempt, options.signal);
+      let outcome: RecoveryOutcome;
+      try {
+        outcome = await options.recover(lastHealth, attempt, options.signal);
+      } catch (error) {
+        outcome = { changedTarget: false, detail: failureDetail(error) };
+      }
       if (outcome.changedTarget) summary.targetChanges += 1;
       if (options.signal.aborted) break;
-      const verified = await options.observe(options.signal);
+      let verified: SessionHealth;
+      try {
+        verified = await options.observe(options.signal);
+      } catch (error) {
+        machine.transition("degraded", "recovery verification failed unexpectedly");
+        options.onEvent?.({
+          type: "recovery.failed",
+          health: lastHealth,
+          attempt,
+          detail: failureDetail(error),
+        });
+        continue;
+      }
       summary.checks += 1;
       summary.lastHealth = verified;
       options.onEvent?.({ type: "health.checked", health: verified, attempt });

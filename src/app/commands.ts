@@ -50,6 +50,9 @@ import {
   type TcpPortMapping,
   tcpEndpoint,
 } from "../ports/model.js";
+import type { RecoveryPolicyInput } from "../session/recovery-policy.js";
+import { planTargetAcquisition } from "../session/target-acquisition.js";
+import { type SessionHealth, type SessionWatchSummary, watchSession } from "../session/watcher.js";
 import { type AndroidTarget, buildTargetInventory, isStableAdbSerial } from "../target/model.js";
 import { type SelectedTarget, selectTarget } from "../target/selection.js";
 
@@ -78,6 +81,7 @@ export interface CommandDependencies {
   runtime?: () => RuntimeInfo;
   detectProject?: typeof detectProject;
   locateExecutable?: typeof locateExecutable;
+  sleep?: (milliseconds: number, signal: AbortSignal) => Promise<boolean>;
 }
 
 export interface CommandExecution<T> {
@@ -1572,6 +1576,9 @@ export interface DevOptions {
   childStdin?: "ignore" | "inherit";
   onChildLine?: (stream: "stderr" | "stdout", line: string) => void;
   hooks?: Partial<Record<DevHookEvent, readonly DevHook[]>>;
+  watch?: boolean;
+  watchIntervalMs?: number;
+  recovery?: RecoveryPolicyInput;
 }
 
 export interface DevData {
@@ -1613,6 +1620,7 @@ export interface DevData {
     completed: number;
     failed: number;
   };
+  recovery: SessionWatchSummary;
 }
 
 async function regularFile(file: string): Promise<boolean> {
@@ -1794,8 +1802,8 @@ export async function runDev(
     problems.push(targetSelectionProblem(selection, correlation));
     return complete(null);
   }
-  const selected = selection.selection;
-  const target = targetForAdb(selected);
+  let selected = selection.selection;
+  let target = targetForAdb(selected);
   bus.emit({
     type: "target.selected",
     source: "target",
@@ -1924,7 +1932,7 @@ export async function runDev(
     cwd: redactedPath(commandCwd),
     envKeys: [...new Set(["ANDROID_SERIAL", ...Object.keys(childCommand.env ?? {})])].sort(),
   };
-  const baseData = {
+  const baseData = () => ({
     sessionId,
     adbPath: redactedPath(executable),
     selected,
@@ -1942,18 +1950,26 @@ export async function runDev(
           },
         }),
     command: commandData,
+  });
+  let recoverySummary: SessionWatchSummary = {
+    checks: 0,
+    degradations: 0,
+    recoveryAttempts: 0,
+    recoveries: 0,
+    targetChanges: 0,
+    failed: false,
   };
   const hookRuns: HookRun[] = [];
   const hookSummary = (): DevData["hooks"] => ({
     completed: hookRuns.filter(({ ok }) => ok).length,
     failed: hookRuns.filter(({ ok }) => !ok).length,
   });
-  const hookEnvironment = {
+  const hookEnvironment = () => ({
     ANDROID_SERIAL: selected.transport.serial,
     ADB_READY_SESSION_ID: sessionId,
     ADB_READY_PRESET: preset,
     ADB_READY_TARGET_ID: selected.target.id,
-  };
+  });
   const runHookPhase = async (
     event: DevHookEvent,
     extraEnvironment: Record<string, string> = {},
@@ -1963,7 +1979,7 @@ export async function runDev(
       hooks: options.hooks ?? {},
       event,
       projectRoot: project.root,
-      environment: { ...hookEnvironment, ...extraEnvironment },
+      environment: { ...hookEnvironment(), ...extraEnvironment },
       bus,
       correlation: targetCorrelation,
       ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
@@ -2052,7 +2068,7 @@ export async function runDev(
       correlation: targetCorrelation,
     });
     return complete({
-      ...baseData,
+      ...baseData(),
       status: "planned",
       ports: {
         requested: normalizedPorts.mappings,
@@ -2061,13 +2077,14 @@ export async function runDev(
         cleaned: false,
       },
       hooks: hookSummary(),
+      recovery: recoverySummary,
       plan: { schemaVersion: SCHEMA_VERSION, dryRun: true, steps },
     });
   }
 
   let cleaned = false;
   const failedData = (): Omit<DevData, "journal"> => ({
-    ...baseData,
+    ...baseData(),
     status: "failed",
     ports: {
       requested: normalizedPorts.mappings,
@@ -2076,6 +2093,7 @@ export async function runDev(
       cleaned,
     },
     hooks: hookSummary(),
+    recovery: recoverySummary,
   });
 
   if (!(await runHookPhase("beforeDev")) || !(await runHookPhase("onTargetReady"))) {
@@ -2276,7 +2294,253 @@ export async function runDev(
   });
   const readyHooksSucceeded = await runHookPhase("onReady");
   if (!readyHooksSucceeded) childController.abort();
+
+  const watchController = new AbortController();
+  if (signal?.aborted === true || !readyHooksSucceeded) watchController.abort();
+  const abortWatcher = () => watchController.abort();
+  signal?.addEventListener("abort", abortWatcher, { once: true });
+  const observeSession = async (watchSignal: AbortSignal): Promise<SessionHealth> => {
+    const state = await client.getState(target.serial, watchSignal);
+    if (!processSucceeded(state.process) || state.value !== "device") {
+      return {
+        targetReady: false,
+        targetSerial: target.serial,
+        missingPorts: [...normalizedPorts.mappings],
+        conflictingPorts: [],
+        detail: `Target ${target.serial} is not ready.`,
+      };
+    }
+    const mappings = await client.listPortMappings(target, "reverse", watchSignal);
+    if (!processSucceeded(mappings.process)) {
+      return {
+        targetReady: true,
+        targetSerial: target.serial,
+        missingPorts: [...normalizedPorts.mappings],
+        conflictingPorts: [],
+        detail: "Reverse mappings could not be inspected.",
+      };
+    }
+    const current = mappings.value.map((mapping) => normalizePortMapping("reverse", mapping));
+    const conflictingPorts = normalizedPorts.mappings.filter((requested) =>
+      current.some(
+        (mapping) => mapping.device === requested.device && mapping.host !== requested.host,
+      ),
+    );
+    const missingPorts = normalizedPorts.mappings.filter(
+      (requested) =>
+        !current.some(
+          (mapping) => mapping.device === requested.device && mapping.host === requested.host,
+        ),
+    );
+    return {
+      targetReady: true,
+      targetSerial: target.serial,
+      missingPorts,
+      conflictingPorts,
+      ...(conflictingPorts.length === 0
+        ? {}
+        : { detail: "A required device port is owned by another mapping." }),
+    };
+  };
+  const recoverSession = async (
+    health: SessionHealth,
+    _attempt: number,
+    watchSignal: AbortSignal,
+  ): Promise<{ changedTarget: boolean; detail?: string }> => {
+    const previousSerial = target.serial;
+    if (!health.targetReady) {
+      const visible = await discoveryClient.devices(watchSignal);
+      if (!processSucceeded(visible.process)) {
+        return { changedTarget: false, detail: "ADB target inventory is unavailable." };
+      }
+      const refreshed = await inspectTargets(
+        discoveryClient,
+        visible.value,
+        context.commandId,
+        watchSignal,
+      );
+      const remembered = selectTarget(refreshed.targets, {
+        rememberedSerial: previousSerial,
+        ...(selected.target.hardwareSerial === undefined
+          ? {}
+          : { rememberedHardwareSerial: selected.target.hardwareSerial }),
+        rememberedOnly: true,
+      });
+      if (remembered.kind === "selected") {
+        selected = remembered.selection;
+        target = targetForAdb(selected);
+      } else {
+        const acquisition = planTargetAcquisition({
+          remembered: {
+            serial: previousSerial,
+            ...(selected.target.hardwareSerial === undefined
+              ? {}
+              : { hardwareSerial: selected.target.hardwareSerial }),
+          },
+          services: refreshed.discovery.mdns.services,
+        });
+        if (acquisition.kind !== "connect") {
+          return {
+            changedTarget: false,
+            detail:
+              acquisition.kind === "ambiguous"
+                ? "More than one wireless endpoint matches the recovery request."
+                : "No safe endpoint is available for recovery.",
+          };
+        }
+        const safeCandidates = acquisition.candidates.filter(
+          (candidate) =>
+            candidate === previousSerial || selected.target.hardwareSerial !== undefined,
+        );
+        let recoveredSelection: SelectedTarget | undefined;
+        for (const endpoint of safeCandidates) {
+          const connected = await discoveryClient.connect(endpoint, watchSignal);
+          if (
+            !processSucceeded(connected.process) ||
+            (connected.value.status !== "connected" &&
+              connected.value.status !== "already-connected")
+          ) {
+            continue;
+          }
+          const verified = await discoveryClient.getState(endpoint, watchSignal);
+          if (!processSucceeded(verified.process) || verified.value !== "device") continue;
+          const hardware = await discoveryClient.getHardwareSerial(endpoint, watchSignal);
+          const hardwareSerial = processSucceeded(hardware.process)
+            ? normalizedHardwareSerial(hardware.value)
+            : undefined;
+          if (
+            selected.target.hardwareSerial !== undefined &&
+            hardwareSerial !== selected.target.hardwareSerial
+          ) {
+            continue;
+          }
+          const afterConnect = await discoveryClient.devices(watchSignal);
+          if (!processSucceeded(afterConnect.process)) continue;
+          const afterInspection = await inspectTargets(
+            discoveryClient,
+            afterConnect.value,
+            context.commandId,
+            watchSignal,
+          );
+          const result = selectTarget(afterInspection.targets, {
+            rememberedSerial: endpoint,
+            ...(selected.target.hardwareSerial === undefined
+              ? {}
+              : { rememberedHardwareSerial: selected.target.hardwareSerial }),
+            rememberedOnly: true,
+          });
+          if (result.kind === "selected") {
+            recoveredSelection = result.selection;
+            break;
+          }
+        }
+        if (recoveredSelection === undefined) {
+          return { changedTarget: false, detail: "The selected target could not be reconnected." };
+        }
+        selected = recoveredSelection;
+        target = targetForAdb(selected);
+      }
+    }
+
+    const listedAfterRecovery = await client.listPortMappings(target, "reverse", watchSignal);
+    if (!processSucceeded(listedAfterRecovery.process)) {
+      return { changedTarget: target.serial !== previousSerial, detail: "Ports are unavailable." };
+    }
+    const currentMappings = listedAfterRecovery.value.map((mapping) =>
+      normalizePortMapping("reverse", mapping),
+    );
+    for (const mapping of normalizedPorts.mappings) {
+      const occupying = currentMappings.find((item) => item.device === mapping.device);
+      if (occupying !== undefined && occupying.host !== mapping.host) {
+        return {
+          changedTarget: target.serial !== previousSerial,
+          detail: `Recovery refused to replace ${mapping.device}.`,
+        };
+      }
+      if (occupying !== undefined) continue;
+      const added = await client.addPortMapping(
+        target,
+        "reverse",
+        mapping.device,
+        mapping.host,
+        watchSignal,
+      );
+      if (!processSucceeded(added.process)) {
+        return {
+          changedTarget: target.serial !== previousSerial,
+          detail: `Recovery could not restore ${mapping.device}.`,
+        };
+      }
+      if (!created.some((item) => item.device === mapping.device && item.host === mapping.host)) {
+        created.push(mapping);
+      }
+    }
+    return {
+      changedTarget: target.serial !== previousSerial,
+      detail:
+        target.serial === previousSerial
+          ? "Session resources restored."
+          : `Target transport changed to ${target.serial}.`,
+    };
+  };
+  const watchPromise =
+    options.watch === false || !readyHooksSucceeded
+      ? Promise.resolve(recoverySummary)
+      : watchSession({
+          signal: watchController.signal,
+          observe: observeSession,
+          recover: recoverSession,
+          ...(options.watchIntervalMs === undefined ? {} : { intervalMs: options.watchIntervalMs }),
+          ...(options.recovery === undefined ? {} : { policy: options.recovery }),
+          ...(dependencies.sleep === undefined ? {} : { sleep: dependencies.sleep }),
+          onEvent: (event) => {
+            bus.emit({
+              type: event.type,
+              source: "recovery",
+              severity:
+                event.type === "watch.failed" || event.type === "recovery.failed"
+                  ? "error"
+                  : event.type === "session.degraded"
+                    ? "warning"
+                    : "info",
+              message: event.detail ?? event.type,
+              correlation: { ...correlation, targetId: selected.target.id },
+              data: {
+                ...(event.attempt === undefined ? {} : { attempt: event.attempt }),
+                ...(event.health === undefined
+                  ? {}
+                  : {
+                      health: {
+                        targetReady: event.health.targetReady,
+                        targetSerial: event.health.targetSerial,
+                        missingPorts: event.health.missingPorts.map(({ device, host }) => ({
+                          device,
+                          host,
+                        })),
+                        conflictingPorts: event.health.conflictingPorts.map(({ device, host }) => ({
+                          device,
+                          host,
+                        })),
+                        ...(event.health.detail === undefined
+                          ? {}
+                          : { detail: event.health.detail }),
+                      },
+                    }),
+              },
+            });
+          },
+        });
+  const firstCompletion = await Promise.race([
+    childPromise.then(() => "child" as const),
+    watchPromise.then((summary) =>
+      summary.failed ? ("watch-failed" as const) : ("watch-stopped" as const),
+    ),
+  ]);
+  if (firstCompletion === "watch-failed") childController.abort();
   const child = await childPromise;
+  watchController.abort();
+  recoverySummary = await watchPromise;
+  signal?.removeEventListener("abort", abortWatcher);
   signal?.removeEventListener("abort", abortChild);
   childStdout.flush();
   childStderr.flush();
@@ -2300,6 +2564,47 @@ export async function runDev(
     false,
   );
   await cleanup();
+  if (recoverySummary.failed) {
+    problems.push(
+      commandProblem(
+        ProblemCode.SessionRecoveryFailed,
+        "session.recovery",
+        "The development session could not be recovered safely.",
+        "ADB Ready exhausted the bounded recovery budget and stopped its child process.",
+        context.commandId,
+        [
+          {
+            source: "session.watcher",
+            field: "recoveryAttempts",
+            value: recoverySummary.recoveryAttempts,
+          },
+          {
+            source: "session.watcher",
+            field: "lastHealth",
+            value:
+              recoverySummary.lastHealth === undefined
+                ? null
+                : {
+                    targetReady: recoverySummary.lastHealth.targetReady,
+                    targetSerial: recoverySummary.lastHealth.targetSerial,
+                    missingPorts: recoverySummary.lastHealth.missingPorts.map(
+                      ({ device, host }) => ({
+                        device,
+                        host,
+                      }),
+                    ),
+                    conflictingPorts: recoverySummary.lastHealth.conflictingPorts.map(
+                      ({ device, host }) => ({ device, host }),
+                    ),
+                    ...(recoverySummary.lastHealth.detail === undefined
+                      ? {}
+                      : { detail: recoverySummary.lastHealth.detail }),
+                  },
+          },
+        ],
+      ),
+    );
+  }
   if (child.aborted && signal?.aborted === true) {
     problems.push(
       commandProblem(
@@ -2310,7 +2615,7 @@ export async function runDev(
         context.commandId,
       ),
     );
-  } else if (!processSucceeded(child) && readyHooksSucceeded) {
+  } else if (!processSucceeded(child) && readyHooksSucceeded && !recoverySummary.failed) {
     problems.push(
       commandProblem(
         ProblemCode.ChildProcessFailed,
@@ -2334,8 +2639,8 @@ export async function runDev(
     correlation: targetCorrelation,
   });
   const execution = complete({
-    ...baseData,
-    status: "completed",
+    ...baseData(),
+    status: problems.some(({ severity }) => severity === "error") ? "failed" : "completed",
     ports: {
       requested: normalizedPorts.mappings,
       created,
@@ -2350,6 +2655,7 @@ export async function runDev(
       stderrTruncated: child.stderrTruncated,
     },
     hooks: hookSummary(),
+    recovery: recoverySummary,
   });
   if (problems.some(({ code }) => code === ProblemCode.ChildProcessFailed)) {
     execution.exitCode = preservedChildExitCode(child) ?? execution.exitCode;
