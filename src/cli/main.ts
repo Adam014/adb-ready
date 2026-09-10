@@ -166,7 +166,11 @@ Log options:
   --package NAME         Resolve and filter the currently running app process
   --pid PID              Filter one explicit process ID
   --tag TAG              Include a log tag; repeat for more tags
+  --exclude-tag TAG      Suppress a log tag; repeat for more tags
   --level PRIORITY       V, D, I, W, E, F, A, or S (default: I)
+  --buffer NAME          Read main, system, or crash; repeat for more
+  --tail COUNT           Start with the most recent record count
+  --since TIMESTAMP      Start at an Android logcat timestamp
   --dump                 Read the current buffer and exit instead of following
   --max-records COUNT    Bound records retained in the final result
 `,
@@ -794,7 +798,7 @@ async function runCliInternal(
       ? await selectDevice(inventory, io, errorCapabilities, lastTarget, signal)
       : inventory;
     if (!selected.result.ok || selected.result.data?.selected === undefined) {
-      if (shouldPrompt || selectable.length === 0) {
+      if (shouldPrompt) {
         renderResult(
           { ...selected.result, command: options.command },
           {
@@ -977,7 +981,11 @@ async function runCliInternal(
           ...(options.logPackage === undefined ? {} : { packageName: options.logPackage }),
           ...(options.logPid === undefined ? {} : { pid: options.logPid }),
           ...(options.logTags === undefined ? {} : { tags: options.logTags }),
+          ...(options.logExcludeTags === undefined ? {} : { excludeTags: options.logExcludeTags }),
           ...(options.logPriority === undefined ? {} : { minimumPriority: options.logPriority }),
+          ...(options.logBuffers === undefined ? {} : { buffers: options.logBuffers }),
+          ...(options.logSince === undefined ? {} : { since: options.logSince }),
+          ...(options.logTail === undefined ? {} : { tail: options.logTail }),
           ...(options.logDump === undefined ? {} : { dump: options.logDump }),
           ...(options.logMaxRecords === undefined ? {} : { maxRecords: options.logMaxRecords }),
           ...(options.format === "human" && !options.quiet

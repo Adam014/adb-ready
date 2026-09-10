@@ -40,6 +40,7 @@ import {
   targetInventoryProblems,
   targetSelectionProblem,
 } from "../domain/problems.js";
+import { classifyLogRecord, type LogFinding } from "../logs/classifier.js";
 import { locateAdb, locateExecutable } from "../platform/executable.js";
 import { type ProcessResult, type ProcessRunner, runProcess } from "../platform/process-runner.js";
 import { detectRuntime, type RuntimeInfo } from "../platform/runtime.js";
@@ -1554,7 +1555,11 @@ export interface LogsOptions {
   packageName?: string;
   pid?: number;
   tags?: readonly string[];
+  excludeTags?: readonly string[];
   minimumPriority?: "A" | "D" | "E" | "F" | "I" | "S" | "V" | "W";
+  buffers?: readonly ("crash" | "main" | "system")[];
+  since?: string;
+  tail?: number;
   dump?: boolean;
   maxRecords?: number;
   onLine?: (line: string) => void;
@@ -1575,8 +1580,11 @@ export interface LogsData {
   selected: SelectedTarget;
   packageName?: string;
   pid?: number;
+  uid?: number;
+  buffers: string[];
   filters: string[];
   records: LogRecord[];
+  findings: Array<LogFinding & { message: string; priority?: string; tag?: string }>;
   dropped: number;
   process: {
     exitCode: number | null;
@@ -1645,7 +1653,21 @@ export async function runLogs(
     ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
   });
   let resolvedPid = options.pid;
+  let resolvedUid: number | undefined;
   if (resolvedPid === undefined && options.packageName !== undefined) {
+    const packages = await client.shell(
+      target,
+      ["cmd", "package", "list", "packages", "-U", options.packageName],
+      signal,
+    );
+    const uidMatch =
+      processSucceeded(packages.process) && packages.value !== undefined
+        ? packages.value.match(/(?:^|\s)uid:(\d+)(?:\s|$)/u)
+        : null;
+    const uid = Number(uidMatch?.[1]);
+    if (Number.isSafeInteger(uid) && uid >= 0) resolvedUid = uid;
+  }
+  if (resolvedPid === undefined && resolvedUid === undefined && options.packageName !== undefined) {
     const pid = await client.shell(target, ["pidof", "-s", options.packageName], signal);
     const parsedPid = processSucceeded(pid.process) ? Number(pid.value) : Number.NaN;
     if (!Number.isSafeInteger(parsedPid) || parsedPid < 1) {
@@ -1667,6 +1689,34 @@ export async function runLogs(
     options.tags === undefined || options.tags.length === 0
       ? [`*:${priority}`]
       : [...options.tags.map((tag) => `${tag}:${priority}`), "*:S"];
+  for (const tag of options.excludeTags ?? []) {
+    filters.unshift(`${tag}:S`);
+  }
+  const buffers = [...new Set(options.buffers ?? [])];
+  if (options.tail !== undefined && (!Number.isSafeInteger(options.tail) || options.tail < 1)) {
+    problems.push(
+      commandProblem(
+        ProblemCode.LogcatFailed,
+        "input.logs.tail",
+        "The log tail count must be a positive integer.",
+        "Use --tail with a value of at least 1.",
+        context.commandId,
+      ),
+    );
+    return finish<LogsData>(context, null, problems);
+  }
+  if (options.tail !== undefined && options.since !== undefined) {
+    problems.push(
+      commandProblem(
+        ProblemCode.LogcatFailed,
+        "input.logs.window",
+        "Only one log start window can be selected.",
+        "Use either --tail or --since, not both.",
+        context.commandId,
+      ),
+    );
+    return finish<LogsData>(context, null, problems);
+  }
   const maxRecords = options.maxRecords ?? 2_000;
   if (!Number.isSafeInteger(maxRecords) || maxRecords < 1) {
     problems.push(
@@ -1681,6 +1731,8 @@ export async function runLogs(
     return finish<LogsData>(context, null, problems);
   }
   const records: LogRecord[] = [];
+  const findings: LogsData["findings"] = [];
+  const findingCodes = new Set<string>();
   let dropped = 0;
   const lines = new TextLineBuffer((raw) => {
     const safeRaw = redactText(raw).value;
@@ -1697,6 +1749,30 @@ export async function runLogs(
     while (records.length > maxRecords) {
       records.shift();
       dropped += 1;
+    }
+    const finding = classifyLogRecord(parsed, safeRaw);
+    if (finding !== undefined && !findingCodes.has(finding.code)) {
+      findingCodes.add(finding.code);
+      findings.push({
+        ...finding,
+        message: record.message,
+        ...(record.priority === undefined ? {} : { priority: record.priority }),
+        ...(record.tag === undefined ? {} : { tag: record.tag }),
+      });
+      context.bus.emit({
+        type: "log.problem",
+        source: "logcat",
+        severity: "error",
+        message: finding.summary,
+        correlation,
+        data: {
+          code: finding.code,
+          detail: finding.detail,
+          evidence: record.message,
+          ...(record.priority === undefined ? {} : { priority: record.priority }),
+          ...(record.tag === undefined ? {} : { tag: record.tag }),
+        },
+      });
     }
     context.bus.emit({
       type: "log.record",
@@ -1727,7 +1803,13 @@ export async function runLogs(
       "logcat",
       "-v",
       "threadtime",
-      ...(options.dump ? ["-d"] : []),
+      ...buffers.flatMap((buffer) => ["-b", buffer]),
+      ...(options.tail === undefined && options.since === undefined
+        ? options.dump
+          ? ["-d"]
+          : []
+        : [options.dump ? "-t" : "-T", String(options.tail ?? options.since)]),
+      ...(resolvedUid === undefined ? [] : [`--uid=${String(resolvedUid)}`]),
       ...(resolvedPid === undefined ? [] : [`--pid=${String(resolvedPid)}`]),
       ...filters,
     ],
@@ -1765,8 +1847,11 @@ export async function runLogs(
       selected,
       ...(options.packageName === undefined ? {} : { packageName: options.packageName }),
       ...(resolvedPid === undefined ? {} : { pid: resolvedPid }),
+      ...(resolvedUid === undefined ? {} : { uid: resolvedUid }),
+      buffers,
       filters,
       records,
+      findings,
       dropped,
       process: {
         exitCode: processResult.exitCode,
@@ -2490,21 +2575,27 @@ export async function runDev(
     return await complete(failedData());
   }
   const runner = dependencies.runner ?? runProcess;
-  const logController = new AbortController();
-  if (signal?.aborted) logController.abort();
-  const abortLogs = () => logController.abort();
+  let activeLogController: AbortController | undefined;
+  let activeLogPromise: Promise<ProcessResult> | undefined;
+  let logStreamFailed = false;
+  const logFindings = new Map<string, LogFinding & { evidence: string }>();
+  const abortLogs = () => activeLogController?.abort();
   signal?.addEventListener("abort", abortLogs, { once: true });
-  let logPromise: Promise<ProcessResult> | undefined;
-  if (options.logs !== false) {
+  const startLogStream = (): void => {
+    if (options.logs === false || signal?.aborted === true) return;
+    const controller = new AbortController();
+    activeLogController = controller;
+    logStreamFailed = false;
     const logLines = new TextLineBuffer((raw) => {
       const parsed = parseLogcatThreadtimeLine(raw);
       const safeRaw = redactText(raw).value;
+      const safeMessage = parsed === undefined ? safeRaw : redactText(parsed.message).value;
       bus.emit({
         type: "log.record",
         source: "logcat",
         severity: streamSeverity(parsed),
-        message: parsed === undefined ? safeRaw : redactText(parsed.message).value,
-        correlation: targetCorrelation,
+        message: safeMessage,
+        correlation: { ...correlation, targetId: selected.target.id },
         data: {
           raw: safeRaw,
           parsed: parsed !== undefined,
@@ -2513,10 +2604,22 @@ export async function runDev(
             : { tag: parsed.tag, pid: parsed.pid, tid: parsed.tid, priority: parsed.priority }),
         },
       });
+      const finding = classifyLogRecord(parsed, safeRaw);
+      if (finding !== undefined && !logFindings.has(finding.code)) {
+        logFindings.set(finding.code, { ...finding, evidence: safeMessage });
+        bus.emit({
+          type: "log.problem",
+          source: "logcat",
+          severity: "error",
+          message: finding.summary,
+          correlation: { ...correlation, targetId: selected.target.id },
+          data: { code: finding.code, detail: finding.detail, evidence: safeMessage },
+        });
+      }
     });
     const selectorArgs =
       target.transportId === undefined ? ["-s", target.serial] : ["-t", target.transportId];
-    logPromise = runner({
+    const promise = runner({
       executable,
       args: [
         ...(config.adbHost === undefined ? [] : ["-H", config.adbHost]),
@@ -2530,12 +2633,37 @@ export async function runDev(
         "AndroidRuntime:E",
         "*:S",
       ],
-      signal: logController.signal,
+      signal: controller.signal,
       maxBufferBytes: 256 * 1024,
       onStdoutChunk: (chunk) => logLines.push(chunk),
       onStderrChunk: (chunk) => logLines.push(chunk),
-    }).finally(() => logLines.flush());
-  }
+    })
+      .then((result) => {
+        if (!controller.signal.aborted && activeLogController === controller) {
+          logStreamFailed = true;
+          bus.emit({
+            type: "log.stream.failed",
+            source: "logcat",
+            severity: "warning",
+            message: "The target log stream ended unexpectedly.",
+            correlation: { ...correlation, targetId: selected.target.id },
+            data: { exitCode: result.exitCode, signal: result.signal },
+          });
+        }
+        return result;
+      })
+      .finally(() => logLines.flush());
+    activeLogPromise = promise;
+  };
+  const stopLogStream = async (): Promise<void> => {
+    const controller = activeLogController;
+    const promise = activeLogPromise;
+    activeLogController = undefined;
+    activeLogPromise = undefined;
+    controller?.abort();
+    if (promise !== undefined) await promise;
+  };
+  startLogStream();
   const childStdout = new TextLineBuffer((line) => {
     const safe = redactText(line).value;
     bus.emit({
@@ -2595,6 +2723,7 @@ export async function runDev(
     if (!processSucceeded(state.process) || state.value !== "device") {
       return {
         targetReady: false,
+        logReady: options.logs === false || !logStreamFailed,
         targetSerial: target.serial,
         missingPorts: [...normalizedPorts.mappings],
         conflictingPorts: [],
@@ -2605,6 +2734,7 @@ export async function runDev(
     if (!processSucceeded(mappings.process)) {
       return {
         targetReady: true,
+        logReady: options.logs === false || !logStreamFailed,
         targetSerial: target.serial,
         missingPorts: [...normalizedPorts.mappings],
         conflictingPorts: [],
@@ -2625,12 +2755,15 @@ export async function runDev(
     );
     return {
       targetReady: true,
+      logReady: options.logs === false || !logStreamFailed,
       targetSerial: target.serial,
       missingPorts,
       conflictingPorts,
-      ...(conflictingPorts.length === 0
-        ? {}
-        : { detail: "A required device port is owned by another mapping." }),
+      ...(conflictingPorts.length > 0
+        ? { detail: "A required device port is owned by another mapping." }
+        : logStreamFailed
+          ? { detail: "The target log stream stopped unexpectedly." }
+          : {}),
     };
   };
   const recoverSession = async (
@@ -2773,6 +2906,10 @@ export async function runDev(
         created.push(mapping);
       }
     }
+    if (target.serial !== previousSerial || health.logReady === false) {
+      await stopLogStream();
+      startLogStream();
+    }
     return {
       changedTarget: target.serial !== previousSerial,
       detail:
@@ -2810,6 +2947,9 @@ export async function runDev(
                   : {
                       health: {
                         targetReady: event.health.targetReady,
+                        ...(event.health.logReady === undefined
+                          ? {}
+                          : { logReady: event.health.logReady }),
                         targetSerial: event.health.targetSerial,
                         missingPorts: event.health.missingPorts.map(({ device, host }) => ({
                           device,
@@ -2842,8 +2982,7 @@ export async function runDev(
   signal?.removeEventListener("abort", abortChild);
   childStdout.flush();
   childStderr.flush();
-  logController.abort();
-  if (logPromise !== undefined) await logPromise;
+  await stopLogStream();
   signal?.removeEventListener("abort", abortLogs);
   bus.emit({
     type: "child.exited",
@@ -2902,6 +3041,29 @@ export async function runDev(
         ],
       ),
     );
+  }
+  for (const finding of logFindings.values()) {
+    problems.push({
+      code: finding.code,
+      category: "app.runtime",
+      severity: "warning",
+      summary: finding.summary,
+      detail: finding.detail,
+      retryable: true,
+      evidence: [{ source: "logcat", field: "message", value: finding.evidence }],
+      actions: [
+        {
+          id: "export_session_context",
+          title: `Export this session with adb-ready context ${sessionId}`,
+          kind: "command",
+          risk: "read-only",
+          automatic: false,
+          idempotent: true,
+          command: { executable: "adb-ready", args: ["context", sessionId] },
+        },
+      ],
+      correlation: { ...correlation, targetId: selected.target.id },
+    });
   }
   if (child.aborted && signal?.aborted === true) {
     problems.push(

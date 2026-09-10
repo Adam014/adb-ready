@@ -57,7 +57,11 @@ export interface CliOptions {
   logPackage?: string;
   logPid?: number;
   logTags?: string[];
+  logExcludeTags?: string[];
   logPriority?: "A" | "D" | "E" | "F" | "I" | "S" | "V" | "W";
+  logBuffers?: Array<"crash" | "main" | "system">;
+  logSince?: string;
+  logTail?: number;
   logDump?: boolean;
   logMaxRecords?: number;
   contextBudget?: number;
@@ -184,7 +188,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logPackage: string | undefined;
   let logPid: number | undefined;
   const logTags: string[] = [];
+  const logExcludeTags: string[] = [];
   let logPriority: CliOptions["logPriority"];
+  const logBuffers: NonNullable<CliOptions["logBuffers"]> = [];
+  let logSince: string | undefined;
+  let logTail: number | undefined;
   let logDump = false;
   let logMaxRecords: number | undefined;
   let contextBudget: number | undefined;
@@ -325,14 +333,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     };
 
     if (option === "-h" || option === "--help") {
-      if (
-        command === "connect" ||
-        command === "dev" ||
-        command === "doctor" ||
-        command === "devices" ||
-        command === "pair" ||
-        command === "ports"
-      ) {
+      if (command !== undefined && command !== "help" && command !== "version") {
         helpTarget = command;
       }
       command = "help";
@@ -467,6 +468,43 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         return failure("CLI_INVALID_VALUE", `Invalid log tag: ${value}.`, option);
       }
       logTags.push(value);
+    } else if (option === "--exclude-tag") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[^\s:]{1,128}$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid excluded log tag: ${value}.`, option);
+      }
+      logExcludeTags.push(value);
+    } else if (option === "--buffer") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value !== "main" && value !== "system" && value !== "crash") {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid log buffer: ${value}. Expected main, system, or crash.`,
+          option,
+        );
+      }
+      logBuffers.push(value);
+    } else if (option === "--since") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[0-9][0-9 .:-]{0,63}$/u.test(value)) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid log start time: ${value}. Use an Android logcat timestamp.`,
+          option,
+        );
+      }
+      logSince = value;
+    } else if (option === "--tail") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1) {
+        return failure("CLI_INVALID_VALUE", `Invalid log tail count: ${value}.`, option);
+      }
+      logTail = parsed;
     } else if (option === "--level") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -659,7 +697,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     (logPackage !== undefined ||
       logPid !== undefined ||
       logTags.length > 0 ||
+      logExcludeTags.length > 0 ||
       logPriority !== undefined ||
+      logBuffers.length > 0 ||
+      logSince !== undefined ||
+      logTail !== undefined ||
       logDump ||
       logMaxRecords !== undefined)
   ) {
@@ -667,6 +709,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (logPackage !== undefined && logPid !== undefined) {
     return failure("CLI_USAGE", "--package and --pid cannot be combined.");
+  }
+  if (logSince !== undefined && logTail !== undefined) {
+    return failure("CLI_USAGE", "--since and --tail cannot be combined.");
   }
   if (contextBudget !== undefined && command !== "context") {
     return failure("CLI_USAGE", "--budget can only be used with the context command.");
@@ -718,7 +763,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logPackage === undefined ? {} : { logPackage }),
       ...(logPid === undefined ? {} : { logPid }),
       ...(logTags.length === 0 ? {} : { logTags }),
+      ...(logExcludeTags.length === 0 ? {} : { logExcludeTags }),
       ...(logPriority === undefined ? {} : { logPriority }),
+      ...(logBuffers.length === 0 ? {} : { logBuffers: [...new Set(logBuffers)] }),
+      ...(logSince === undefined ? {} : { logSince }),
+      ...(logTail === undefined ? {} : { logTail }),
       ...(logDump ? { logDump: true } : {}),
       ...(logMaxRecords === undefined ? {} : { logMaxRecords }),
       ...(contextBudget === undefined ? {} : { contextBudget }),

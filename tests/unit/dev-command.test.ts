@@ -142,6 +142,9 @@ describe("runDev", () => {
     expect(serializedJournal).not.toContain("secret-value");
     expect(serializedJournal).toContain("child.stdout");
     expect(serializedJournal).toContain("log.record");
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: "REACT_NATIVE_FATAL", severity: "warning" }),
+    );
   });
 
   test("persists a finalized private session when storage is enabled", async () => {
@@ -500,6 +503,71 @@ describe("runDev", () => {
     });
     expect(execution.result.data?.journal.events.map(({ type }) => type)).toContain(
       "recovery.completed",
+    );
+  });
+
+  test("restarts an unexpectedly ended log stream without restarting the development child", async () => {
+    let logStarts = 0;
+    let mappingLists = 0;
+    let resolveChild: ((value: ProcessResult) => void) | undefined;
+    let sleepCalls = 0;
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("logcat")) {
+        logStarts += 1;
+        if (logStarts === 1) return result(request);
+        return await new Promise<ProcessResult>((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+            { once: true },
+          );
+        });
+      }
+      if (args.includes("get-state")) return result(request, { stdout: "device\n" });
+      if (args.includes("--list")) {
+        mappingLists += 1;
+        if (mappingLists >= 3 && logStarts >= 2) {
+          queueMicrotask(() => resolveChild?.(result({ executable: "long-running", args: [] })));
+        }
+        return result(request);
+      }
+      if (request.executable === "long-running") {
+        return await new Promise<ProcessResult>((resolve) => {
+          resolveChild = resolve;
+        });
+      }
+      return result(request);
+    });
+    deps.sleep = async (_milliseconds, watchSignal) => {
+      sleepCalls += 1;
+      if (sleepCalls <= 2) return true;
+      if (watchSignal.aborted) return false;
+      return await new Promise<boolean>((resolve) => {
+        watchSignal.addEventListener("abort", () => resolve(false), { once: true });
+      });
+    };
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "long-running", args: [] },
+        reversePorts: [],
+        watchIntervalMs: 1,
+        recovery: { initialDelayMs: 1, maxDelayMs: 1 },
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(logStarts).toBe(2);
+    expect(execution.result.data?.recovery).toMatchObject({ recoveries: 1, failed: false });
+    expect(execution.result.data?.journal.events.map(({ type }) => type)).toContain(
+      "log.stream.failed",
     );
   });
 

@@ -258,9 +258,19 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     const data = result.data;
     lines.push(
       `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
-      `${style.success(glyphs.success, capabilities)} Filter   ${data.filters.map(clean).join(" ")}${data.packageName === undefined ? "" : ` · ${clean(data.packageName)}`}${data.pid === undefined ? "" : ` · PID ${String(data.pid)}`}`,
+      `${style.success(glyphs.success, capabilities)} Filter   ${data.filters.map(clean).join(" ")}${data.packageName === undefined ? "" : ` · ${clean(data.packageName)}`}${data.uid === undefined ? "" : ` · UID ${String(data.uid)}`}${data.pid === undefined ? "" : ` · PID ${String(data.pid)}`}`,
+      `${style.success(glyphs.success, capabilities)} Buffers  ${data.buffers.length === 0 ? "device default" : data.buffers.map(clean).join(", ")}`,
       `${style.success(glyphs.success, capabilities)} Records  ${String(data.records.length)} retained${data.dropped === 0 ? "" : ` · ${String(data.dropped)} dropped`}`,
     );
+    if (data.findings.length > 0) {
+      lines.push("", style.strong(`Findings (${String(data.findings.length)})`, capabilities));
+      data.findings.forEach((finding, index) => {
+        const branch = index === data.findings.length - 1 ? glyphs.end : glyphs.branch;
+        lines.push(
+          `${style.dim(branch, capabilities)} ${style.failure(clean(finding.code), capabilities)} · ${clean(finding.summary)}`,
+        );
+      });
+    }
   }
 
   if (result.command.startsWith("sessions ") && isSessionCommandData(result.data)) {
@@ -477,8 +487,14 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`package=${clean(result.data.packageName)}\n`);
     }
     if (result.data.pid !== undefined) sink.write(`pid=${String(result.data.pid)}\n`);
+    if (result.data.uid !== undefined) sink.write(`uid=${String(result.data.uid)}\n`);
+    sink.write(`buffers=${result.data.buffers.map(clean).join(",")}\n`);
     sink.write(`record_count=${String(result.data.records.length)}\n`);
     sink.write(`record_dropped=${String(result.data.dropped)}\n`);
+    sink.write(`finding_count=${String(result.data.findings.length)}\n`);
+    result.data.findings.forEach((finding) => {
+      sink.write(`finding=${clean(finding.code)}:${clean(finding.summary)}\n`);
+    });
     result.data.records.forEach((record, index) => {
       sink.write(`record_${String(index)}=${clean(record.raw)}\n`);
     });

@@ -439,6 +439,20 @@ describe("runCli", () => {
     expect(streams.error.value).toContain("No ready Android target can be selected.");
   });
 
+  test("keeps target preflight failures machine-readable", async () => {
+    const streams = io();
+    const exitCode = await runCli(
+      ["logs", "--dump", "--json", "--non-interactive"],
+      streams,
+      dependencies("List of devices attached\n"),
+    );
+    const parsed = JSON.parse(streams.output.value);
+
+    expect(exitCode).toBe(ExitCode.Target);
+    expect(parsed).toMatchObject({ command: "logs", ok: false });
+    expect(streams.error.value).toBe("");
+  });
+
   test("requires secure stdin for non-interactive pairing before probing ADB", async () => {
     const streams = io();
     const broken = dependencies();

@@ -63,7 +63,10 @@ describe("runLogs", () => {
       {
         packageName: "com.example.demo",
         tags: ["DemoTag"],
+        excludeTags: ["ChattyTag"],
         minimumPriority: "D",
+        buffers: ["main", "crash"],
+        tail: 50,
         dump: true,
         maxRecords: 1,
         onLine: (line) => streamed.push(line),
@@ -77,7 +80,9 @@ describe("runLogs", () => {
       selected: { transport: { serial: "USB-1" } },
       packageName: "com.example.demo",
       pid: 321,
-      filters: ["DemoTag:D", "*:S"],
+      buffers: ["main", "crash"],
+      filters: ["ChattyTag:S", "DemoTag:D", "*:S"],
+      findings: [],
       dropped: 1,
       records: [{ parsed: true, priority: "E", tag: "DemoTag", message: "token=[REDACTED]" }],
     });
@@ -88,12 +93,64 @@ describe("runLogs", () => {
       "logcat",
       "-v",
       "threadtime",
-      "-d",
+      "-b",
+      "main",
+      "-b",
+      "crash",
+      "-t",
+      "50",
       "--pid=321",
+      "ChattyTag:S",
       "DemoTag:D",
       "*:S",
     ]);
     expect(streamed.join("\n")).not.toContain("secret-value");
+  });
+
+  test("uses a restart-stable package UID when the device exposes it", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = dependencies(requests);
+    const baseRunner = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("packages")) {
+        requests.push(request);
+        return result(request, "package:com.example.demo uid:10123\n");
+      }
+      if (baseRunner === undefined) throw new Error("missing fixture runner");
+      return await baseRunner(request);
+    };
+
+    const execution = await runLogs({ packageName: "com.example.demo", dump: true }, {}, deps);
+
+    expect(execution.result.data).toMatchObject({ uid: 10123 });
+    expect(execution.result.data?.pid).toBeUndefined();
+    expect(requests.find(({ args }) => args?.includes("logcat"))?.args).toContain("--uid=10123");
+    expect(requests.some(({ args }) => args?.includes("pidof"))).toBeFalse();
+  });
+
+  test("emits one structured finding for repeated fatal markers", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = dependencies(requests);
+    const baseRunner = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("logcat")) {
+        requests.push(request);
+        const output =
+          "09-10 10:00:00.000  321  322 F AndroidRuntime: FATAL EXCEPTION: main\n" +
+          "09-10 10:00:01.000  321  322 E AndroidRuntime: FATAL EXCEPTION: main\n";
+        request.onStdoutChunk?.(new TextEncoder().encode(output));
+        return result(request, output);
+      }
+      if (baseRunner === undefined) throw new Error("missing fixture runner");
+      return await baseRunner(request);
+    };
+
+    const execution = await runLogs({ dump: true }, {}, deps);
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.findings).toEqual([
+      expect.objectContaining({ code: "ANDROID_FATAL_EXCEPTION" }),
+    ]);
   });
 
   test("fails clearly before logcat when the selected package is not running", async () => {

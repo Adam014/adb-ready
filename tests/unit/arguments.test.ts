@@ -232,8 +232,15 @@ describe("parseArguments", () => {
         "--tag",
         "ReactNativeJS",
         "--tag=AndroidRuntime",
+        "--exclude-tag",
+        "ChattyTag",
         "--level",
         "w",
+        "--buffer",
+        "main",
+        "--buffer=crash",
+        "--tail",
+        "250",
         "--dump",
         "--max-records",
         "500",
@@ -245,7 +252,10 @@ describe("parseArguments", () => {
         command: "logs",
         logPackage: "com.example.app",
         logTags: ["ReactNativeJS", "AndroidRuntime"],
+        logExcludeTags: ["ChattyTag"],
         logPriority: "W",
+        logBuffers: ["main", "crash"],
+        logTail: 250,
         logDump: true,
         logMaxRecords: 500,
         remembered: true,
@@ -261,6 +271,16 @@ describe("parseArguments", () => {
     expect(parseArguments(["doctor", "--dump"])).toMatchObject({
       ok: false,
       code: "CLI_USAGE",
+    });
+    expect(parseArguments(["logs", "--since", "09-10 10:00:00.000", "--tail", "10"])).toMatchObject(
+      {
+        ok: false,
+        code: "CLI_USAGE",
+      },
+    );
+    expect(parseArguments(["logs", "--help"])).toMatchObject({
+      ok: true,
+      options: { command: "help", helpTarget: "logs" },
     });
   });
 

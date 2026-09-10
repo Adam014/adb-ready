@@ -13,6 +13,7 @@ export interface WatchedPort {
 
 export interface SessionHealth {
   targetReady: boolean;
+  logReady?: boolean;
   targetSerial: string;
   missingPorts: WatchedPort[];
   conflictingPorts: WatchedPort[];
@@ -70,7 +71,10 @@ function positiveInteger(value: number, field: string): void {
 
 export function sessionHealthy(health: SessionHealth): boolean {
   return (
-    health.targetReady && health.missingPorts.length === 0 && health.conflictingPorts.length === 0
+    health.targetReady &&
+    health.logReady !== false &&
+    health.missingPorts.length === 0 &&
+    health.conflictingPorts.length === 0
   );
 }
 
