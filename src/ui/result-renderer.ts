@@ -1,5 +1,11 @@
-import type { AdbDevice } from "../adb/parsers.js";
-import type { ConnectedData, DevicesData, DoctorData, PairedData } from "../app/commands.js";
+import type { AdbDevice, AdbMdnsService } from "../adb/parsers.js";
+import type {
+  ConnectedData,
+  DevicesData,
+  DoctorData,
+  PairedData,
+  TargetDiscoveryData,
+} from "../app/commands.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
@@ -42,6 +48,10 @@ function hasTargets(value: unknown): value is DoctorData | DevicesData {
   return isRecord(value) && Array.isArray(value.targets);
 }
 
+function hasDiscovery(value: unknown): value is { discovery: TargetDiscoveryData } {
+  return isRecord(value) && isRecord(value.discovery) && isRecord(value.discovery.mdns);
+}
+
 function isConnectData(value: unknown): value is ConnectedData {
   return isRecord(value) && value.state === "device" && typeof value.serial === "string";
 }
@@ -65,6 +75,11 @@ function targetLabel(target: AndroidTarget): string {
   const transports = target.transports.map(({ kind }) => kind).join("+");
   const transportSummary = target.transports.length > 1 ? ` · ${transports}` : "";
   return `${clean(target.name)} · ${clean(target.serial)} · ${clean(target.state)}${clean(transportSummary)}`;
+}
+
+function wirelessServiceLabel(service: AdbMdnsService): string {
+  const identity = service.givenName ?? service.deviceModel ?? service.instance;
+  return `${clean(identity)} · ${clean(service.endpoint.serial)} · ${clean(service.serviceType)}`;
 }
 
 function problemLines(
@@ -171,6 +186,15 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     });
   }
 
+  if (hasDiscovery(result.data) && result.data.discovery.mdns.services.length > 0) {
+    const services = result.data.discovery.mdns.services;
+    lines.push("", style.strong(`Wireless discovery (${String(services.length)})`, capabilities));
+    services.forEach((service, index) => {
+      const branch = index === services.length - 1 ? glyphs.end : glyphs.branch;
+      lines.push(`${style.dim(branch, capabilities)} ${wirelessServiceLabel(service)}`);
+    });
+  }
+
   if (result.problems.length > 0) {
     lines.push("", style.strong("Diagnostics", capabilities));
     for (const problem of result.problems) {
@@ -226,6 +250,13 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`device_count=${String(result.data.devices.length)}\n`);
     result.data.devices.forEach((device, index) => {
       sink.write(`device_${String(index)}=${deviceLabel(device)}\n`);
+    });
+  }
+  if (hasDiscovery(result.data)) {
+    const services = result.data.discovery.mdns.services;
+    sink.write(`wireless_service_count=${String(services.length)}\n`);
+    services.forEach((service, index) => {
+      sink.write(`wireless_service_${String(index)}=${wirelessServiceLabel(service)}\n`);
     });
   }
   for (const problem of result.problems) {

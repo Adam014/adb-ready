@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { redactText } from "../../src/core/redaction.js";
 import {
   adbProcessProblem,
+  noTargetsProblem,
   ProblemCode,
   problemsForDevices,
   problemsForServerStatus,
@@ -160,5 +161,28 @@ describe("problem classification", () => {
       ProblemCode.TargetOffline,
       ProblemCode.TargetUnknownState,
     ]);
+  });
+
+  test("recommends pairing rather than connecting a pairing-only service", () => {
+    const problem = noTargetsProblem({ commandId: "command-1" }, [
+      {
+        instance: "adb-PHONE-1-x",
+        rawServiceType: "_adb-tls-pairing._tcp",
+        serviceType: "pairing",
+        endpoint: {
+          host: "192.168.1.20",
+          port: 41234,
+          serial: "192.168.1.20:41234",
+          version: 4,
+        },
+      },
+    ]);
+
+    expect(problem.detail).toContain("adb-ready pair 192.168.1.20:41234");
+    expect(problem.actions[0]).toMatchObject({
+      id: "pair_discovered_target",
+      risk: "device-reversible",
+      automatic: false,
+    });
   });
 });

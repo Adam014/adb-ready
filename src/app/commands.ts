@@ -517,9 +517,6 @@ export async function runDoctor(
   }
 
   problems.push(...problemsForDevices(devices.value, { commandId: context.commandId }, "warning"));
-  if (devices.value.length === 0) {
-    problems.push(noTargetsProblem({ commandId: context.commandId }));
-  }
   const inspection = await inspectTargets(
     client,
     devices.value,
@@ -533,6 +530,11 @@ export async function runDoctor(
   }
   problems.push(...targetInventoryProblems(inspection.targets, { commandId: context.commandId }));
   problems.push(...inspection.optionalProblems);
+  if (devices.value.length === 0) {
+    problems.push(
+      noTargetsProblem({ commandId: context.commandId }, inspection.discovery.mdns.services),
+    );
+  }
 
   const versionData: Omit<AdbVersion, "raw"> = {
     ...(version.value.protocolVersion === undefined
@@ -585,9 +587,6 @@ export async function runDevices(
   }
 
   problems.push(...problemsForDevices(devices.value, { commandId: context.commandId }, "warning"));
-  if (devices.value.length === 0) {
-    problems.push(noTargetsProblem({ commandId: context.commandId }));
-  }
 
   const inspection = await inspectTargets(client, devices.value, context.commandId, signal);
   if (inspection.interruption !== undefined) {
@@ -595,6 +594,12 @@ export async function runDevices(
     return finish<DevicesData>(context, null, problems);
   }
   problems.push(...targetInventoryProblems(inspection.targets, { commandId: context.commandId }));
+  problems.push(...inspection.optionalProblems);
+  if (devices.value.length === 0) {
+    problems.push(
+      noTargetsProblem({ commandId: context.commandId }, inspection.discovery.mdns.services),
+    );
+  }
 
   let selected: SelectedTarget | undefined;
   if (

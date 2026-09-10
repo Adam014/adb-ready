@@ -1,4 +1,4 @@
-import type { AdbDevice } from "../adb/parsers.js";
+import type { AdbDevice, AdbMdnsService } from "../adb/parsers.js";
 import { redactText } from "../core/redaction.js";
 import type { ProcessResult } from "../platform/process-runner.js";
 import type { AndroidTarget } from "../target/model.js";
@@ -496,16 +496,87 @@ export function problemsForDevices(
   return problems;
 }
 
-export function noTargetsProblem(correlation: Correlation): Problem {
+export function noTargetsProblem(
+  correlation: Correlation,
+  discoveredServices: readonly AdbMdnsService[] = [],
+): Problem {
+  const connectEndpoints = [
+    ...new Set(
+      discoveredServices
+        .filter(({ serviceType }) => serviceType === "connect" || serviceType === "legacy")
+        .map(({ endpoint }) => endpoint.serial),
+    ),
+  ].sort();
+  const oneEndpoint = connectEndpoints.length === 1 ? connectEndpoints[0] : undefined;
+  const pairingEndpoints = [
+    ...new Set(
+      discoveredServices
+        .filter(({ serviceType }) => serviceType === "pairing")
+        .map(({ endpoint }) => endpoint.serial),
+    ),
+  ].sort();
+  const onePairingEndpoint =
+    connectEndpoints.length === 0 && pairingEndpoints.length === 1
+      ? pairingEndpoints[0]
+      : undefined;
   return {
     code: ProblemCode.NoTargets,
     category: "target.selection",
     severity: "warning",
-    summary: "No Android targets are visible.",
-    detail: "Connect a target over USB, start an emulator, or enable Wireless debugging.",
+    summary:
+      discoveredServices.length === 0
+        ? "No Android targets are visible."
+        : "Wireless Android services are visible, but no target is connected.",
+    detail:
+      discoveredServices.length === 0
+        ? "Connect a target over USB, start an emulator, or enable Wireless debugging."
+        : oneEndpoint !== undefined
+          ? `Run adb-ready connect ${oneEndpoint} to establish and verify the target.`
+          : onePairingEndpoint !== undefined
+            ? `Run adb-ready pair ${onePairingEndpoint}, then connect the verified target.`
+            : "Choose the matching wireless service, or connect a target over USB.",
     retryable: true,
-    evidence: [{ source: "adb.devices", field: "count", value: 0 }],
-    actions: [retryDevicesAction()],
+    evidence: [
+      { source: "adb.devices", field: "count", value: 0 },
+      ...(discoveredServices.length === 0
+        ? []
+        : [
+            {
+              source: "adb.mdns",
+              field: "services",
+              value: discoveredServices.map(({ endpoint, serviceType }) => ({
+                endpoint: endpoint.serial,
+                serviceType,
+              })),
+            } satisfies Evidence,
+          ]),
+    ],
+    actions:
+      oneEndpoint !== undefined
+        ? [
+            {
+              id: "connect_discovered_target",
+              title: `Connect ${oneEndpoint}`,
+              kind: "command",
+              risk: "local-additive",
+              automatic: false,
+              idempotent: true,
+              command: { executable: "adb-ready", args: ["connect", oneEndpoint] },
+            },
+          ]
+        : onePairingEndpoint !== undefined
+          ? [
+              {
+                id: "pair_discovered_target",
+                title: `Pair ${onePairingEndpoint}`,
+                kind: "command",
+                risk: "device-reversible",
+                automatic: false,
+                idempotent: false,
+                command: { executable: "adb-ready", args: ["pair", onePairingEndpoint] },
+              },
+            ]
+          : [retryDevicesAction()],
     correlation,
   };
 }

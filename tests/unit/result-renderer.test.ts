@@ -82,6 +82,49 @@ describe("result renderer", () => {
     expect(sink.value).not.toContain("\u001b");
   });
 
+  test("renders discoverable wireless services separately from connected targets", () => {
+    const wireless: ResultEnvelope<unknown> = {
+      ...result,
+      data: {
+        adbPath: "~/Android/sdk/platform-tools/adb",
+        devices: [],
+        targets: [],
+        discovery: {
+          mdns: {
+            available: true,
+            method: "track",
+            services: [
+              {
+                instance: "adb-PHONE-1-x",
+                rawServiceType: "_adb-tls-connect._tcp",
+                serviceType: "connect",
+                endpoint: {
+                  host: "192.168.1.20",
+                  port: 37123,
+                  serial: "192.168.1.20:37123",
+                  version: 4,
+                },
+                givenName: "My Pixel",
+              },
+            ],
+          },
+          identity: { probed: 0, resolved: 0 },
+        },
+      },
+    };
+    const human = new MemorySink();
+    const plain = new MemorySink();
+
+    renderResult(wireless, { format: "human", capabilities, sink: human });
+    renderResult(wireless, { format: "plain", capabilities, sink: plain });
+
+    expect(human.value).toContain("Targets (0)");
+    expect(human.value).toContain("Wireless discovery (1)");
+    expect(human.value).toContain("My Pixel · 192.168.1.20:37123 · connect");
+    expect(plain.value).toContain("wireless_service_count=1");
+    expect(plain.value).toContain("wireless_service_0=My Pixel · 192.168.1.20:37123 · connect");
+  });
+
   test("streams events and the final result as independently valid NDJSON records", () => {
     const sink = new MemorySink();
     const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));

@@ -292,6 +292,37 @@ describe("runDevices", () => {
     expect(execution.result.problems[0]?.code).toBe(ProblemCode.NoTargets);
   });
 
+  test("distinguishes a discoverable wireless service from a connected target", async () => {
+    const endpoint = "192.168.1.20:37123";
+    const execution = await runDevices(
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          devices: "List of devices attached\n",
+          "mdns-services":
+            "List of discovered mdns services\n" +
+            `adb-PHONE-1-x _adb-tls-connect._tcp ${endpoint}\n`,
+        }),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data).toMatchObject({
+      targets: [],
+      discovery: { mdns: { services: [{ endpoint: { serial: endpoint } }] } },
+    });
+    expect(execution.result.problems[0]).toMatchObject({
+      code: ProblemCode.NoTargets,
+      summary: "Wireless Android services are visible, but no target is connected.",
+      actions: [
+        {
+          command: { executable: "adb-ready", args: ["connect", endpoint] },
+          automatic: false,
+        },
+      ],
+    });
+  });
+
   test("deduplicates USB and wireless transports only after observing the same identity", async () => {
     const execution = await runDevices(
       {},
