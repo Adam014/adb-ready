@@ -1,12 +1,16 @@
 version: 2
 updates:
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: monthly
     groups:
       development-toolchain:
         dependency-type: development
+    ignore:
+      # Keep compile-time Node APIs aligned with the oldest supported runtime.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
