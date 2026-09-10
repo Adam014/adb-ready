@@ -159,6 +159,38 @@ describe("runPorts", () => {
     expect(requests.some(({ args }) => args?.includes("--no-rebind"))).toBe(false);
   });
 
+  test("adds and removes a forward mapping with verification", async () => {
+    let mapping: string | undefined;
+    const runner: ProcessRunner = async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--list")) return result(request, mapping ?? "");
+      if (args.includes("--no-rebind")) mapping = "USB-1 tcp:9229 tcp:3000\n";
+      if (args.includes("--remove")) mapping = undefined;
+      return result(request);
+    };
+
+    const added = await runPorts(
+      { direction: "forward", action: "add", hostPort: 9229, devicePort: 3000 },
+      {},
+      dependencies(runner),
+    );
+    expect(added.exitCode).toBe(ExitCode.Success);
+    expect(added.result.data).toMatchObject({
+      status: "added",
+      mappings: [{ direction: "forward", host: "tcp:9229", device: "tcp:3000" }],
+    });
+
+    const removed = await runPorts(
+      { direction: "forward", action: "remove", hostPort: 9229, devicePort: 3000 },
+      {},
+      dependencies(runner),
+    );
+    expect(removed.exitCode).toBe(ExitCode.Success);
+    expect(removed.result.data).toMatchObject({ status: "removed", mappings: [] });
+  });
+
   test("validates ports before resolving ADB", async () => {
     let resolved = false;
     const execution = await runPorts(
