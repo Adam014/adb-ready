@@ -4,6 +4,7 @@ import type { PortDirection } from "../ports/model.js";
 
 export type CommandName =
   | "connect"
+  | "context"
   | "dev"
   | "devices"
   | "doctor"
@@ -14,7 +15,7 @@ export type CommandName =
   | "problems"
   | "sessions"
   | "version";
-export type OutputFormat = "human" | "json" | "ndjson" | "plain";
+export type OutputFormat = "human" | "json" | "markdown" | "ndjson" | "plain";
 
 export interface CliOptions {
   command: CommandName;
@@ -57,6 +58,7 @@ export interface CliOptions {
   logPriority?: "A" | "D" | "E" | "F" | "I" | "S" | "V" | "W";
   logDump?: boolean;
   logMaxRecords?: number;
+  contextBudget?: number;
 }
 
 export interface CliParseFailure {
@@ -75,6 +77,7 @@ export type CliParseResult = CliParseFailure | CliParseSuccess;
 
 const COMMANDS = new Set<CommandName>([
   "connect",
+  "context",
   "dev",
   "devices",
   "doctor",
@@ -177,6 +180,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logPriority: CliOptions["logPriority"];
   let logDump = false;
   let logMaxRecords: number | undefined;
+  let contextBudget: number | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -209,6 +213,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         const candidate = argument as CommandName;
         if (
           candidate === "connect" ||
+          candidate === "context" ||
           candidate === "dev" ||
           candidate === "devices" ||
           candidate === "doctor" ||
@@ -244,6 +249,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       if (
         command === "problems" &&
+        sessionId === undefined &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(argument)
+      ) {
+        sessionId = argument;
+        continue;
+      }
+      if (
+        command === "context" &&
         sessionId === undefined &&
         /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(argument)
       ) {
@@ -312,10 +325,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (typeof value !== "string") {
         return value;
       }
-      if (!new Set<OutputFormat>(["human", "json", "ndjson", "plain"]).has(value as OutputFormat)) {
+      if (
+        !new Set<OutputFormat>(["human", "json", "markdown", "ndjson", "plain"]).has(
+          value as OutputFormat,
+        )
+      ) {
         return failure(
           "CLI_INVALID_VALUE",
-          `Invalid format: ${value}. Expected human, plain, json, or ndjson.`,
+          `Invalid format: ${value}. Expected human, plain, markdown, json, or ndjson.`,
           option,
         );
       }
@@ -448,6 +465,18 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         return failure("CLI_INVALID_VALUE", `Invalid record limit: ${value}.`, option);
       }
       logMaxRecords = parsed;
+    } else if (option === "--budget") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1_000) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid context budget: ${value}. Expected at least 1000 characters.`,
+          option,
+        );
+      }
+      contextBudget = parsed;
     } else if (option === "--timeout") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -517,6 +546,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
+  if (command === "context" && format === "human") format = "markdown";
   if (command === "sessions") sessionAction ??= "list";
   const targetCommand =
     command === "dev" || command === "devices" || command === "logs" || command === "ports";
@@ -613,6 +643,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (logPackage !== undefined && logPid !== undefined) {
     return failure("CLI_USAGE", "--package and --pid cannot be combined.");
   }
+  if (contextBudget !== undefined && command !== "context") {
+    return failure("CLI_USAGE", "--budget can only be used with the context command.");
+  }
+  if (format === "markdown" && command !== "context") {
+    return failure("CLI_USAGE", "Markdown output is only available for the context command.");
+  }
 
   return {
     ok: true,
@@ -657,6 +693,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logPriority === undefined ? {} : { logPriority }),
       ...(logDump ? { logDump: true } : {}),
       ...(logMaxRecords === undefined ? {} : { logMaxRecords }),
+      ...(contextBudget === undefined ? {} : { contextBudget }),
     },
   };
 }

@@ -222,6 +222,13 @@ describe("runCli", () => {
         events: [{ type: "session.started" }],
       });
       expect(streams.error.value).toBe("");
+
+      const contextStreams = io();
+      const contextExit = await runCli(["context", "session-cli-1"], contextStreams, fixture);
+      expect(contextExit).toBe(ExitCode.Success);
+      expect(contextStreams.output.value).toStartWith("# ADB Ready diagnostic context\n");
+      expect(contextStreams.output.value).toContain("untrusted diagnostic data");
+      expect(contextStreams.error.value).toBe("");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

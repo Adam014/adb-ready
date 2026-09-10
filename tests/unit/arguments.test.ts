@@ -264,6 +264,30 @@ describe("parseArguments", () => {
     });
   });
 
+  test("defaults AI context exports to bounded Markdown", () => {
+    expect(parseArguments(["context", "session-42", "--budget", "8000"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "context",
+        sessionId: "session-42",
+        contextBudget: 8000,
+        format: "markdown",
+      },
+    });
+    expect(parseArguments(["context", "--format", "json"])).toMatchObject({
+      ok: true,
+      options: { command: "context", format: "json" },
+    });
+    expect(parseArguments(["devices", "--format", "markdown"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["context", "--budget", "999"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+  });
+
   test("rejects invalid or misplaced development options", () => {
     expect(parseArguments(["dev", "--preset", "flutter"])).toMatchObject({
       ok: false,

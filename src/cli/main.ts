@@ -18,7 +18,11 @@ import {
   runPorts,
   runWirelessDiscovery,
 } from "../app/commands.js";
-import { runProblemsCommand, runSessionCommand } from "../app/session-commands.js";
+import {
+  runContextCommand,
+  runProblemsCommand,
+  runSessionCommand,
+} from "../app/session-commands.js";
 import { loadConfig } from "../config/loader.js";
 import type { ConfigError, ConfigValues } from "../config/types.js";
 import { EventBus } from "../core/event-bus.js";
@@ -60,6 +64,7 @@ Usage:
 
 Commands:
   connect [HOST:PORT]    Connect and verify a wireless Android target
+  context [SESSION]      Export bounded AI-ready diagnostic context
   dev [OPTIONS] [-- CMD] Prepare one target and run a development session
   doctor                 Inspect the local ADB environment
   devices                List visible Android targets
@@ -105,6 +110,15 @@ const COMMAND_HELP = {
 
 Connects a TLS/legacy wireless endpoint and verifies its stable ADB serial.
 When the endpoint is omitted, exactly one mDNS connect service must be visible.
+`,
+  context: `Usage: adb-ready context [SESSION] [options]
+
+Exports a bounded, redacted Markdown brief for AI-assisted debugging. The
+latest session is used when no ID is provided.
+
+Context options:
+  --budget CHARACTERS    Maximum Markdown size (default: 12000, minimum: 1000)
+  --format FORMAT        markdown (default), json, plain, or ndjson
 `,
   dev: `Usage: adb-ready dev [options] [-- EXECUTABLE ARG...]
 
@@ -205,12 +219,24 @@ function inferredFormat(argv: readonly string[]): OutputFormat {
       format = "json";
     } else if (argument?.startsWith("--format=")) {
       const value = argument.slice("--format=".length);
-      if (value === "human" || value === "plain" || value === "json" || value === "ndjson") {
+      if (
+        value === "human" ||
+        value === "plain" ||
+        value === "markdown" ||
+        value === "json" ||
+        value === "ndjson"
+      ) {
         format = value;
       }
     } else if (argument === "--format") {
       const value = argv[index + 1];
-      if (value === "human" || value === "plain" || value === "json" || value === "ndjson") {
+      if (
+        value === "human" ||
+        value === "plain" ||
+        value === "markdown" ||
+        value === "json" ||
+        value === "ndjson"
+      ) {
         format = value;
       }
       index += 1;
@@ -539,20 +565,31 @@ async function runCliInternal(
     io.output.write(`${VERSION}\n`);
     return ExitCode.Success;
   }
-  if (options.command === "sessions" || options.command === "problems") {
+  if (
+    options.command === "context" ||
+    options.command === "sessions" ||
+    options.command === "problems"
+  ) {
     const storeOptions =
       dependencies.sessionStore === false
         ? { env: io.env }
         : (dependencies.sessionStore ?? { env: io.env });
     const execution =
-      options.command === "sessions"
-        ? await runSessionCommand(
-            options.sessionAction ?? "list",
+      options.command === "context"
+        ? await runContextCommand(
             options.sessionId,
+            options.contextBudget,
             storeOptions,
             dependencies,
           )
-        : await runProblemsCommand(options.sessionId, storeOptions, dependencies);
+        : options.command === "sessions"
+          ? await runSessionCommand(
+              options.sessionAction ?? "list",
+              options.sessionId,
+              storeOptions,
+              dependencies,
+            )
+          : await runProblemsCommand(options.sessionId, storeOptions, dependencies);
     renderResult(execution.result, {
       format: options.format,
       capabilities: capabilities(options, cliConfig(options), io, "output", options.format),

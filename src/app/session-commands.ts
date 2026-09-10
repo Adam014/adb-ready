@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { type CompiledContext, compileSessionContext } from "../ai/context-compiler.js";
 import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ExitCode, SCHEMA_VERSION } from "../domain/contracts.js";
 import {
@@ -21,6 +22,11 @@ export interface ProblemsCommandData {
   sessionId: string;
   status: SessionManifest["status"];
   problems: StoredProblem[];
+}
+
+export interface ContextCommandData extends CompiledContext {
+  sessionId: string;
+  status: SessionManifest["status"];
 }
 
 export interface SessionCommandDependencies {
@@ -189,6 +195,52 @@ export async function runProblemsCommand(
       sessionId: resolved.manifest.sessionId,
       status: resolved.manifest.status,
       problems: resolved.manifest.problems,
+    },
+    [],
+    dependencies,
+  );
+}
+
+export async function runContextCommand(
+  sessionId: string | undefined,
+  characterBudget: number | undefined,
+  options: SessionStoreOptions = {},
+  dependencies: SessionCommandDependencies = {},
+): Promise<SessionCommandExecution<ContextCommandData>> {
+  const resolved = await resolveManifest(sessionId, options);
+  if (!resolved.ok) {
+    return execution<ContextCommandData>(
+      "context",
+      null,
+      [storageProblem(resolved.code, resolved.summary, resolved.detail, "session-context")],
+      dependencies,
+    );
+  }
+  const events = await readSessionEvents(resolved.manifest.sessionId, options);
+  if (!events.ok) {
+    return execution<ContextCommandData>(
+      "context",
+      null,
+      [
+        storageProblem(
+          events.code,
+          "The requested session events are unavailable.",
+          events.message,
+          "session-context",
+        ),
+      ],
+      dependencies,
+    );
+  }
+  const compiled = compileSessionContext(resolved.manifest, events.value, {
+    ...(characterBudget === undefined ? {} : { characterBudget }),
+  });
+  return execution(
+    "context",
+    {
+      sessionId: resolved.manifest.sessionId,
+      status: resolved.manifest.status,
+      ...compiled,
     },
     [],
     dependencies,

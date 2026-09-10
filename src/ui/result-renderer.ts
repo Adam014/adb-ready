@@ -9,7 +9,11 @@ import type {
   PortsData,
   TargetDiscoveryData,
 } from "../app/commands.js";
-import type { ProblemsCommandData, SessionCommandData } from "../app/session-commands.js";
+import type {
+  ContextCommandData,
+  ProblemsCommandData,
+  SessionCommandData,
+} from "../app/session-commands.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
@@ -108,6 +112,16 @@ function isProblemsCommandData(value: unknown): value is ProblemsCommandData {
     typeof value.sessionId === "string" &&
     typeof value.status === "string" &&
     Array.isArray(value.problems)
+  );
+}
+
+function isContextCommandData(value: unknown): value is ContextCommandData {
+  return (
+    isRecord(value) &&
+    typeof value.sessionId === "string" &&
+    typeof value.markdown === "string" &&
+    typeof value.characterCount === "number" &&
+    typeof value.includedEvents === "number"
   );
 }
 
@@ -285,6 +299,14 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     }
   }
 
+  if (result.command === "context" && isContextCommandData(result.data)) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Session   ${clean(result.data.sessionId)}`,
+      `${style.success(glyphs.success, capabilities)} Context   ${String(result.data.characterCount)} characters`,
+      `${style.success(glyphs.success, capabilities)} Evidence  ${String(result.data.includedEvents)} included · ${String(result.data.omittedEvents)} omitted`,
+    );
+  }
+
   if (result.command === "pair" && isPairData(result.data)) {
     lines.push(
       `${style.success(glyphs.success, capabilities)} Paired ${clean(result.data.endpoint)}`,
@@ -442,6 +464,13 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`problem=${clean(problem.code)}:${clean(problem.summary)}\n`);
     });
   }
+  if (isContextCommandData(result.data)) {
+    sink.write(`session_id=${clean(result.data.sessionId)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`character_count=${String(result.data.characterCount)}\n`);
+    sink.write(`included_events=${String(result.data.includedEvents)}\n`);
+    sink.write(`omitted_events=${String(result.data.omittedEvents)}\n`);
+  }
   if (isPairData(result.data)) {
     sink.write(`endpoint=${clean(result.data.endpoint)}\n`);
     sink.write("paired=true\n");
@@ -492,7 +521,9 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
 }
 
 export function renderResult(result: CommandResult, options: ResultRenderOptions): void {
-  if (options.format === "json") {
+  if (options.format === "markdown" && isContextCommandData(result.data)) {
+    options.sink.write(result.data.markdown);
+  } else if (options.format === "json") {
     options.sink.write(`${JSON.stringify(result)}\n`);
   } else if (options.format === "ndjson") {
     options.sink.write(`${JSON.stringify({ kind: "result", ...result })}\n`);

@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runProblemsCommand, runSessionCommand } from "../../src/app/session-commands.js";
+import {
+  runContextCommand,
+  runProblemsCommand,
+  runSessionCommand,
+} from "../../src/app/session-commands.js";
 import { EventBus } from "../../src/core/event-bus.js";
 import type { Problem } from "../../src/domain/contracts.js";
 import { SessionRecorder } from "../../src/state/session-store.js";
@@ -73,6 +77,15 @@ describe("session history commands", () => {
         status: "failed",
         problems: [{ code: "TARGET_OFFLINE", retryable: true }],
       });
+      const context = await runContextCommand(undefined, 2_000, { directory }, dependencies);
+      expect(context.result.data).toMatchObject({
+        sessionId: "session-1",
+        status: "failed",
+        characterBudget: 2_000,
+        includedEvents: 1,
+      });
+      expect(context.result.data?.markdown).toContain("# ADB Ready diagnostic context");
+      expect(context.result.data?.markdown).toContain("TARGET_OFFLINE");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
