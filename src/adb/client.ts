@@ -13,12 +13,14 @@ import {
   type AdbDevice,
   type AdbMdnsService,
   type AdbPairResult,
+  type AdbPortMapping,
   type AdbVersion,
   parseAdbConnectResult,
   parseAdbDevices,
   parseAdbMdnsServices,
   parseAdbMdnsTrackServices,
   parseAdbPairResult,
+  parseAdbPortMappings,
   parseAdbVersion,
   parseFeatureList,
   parseKeyValueLines,
@@ -190,6 +192,51 @@ export class AdbClient {
       parseAdbPairResult,
       signal,
       { input: `${pairingCode}\n` },
+    );
+  }
+
+  async listPortMappings(
+    serial: string,
+    direction: "forward" | "reverse",
+    signal?: AbortSignal,
+  ): Promise<AdbObservation<AdbPortMapping[]>> {
+    return await this.#observe(
+      `${direction}-list`,
+      `Listing ${direction} mappings for ${serial}`,
+      ["-s", serial, direction, "--list"],
+      parseAdbPortMappings,
+      signal,
+    );
+  }
+
+  async addPortMapping(
+    serial: string,
+    direction: "forward" | "reverse",
+    firstEndpoint: string,
+    secondEndpoint: string,
+    signal?: AbortSignal,
+  ): Promise<AdbObservation<string | undefined>> {
+    return await this.#observe(
+      `${direction}-add`,
+      `Adding ${direction} mapping for ${serial}`,
+      ["-s", serial, direction, "--no-rebind", firstEndpoint, secondEndpoint],
+      parseSingleLine,
+      signal,
+    );
+  }
+
+  async removePortMapping(
+    serial: string,
+    direction: "forward" | "reverse",
+    listenEndpoint: string,
+    signal?: AbortSignal,
+  ): Promise<AdbObservation<undefined>> {
+    return await this.#observe(
+      `${direction}-remove`,
+      `Removing ${direction} mapping for ${serial}`,
+      ["-s", serial, direction, "--remove", listenEndpoint],
+      () => undefined,
+      signal,
     );
   }
 

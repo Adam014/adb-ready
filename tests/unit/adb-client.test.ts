@@ -217,6 +217,47 @@ describe("AdbClient", () => {
     ]);
   });
 
+  test("uses no-rebind and an explicit target for port mappings", async () => {
+    const requests: ProcessRequest[] = [];
+    const client = new AdbClient({
+      executable: "adb",
+      host: "remote.example",
+      port: 5037,
+      bus: new EventBus(),
+      correlation: { commandId: "command-1" },
+      runner: async (request) => {
+        requests.push(request);
+        return processResult({
+          args: [...(request.args ?? [])],
+          stdout: request.args?.includes("--list") ? "R5CT-001 tcp:8081 tcp:8081\n" : "",
+        });
+      },
+      idFactory: () => "operation-1",
+    });
+
+    const listed = await client.listPortMappings("R5CT-001", "reverse");
+    await client.addPortMapping("R5CT-001", "reverse", "tcp:8081", "tcp:3000");
+    await client.removePortMapping("R5CT-001", "reverse", "tcp:8081");
+
+    expect(listed.value).toEqual([{ serial: "R5CT-001", local: "tcp:8081", remote: "tcp:8081" }]);
+    expect(requests.map(({ args }) => args)).toEqual([
+      ["-H", "remote.example", "-P", "5037", "-s", "R5CT-001", "reverse", "--list"],
+      [
+        "-H",
+        "remote.example",
+        "-P",
+        "5037",
+        "-s",
+        "R5CT-001",
+        "reverse",
+        "--no-rebind",
+        "tcp:8081",
+        "tcp:3000",
+      ],
+      ["-H", "remote.example", "-P", "5037", "-s", "R5CT-001", "reverse", "--remove", "tcp:8081"],
+    ]);
+  });
+
   test("treats an intentionally bounded mDNS track stream as a successful snapshot", async () => {
     const requests: ProcessRequest[] = [];
     const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
