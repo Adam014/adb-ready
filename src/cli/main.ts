@@ -783,6 +783,7 @@ async function runCliInternal(
           ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
           ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
           ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
+          ...(values.devHooks === undefined ? {} : { hooks: values.devHooks }),
           journal: {
             ...(values.journalMaxEntries === undefined
               ? {}
@@ -792,6 +793,16 @@ async function runCliInternal(
             ...(values.journalMinimumSeverity === undefined
               ? {}
               : { minimumSeverity: values.journalMinimumSeverity }),
+            ...(values.journalRedactEnvironment === undefined
+              ? {}
+              : {
+                  redaction: {
+                    additionalLiterals: values.journalRedactEnvironment.flatMap((name) => {
+                      const value = io.env[name];
+                      return value === undefined || value === "" ? [] : [value];
+                    }),
+                  },
+                }),
           },
           childStdin: errorCapabilities.interactive ? "inherit" : "ignore",
           ...(options.format === "human" && !options.quiet

@@ -211,6 +211,19 @@ describe("loadConfig", () => {
           maxBytes: 100000,
           sources: ["child.stdout", "logcat"],
           minimumSeverity: "info",
+          redactEnvironment: ["PRIVATE_TOKEN", "API_SECRET"],
+        },
+        hooks: {
+          onReady: [
+            {
+              run: ["node", "scripts/ready.mjs", "literal;$(argument)"],
+              timeoutMs: 2500,
+              failure: "warn",
+              cwd: "mobile",
+              envAllowlist: ["CI"],
+            },
+          ],
+          finally: [{ run: ["node", "scripts/cleanup.mjs"] }],
         },
       },
     });
@@ -242,6 +255,19 @@ describe("loadConfig", () => {
           journalMaxBytes: 100000,
           journalSources: ["child.stdout", "logcat"],
           journalMinimumSeverity: "info",
+          journalRedactEnvironment: ["PRIVATE_TOKEN", "API_SECRET"],
+          devHooks: {
+            onReady: [
+              {
+                run: ["node", "scripts/ready.mjs", "literal;$(argument)"],
+                timeoutMs: 2500,
+                failure: "warn",
+                cwd: "mobile",
+                envAllowlist: ["CI"],
+              },
+            ],
+            finally: [{ run: ["node", "scripts/cleanup.mjs"] }],
+          },
         },
         provenance: {
           devPreset: { source: "environment" },
@@ -264,7 +290,16 @@ describe("loadConfig", () => {
         command: { executable: "", args: "start", shell: true },
         reversePorts: [0, { device: 8081, host: 70000, extra: true }],
         logs: "yes",
-        journal: { maxEntries: 0, minimumSeverity: "fatal", extra: true },
+        journal: {
+          maxEntries: 0,
+          minimumSeverity: "fatal",
+          redactEnvironment: ["NOT-VALID"],
+          extra: true,
+        },
+        hooks: {
+          unknown: [],
+          onReady: [{ run: [], timeoutMs: 0, failure: "maybe", envAllowlist: ["NOT-VALID"] }],
+        },
         extra: true,
       },
     });
@@ -284,6 +319,12 @@ describe("loadConfig", () => {
       expect(paths).toContain("dev.reversePorts.0.device");
       expect(paths).toContain("dev.reversePorts.1.host");
       expect(paths).toContain("dev.journal.minimumSeverity");
+      expect(paths).toContain("dev.journal.redactEnvironment");
+      expect(paths).toContain("dev.hooks.unknown");
+      expect(paths).toContain("dev.hooks.onReady.0.run");
+      expect(paths).toContain("dev.hooks.onReady.0.timeoutMs");
+      expect(paths).toContain("dev.hooks.onReady.0.failure");
+      expect(paths).toContain("dev.hooks.onReady.0.envAllowlist");
     }
   });
 

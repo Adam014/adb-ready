@@ -36,12 +36,14 @@ export const ProblemCode = {
   UnstableTargetSerial: "UNSTABLE_TARGET_SERIAL",
   InvalidPort: "INVALID_PORT",
   PortMappingConflict: "PORT_MAPPING_CONFLICT",
+  PortMappingCleanupFailed: "PORT_MAPPING_CLEANUP_FAILED",
   PortMappingVerificationFailed: "PORT_MAPPING_VERIFICATION_FAILED",
   DevPresetNotFound: "DEV_PRESET_NOT_FOUND",
   DevCommandNotFound: "DEV_COMMAND_NOT_FOUND",
   PackageManagerConflict: "PACKAGE_MANAGER_CONFLICT",
   PackageManagerNotFound: "PACKAGE_MANAGER_NOT_FOUND",
   ChildProcessFailed: "CHILD_PROCESS_FAILED",
+  HookFailed: "HOOK_FAILED",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {

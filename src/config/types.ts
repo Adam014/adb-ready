@@ -19,6 +19,22 @@ export interface ConfigDevPort {
   host?: number;
 }
 
+export type ConfigHookEvent =
+  | "beforeDev"
+  | "finally"
+  | "onChildExit"
+  | "onPortsReady"
+  | "onReady"
+  | "onTargetReady";
+
+export interface ConfigDevHook {
+  run: [string, ...string[]];
+  timeoutMs?: number;
+  failure?: "fail" | "ignore" | "warn";
+  cwd?: string;
+  envAllowlist?: string[];
+}
+
 export interface ConfigValues {
   adbPath?: string;
   adbHost?: string;
@@ -39,6 +55,8 @@ export interface ConfigValues {
   journalMaxBytes?: number;
   journalSources?: string[];
   journalMinimumSeverity?: "debug" | "error" | "info" | "warning";
+  journalRedactEnvironment?: string[];
+  devHooks?: Partial<Record<ConfigHookEvent, ConfigDevHook[]>>;
 }
 
 export interface ResolvedConfig extends ConfigValues {

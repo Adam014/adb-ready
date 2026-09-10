@@ -295,4 +295,130 @@ describe("runDev", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("runs lifecycle hooks in session order with direct arguments and reports warnings", async () => {
+    const calls: string[] = [];
+    let mapped = false;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-server", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+        hooks: {
+          beforeDev: [{ run: ["hook", "before", "literal;$(safe)"] }],
+          onTargetReady: [{ run: ["hook", "target"] }],
+          onPortsReady: [{ run: ["hook", "ports"] }],
+          onReady: [{ run: ["hook", "ready"], failure: "warn" }],
+          onChildExit: [{ run: ["hook", "exit"] }],
+          finally: [{ run: ["hook", "finally"] }],
+        },
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (request.executable === "hook") {
+          calls.push(`hook:${args[0]}`);
+          return result(request, args[0] === "ready" ? { exitCode: 7 } : {});
+        }
+        if (args.includes("--no-rebind")) {
+          calls.push("port:add");
+          mapped = true;
+        }
+        if (args.includes("--remove")) {
+          calls.push("port:remove");
+          mapped = false;
+        }
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        if (request.executable === "dev-server") calls.push("child:start");
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.hooks).toEqual({ completed: 5, failed: 1 });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.HookFailed, severity: "warning" }),
+    );
+    expect(calls).toEqual([
+      "hook:before",
+      "hook:target",
+      "port:add",
+      "hook:ports",
+      "child:start",
+      "hook:ready",
+      "hook:exit",
+      "port:remove",
+      "hook:finally",
+    ]);
+  });
+
+  test("forwards session cancellation to the child, cleans ports, and exits as interrupted", async () => {
+    const controller = new AbortController();
+    let mapped = false;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "long-running", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (args.includes("--no-rebind")) mapped = true;
+        if (args.includes("--remove")) mapped = false;
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        if (request.executable === "long-running") {
+          controller.abort();
+          return result(request, { exitCode: null, signal: "SIGTERM", aborted: true });
+        }
+        return result(request);
+      }),
+      controller.signal,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Interrupted);
+    expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.OperationInterrupted);
+    expect(execution.result.data?.ports.cleaned).toBe(true);
+  });
+
+  test("fails visibly when an owned reverse mapping cannot be cleaned", async () => {
+    let mapped = false;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-server", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (args.includes("--no-rebind")) mapped = true;
+        if (args.includes("--remove")) return result(request, { exitCode: 1 });
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.AdbOperation);
+    expect(execution.result.data?.ports.cleaned).toBe(false);
+    expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.PortMappingCleanupFailed);
+  });
 });

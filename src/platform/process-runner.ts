@@ -8,6 +8,7 @@ export interface ProcessRequest {
   args?: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  inheritEnv?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
   killSignal?: NodeJS.Signals;
@@ -147,7 +148,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   return await new Promise<ProcessResult>((resolve) => {
     const child = spawn(request.executable, args, {
       cwd: request.cwd,
-      env: { ...process.env, ...request.env },
+      env: request.inheritEnv === false ? request.env : { ...process.env, ...request.env },
       shell: false,
       stdio:
         stdio === "inherit"

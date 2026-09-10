@@ -13,6 +13,7 @@ import { EventBus } from "../core/event-bus.js";
 import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.js";
 import { redactText } from "../core/redaction.js";
 import { TextLineBuffer } from "../core/text-lines.js";
+import { type DevHook, type DevHookEvent, type HookRun, runHooks } from "../dev/hooks.js";
 import {
   type DevPreset,
   detectProject,
@@ -1556,14 +1557,18 @@ export interface DevOptions {
     maxBytes?: number;
     sources?: readonly string[];
     minimumSeverity?: "debug" | "error" | "info" | "warning";
+    redaction?: {
+      additionalLiterals?: readonly string[];
+    };
   };
   childStdin?: "ignore" | "inherit";
   onChildLine?: (stream: "stderr" | "stdout", line: string) => void;
+  hooks?: Partial<Record<DevHookEvent, readonly DevHook[]>>;
 }
 
 export interface DevData {
   sessionId: string;
-  status: "completed" | "planned";
+  status: "completed" | "failed" | "planned";
   adbPath: string;
   selected: SelectedTarget;
   project: {
@@ -1596,6 +1601,10 @@ export interface DevData {
   };
   plan?: OperationPlan;
   journal: EventJournalSnapshot;
+  hooks: {
+    completed: number;
+    failed: number;
+  };
 }
 
 async function regularFile(file: string): Promise<boolean> {
@@ -1926,10 +1935,88 @@ export async function runDev(
         }),
     command: commandData,
   };
+  const hookRuns: HookRun[] = [];
+  const hookSummary = (): DevData["hooks"] => ({
+    completed: hookRuns.filter(({ ok }) => ok).length,
+    failed: hookRuns.filter(({ ok }) => !ok).length,
+  });
+  const hookEnvironment = {
+    ANDROID_SERIAL: selected.transport.serial,
+    ADB_READY_SESSION_ID: sessionId,
+    ADB_READY_PRESET: preset,
+    ADB_READY_TARGET_ID: selected.target.id,
+  };
+  const runHookPhase = async (
+    event: DevHookEvent,
+    extraEnvironment: Record<string, string> = {},
+    useSessionSignal = true,
+  ): Promise<boolean> => {
+    const runs = await runHooks({
+      hooks: options.hooks ?? {},
+      event,
+      projectRoot: project.root,
+      environment: { ...hookEnvironment, ...extraEnvironment },
+      bus,
+      correlation: targetCorrelation,
+      ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+      ...(useSessionSignal && signal !== undefined ? { signal } : {}),
+    });
+    hookRuns.push(...runs);
+    for (const run of runs) {
+      if (run.ok || run.failure === "ignore") continue;
+      if (run.result.aborted && signal?.aborted === true) {
+        if (!problems.some(({ code }) => code === ProblemCode.OperationInterrupted)) {
+          problems.push(
+            commandProblem(
+              ProblemCode.OperationInterrupted,
+              "child.interrupted",
+              "The development session was interrupted.",
+              `The ${run.event} hook and owned session resources were stopped safely.`,
+              context.commandId,
+            ),
+          );
+        }
+        continue;
+      }
+      problems.push({
+        code: ProblemCode.HookFailed,
+        category: "child.hook",
+        severity: run.failure === "warn" ? "warning" : "error",
+        summary: `${run.event} hook ${String(run.index + 1)} failed.`,
+        detail: run.result.timedOut
+          ? "The hook exceeded its configured timeout."
+          : run.result.spawnError === undefined
+            ? `The hook exited with ${run.result.exitCode === null ? String(run.result.signal) : String(run.result.exitCode)}.`
+            : "The hook executable could not be started.",
+        retryable: true,
+        evidence: [
+          { source: `hook.${run.event}`, field: "exitCode", value: run.result.exitCode },
+          { source: `hook.${run.event}`, field: "signal", value: run.result.signal },
+          { source: `hook.${run.event}`, field: "timedOut", value: run.result.timedOut },
+        ],
+        actions: [],
+        correlation: {
+          ...targetCorrelation,
+          operationId: `hook:${run.event}:${String(run.index)}`,
+        },
+      });
+    }
+    return !runs.some(({ failure, ok }) => !ok && failure === "fail");
+  };
+  const hookPlanSteps = (event: DevHookEvent) =>
+    (options.hooks?.[event] ?? []).map((hook, index) => ({
+      id: `hook-${event}-${String(index + 1)}`,
+      title: `Run ${event} hook ${String(index + 1)}`,
+      risk: "open-world" as const,
+      executable: redactText(hook.run[0]).value,
+      args: hook.run.slice(1).map((argument) => redactText(argument).value),
+    }));
   if (config.dryRun) {
     const selectorArgs =
       target.transportId === undefined ? ["-s", target.serial] : ["-t", target.transportId];
     const steps = [
+      ...hookPlanSteps("beforeDev"),
+      ...hookPlanSteps("onTargetReady"),
       ...pending.map((mapping, index) => ({
         id: `reverse-${String(index + 1)}`,
         title: `Map device ${mapping.device} to host ${mapping.host}`,
@@ -1937,6 +2024,7 @@ export async function runDev(
         executable: redactedPath(executable),
         args: [...selectorArgs, "reverse", "--no-rebind", mapping.device, mapping.host],
       })),
+      ...hookPlanSteps("onPortsReady"),
       {
         id: "start-child",
         title: `Start ${preset} development command`,
@@ -1944,6 +2032,9 @@ export async function runDev(
         executable: commandData.executable,
         args: commandData.args,
       },
+      ...hookPlanSteps("onReady"),
+      ...hookPlanSteps("onChildExit"),
+      ...hookPlanSteps("finally"),
     ];
     bus.emit({
       type: "session.planned",
@@ -1961,8 +2052,27 @@ export async function runDev(
         reused,
         cleaned: false,
       },
+      hooks: hookSummary(),
       plan: { schemaVersion: SCHEMA_VERSION, dryRun: true, steps },
     });
+  }
+
+  let cleaned = false;
+  const failedData = (): Omit<DevData, "journal"> => ({
+    ...baseData,
+    status: "failed",
+    ports: {
+      requested: normalizedPorts.mappings,
+      created,
+      reused,
+      cleaned,
+    },
+    hooks: hookSummary(),
+  });
+
+  if (!(await runHookPhase("beforeDev")) || !(await runHookPhase("onTargetReady"))) {
+    await runHookPhase("finally", {}, false);
+    return complete(failedData());
   }
 
   for (const mapping of pending) {
@@ -2001,7 +2111,6 @@ export async function runDev(
     }
   }
 
-  let cleaned = false;
   const cleanup = async (): Promise<void> => {
     if (options.cleanupPorts === false || created.length === 0) return;
     bus.emit({
@@ -2011,19 +2120,43 @@ export async function runDev(
       message: "Cleaning session-owned port mappings",
       correlation: targetCorrelation,
     });
+    let removalSucceeded = true;
     for (const mapping of created) {
-      await client.removePortMapping(target, "reverse", mapping.device);
+      const removed = await client.removePortMapping(target, "reverse", mapping.device);
+      removalSucceeded = processSucceeded(removed.process) && removalSucceeded;
     }
     const remaining = await client.listPortMappings(target, "reverse");
     cleaned =
+      removalSucceeded &&
       processSucceeded(remaining.process) &&
       !remaining.value
         .map((mapping) => normalizePortMapping("reverse", mapping))
         .some((mapping) => created.some((item) => item.device === mapping.device));
+    if (!cleaned) {
+      problems.push({
+        code: ProblemCode.PortMappingCleanupFailed,
+        category: "adb.port.cleanup",
+        severity: "error",
+        summary: "Session-owned reverse mappings could not be fully removed.",
+        detail:
+          "ADB Ready attempted removal and verified the mapping list, but owned mappings remain or ADB failed.",
+        retryable: true,
+        evidence: [
+          {
+            source: "adb.reverse",
+            field: "ownedMappings",
+            value: created.map(({ device, host }) => ({ device, host })),
+          },
+        ],
+        actions: [],
+        correlation: targetCorrelation,
+      });
+    }
   };
   if (problems.some(({ severity }) => severity === "error")) {
     await cleanup();
-    return complete(null);
+    await runHookPhase("finally", {}, false);
+    return complete(failedData());
   }
 
   bus.emit({
@@ -2034,6 +2167,11 @@ export async function runDev(
     correlation: targetCorrelation,
     data: { created: created.length, reused: reused.length },
   });
+  if (!(await runHookPhase("onPortsReady"))) {
+    await cleanup();
+    await runHookPhase("finally", {}, false);
+    return complete(failedData());
+  }
   const runner = dependencies.runner ?? runProcess;
   const logController = new AbortController();
   if (signal?.aborted) logController.abort();
@@ -2113,17 +2251,25 @@ export async function runDev(
     correlation: targetCorrelation,
     data: commandData,
   });
-  const child = await runner({
+  const childController = new AbortController();
+  if (signal?.aborted === true) childController.abort();
+  const abortChild = () => childController.abort();
+  signal?.addEventListener("abort", abortChild, { once: true });
+  const childPromise = runner({
     executable: childCommand.executable,
     args: childCommand.args,
     cwd: commandCwd,
     env: { ...childCommand.env, ANDROID_SERIAL: selected.transport.serial },
-    ...(signal === undefined ? {} : { signal }),
+    signal: childController.signal,
     stdin: options.childStdin ?? "ignore",
     maxBufferBytes: 4 * 1024 * 1024,
     onStdoutChunk: (chunk) => childStdout.push(chunk),
     onStderrChunk: (chunk) => childStderr.push(chunk),
   });
+  const readyHooksSucceeded = await runHookPhase("onReady");
+  if (!readyHooksSucceeded) childController.abort();
+  const child = await childPromise;
+  signal?.removeEventListener("abort", abortChild);
   childStdout.flush();
   childStderr.flush();
   logController.abort();
@@ -2137,8 +2283,16 @@ export async function runDev(
     correlation: targetCorrelation,
     data: { exitCode: child.exitCode, signal: child.signal, durationMs: child.durationMs },
   });
+  await runHookPhase(
+    "onChildExit",
+    {
+      ADB_READY_CHILD_EXIT_CODE: child.exitCode === null ? "" : String(child.exitCode),
+      ADB_READY_CHILD_SIGNAL: child.signal ?? "",
+    },
+    false,
+  );
   await cleanup();
-  if (child.aborted) {
+  if (child.aborted && signal?.aborted === true) {
     problems.push(
       commandProblem(
         ProblemCode.OperationInterrupted,
@@ -2148,7 +2302,7 @@ export async function runDev(
         context.commandId,
       ),
     );
-  } else if (!processSucceeded(child)) {
+  } else if (!processSucceeded(child) && readyHooksSucceeded) {
     problems.push(
       commandProblem(
         ProblemCode.ChildProcessFailed,
@@ -2163,6 +2317,7 @@ export async function runDev(
       ),
     );
   }
+  await runHookPhase("finally", {}, false);
   bus.emit({
     type: "session.ended",
     source: "session",
@@ -2186,5 +2341,6 @@ export async function runDev(
       stdoutTruncated: child.stdoutTruncated,
       stderrTruncated: child.stderrTruncated,
     },
+    hooks: hookSummary(),
   });
 }

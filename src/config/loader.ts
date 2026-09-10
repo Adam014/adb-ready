@@ -60,10 +60,26 @@ const DEV_KEYS = new Set([
   "logs",
   "cleanupPorts",
   "journal",
+  "hooks",
 ]);
 const COMMAND_KEYS = new Set(["executable", "args", "cwd"]);
 const PORT_KEYS = new Set(["device", "host"]);
-const JOURNAL_KEYS = new Set(["maxEntries", "maxBytes", "sources", "minimumSeverity"]);
+const JOURNAL_KEYS = new Set([
+  "maxEntries",
+  "maxBytes",
+  "sources",
+  "minimumSeverity",
+  "redactEnvironment",
+]);
+const HOOK_EVENTS = new Set([
+  "beforeDev",
+  "onTargetReady",
+  "onPortsReady",
+  "onReady",
+  "onChildExit",
+  "finally",
+]);
+const HOOK_KEYS = new Set(["run", "timeoutMs", "failure", "cwd", "envAllowlist"]);
 const PROFILE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -491,6 +507,158 @@ function validateDocument(
               >;
             }
           }
+          if (document.dev.journal.redactEnvironment !== undefined) {
+            if (
+              !Array.isArray(document.dev.journal.redactEnvironment) ||
+              !document.dev.journal.redactEnvironment.every(
+                (item) => typeof item === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(item),
+              )
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  "dev.journal.redactEnvironment",
+                  "dev.journal.redactEnvironment must contain valid environment variable names.",
+                ),
+              );
+            } else {
+              values.journalRedactEnvironment = [
+                ...new Set(document.dev.journal.redactEnvironment as string[]),
+              ];
+            }
+          }
+        }
+      }
+      if (document.dev.hooks !== undefined) {
+        if (!isObject(document.dev.hooks)) {
+          errors.push(error(source, location, "dev.hooks", "dev.hooks must be an object."));
+        } else {
+          validateUnknownKeys(
+            document.dev.hooks,
+            HOOK_EVENTS,
+            "dev.hooks.",
+            source,
+            location,
+            errors,
+          );
+          const hooks: NonNullable<ConfigValues["devHooks"]> = {};
+          for (const [eventName, candidates] of Object.entries(document.dev.hooks)) {
+            if (!HOOK_EVENTS.has(eventName)) continue;
+            if (!Array.isArray(candidates)) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `dev.hooks.${eventName}`,
+                  `dev.hooks.${eventName} must be an array.`,
+                ),
+              );
+              continue;
+            }
+            const validatedHooks: NonNullable<ConfigValues["devHooks"]>[keyof NonNullable<
+              ConfigValues["devHooks"]
+            >] = [];
+            candidates.forEach((candidate, index) => {
+              const prefix = `dev.hooks.${eventName}.${String(index)}`;
+              if (!isObject(candidate)) {
+                errors.push(error(source, location, prefix, "Hook must be an object."));
+                return;
+              }
+              validateUnknownKeys(candidate, HOOK_KEYS, `${prefix}.`, source, location, errors);
+              const run = candidate.run;
+              const timeoutMs = candidate.timeoutMs;
+              const failure = candidate.failure;
+              const cwd = candidate.cwd;
+              const envAllowlist = candidate.envAllowlist;
+              let valid = true;
+              if (
+                !Array.isArray(run) ||
+                run.length < 1 ||
+                !run.every((item) => typeof item === "string") ||
+                (run[0] as string | undefined)?.trim() === ""
+              ) {
+                valid = false;
+                errors.push(
+                  error(
+                    source,
+                    location,
+                    `${prefix}.run`,
+                    "Hook run must be a non-empty executable and argument array.",
+                  ),
+                );
+              }
+              if (
+                timeoutMs !== undefined &&
+                (!Number.isSafeInteger(timeoutMs) ||
+                  (timeoutMs as number) < 1 ||
+                  (timeoutMs as number) > 2_147_483_647)
+              ) {
+                valid = false;
+                errors.push(
+                  error(
+                    source,
+                    location,
+                    `${prefix}.timeoutMs`,
+                    "Hook timeoutMs must be a positive integer.",
+                  ),
+                );
+              }
+              if (
+                failure !== undefined &&
+                !new Set(["fail", "ignore", "warn"]).has(failure as string)
+              ) {
+                valid = false;
+                errors.push(
+                  error(
+                    source,
+                    location,
+                    `${prefix}.failure`,
+                    "Hook failure must be fail, warn, or ignore.",
+                  ),
+                );
+              }
+              if (cwd !== undefined && (typeof cwd !== "string" || cwd.trim() === "")) {
+                valid = false;
+                errors.push(
+                  error(source, location, `${prefix}.cwd`, "Hook cwd must be a non-empty string."),
+                );
+              }
+              if (
+                envAllowlist !== undefined &&
+                (!Array.isArray(envAllowlist) ||
+                  !envAllowlist.every(
+                    (item) => typeof item === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(item),
+                  ))
+              ) {
+                valid = false;
+                errors.push(
+                  error(
+                    source,
+                    location,
+                    `${prefix}.envAllowlist`,
+                    "Hook envAllowlist must contain valid environment variable names.",
+                  ),
+                );
+              }
+              if (valid) {
+                const command = run as [string, ...string[]];
+                validatedHooks?.push({
+                  run: command,
+                  ...(timeoutMs === undefined ? {} : { timeoutMs: timeoutMs as number }),
+                  ...(failure === undefined
+                    ? {}
+                    : { failure: failure as "fail" | "ignore" | "warn" }),
+                  ...(cwd === undefined ? {} : { cwd: cwd as string }),
+                  ...(envAllowlist === undefined
+                    ? {}
+                    : { envAllowlist: [...new Set(envAllowlist as string[])] }),
+                });
+              }
+            });
+            Object.assign(hooks, { [eventName]: validatedHooks });
+          }
+          values.devHooks = hooks;
         }
       }
     }
@@ -789,6 +957,22 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
       );
     } else {
       values.devReversePorts = parsed.map((device) => ({ device }));
+    }
+  }
+
+  if (env.ADB_READY_JOURNAL_REDACT_ENVIRONMENT !== undefined) {
+    const names = env.ADB_READY_JOURNAL_REDACT_ENVIRONMENT.split(",").map((value) => value.trim());
+    if (names.length === 0 || names.some((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name))) {
+      errors.push(
+        error(
+          "environment",
+          "ADB_READY_JOURNAL_REDACT_ENVIRONMENT",
+          "ADB_READY_JOURNAL_REDACT_ENVIRONMENT",
+          "ADB_READY_JOURNAL_REDACT_ENVIRONMENT must be a comma-separated list of environment variable names.",
+        ),
+      );
+    } else {
+      values.journalRedactEnvironment = [...new Set(names)];
     }
   }
 
