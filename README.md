@@ -2,10 +2,10 @@
 
 # ADB Ready
 
-**One Android target. One reliable development session.**
+**The AI-first control plane for Android development.**
 
-Select a device, prepare localhost ports, start your project, and keep the
-connection healthy—without stitching together fragile ADB scripts.
+Give developers and coding agents one safe, typed interface for Android targets,
+apps, UI, logs, evidence, ports, and development sessions.
 
 [![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
@@ -13,8 +13,10 @@ connection healthy—without stitching together fragile ADB scripts.
 [![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
 [![Deno](https://img.shields.io/badge/Deno_2-tested-111827?logo=deno&logoColor=white)](https://deno.com/)
 [![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
+[![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
+[![AI agents](https://img.shields.io/badge/AI_agents-ready-1f9db5)](./docs/agent-integration.md)
 
-[Quick start](#quick-start) · [Why ADB Ready](#why-adb-ready) ·
+[Quick start](#quick-start) · [AI agents](#android-tools-built-for-ai-agents) · [Why ADB Ready](#why-adb-ready) ·
 [Workflows](#find-your-workflow) · [Documentation](#documentation) ·
 [Compatibility](#compatibility)
 
@@ -30,12 +32,38 @@ $ adb-ready dev
 ```
 
 Stop rebuilding your Android setup every time a cable moves, Wi-Fi reconnects,
-or ADB picks the wrong device. ADB Ready turns the target, ports, project
-command, recovery, and useful logs into one development session.
+or ADB picks the wrong device. ADB Ready turns scattered ADB operations into
+one deterministic workflow that developers, scripts, and AI agents can share.
 
 ```bash
 npx adb-ready dev
 ```
+
+## Android tools built for AI agents
+
+ADB Ready turns coding agents from passive log readers into safe Android
+operators. Its local MCP server exposes **19 schema-validated tools** for target
+readiness, app lifecycle, UI inspection, evidence capture, and verified UI
+actions—without giving the model a generic shell or unrestricted ADB access.
+
+```bash
+# Connect the current project to your coding agent
+npx adb-ready agent setup codex
+```
+
+Codex, Claude Code, Cursor, VS Code/Copilot, Windsurf, and other MCP clients can:
+
+- find and bind one deterministic Android target;
+- resolve, install, launch, restart, and inspect the project app;
+- inspect current UI, tap, type, swipe, press keys, and wait for state changes;
+- capture screenshots and read bounded, redacted session evidence; and
+- verify actions against fresh device state instead of assuming they worked.
+
+Everything stays local unless your chosen AI client sends tool results to its
+model provider. Stale UI references are rejected, destructive app removal is
+not exposed to agents, and every tool returns structured evidence.
+
+[Connect an AI agent in minutes →](./docs/agent-integration.md)
 
 ## Why ADB Ready?
 
@@ -51,11 +79,11 @@ When a wireless target or reverse mapping disappears, recovery is bounded,
 target-safe, and independently verified. It never silently restarts the shared
 ADB server or rewrites another tool's mapping.
 
-### Get signal instead of noise.
+### Give agents evidence, not terminal noise.
 
 Focused logcat, structured problems, and a saved redacted timeline keep the
-important failure evidence together. One command turns it into compact context
-for any AI assistant—without uploading anything.
+important failure evidence together. Agents receive bounded, machine-readable
+context and typed actions instead of guessing from an unstructured terminal.
 
 ### Keep your existing stack.
 
@@ -142,7 +170,7 @@ adb-ready dev -- pnpm run android:local
 adb-ready dev --dry-run --json
 ```
 
-## Built for humans and automation
+## Built for humans, agents, and automation
 
 The interactive CLI provides keyboard navigation, live state, reduced-motion
 support, narrow-terminal fallbacks, and clear recovery feedback. Scripts get a
@@ -160,9 +188,10 @@ adb-ready context --since 5m --only problems,recovery,logs
 - stable problem categories, meaningful exit codes, timeouts, and dry runs; and
 - explicit target, ADB path, and remote ADB server overrides.
 
-Local AI agents can use the same contracts through a schema-validated MCP stdio
-server. It exposes focused Android workflows, not a generic shell or raw ADB.
-[Connect an agent →](./docs/agent-integration.md)
+Local AI agents use the same contracts through a schema-validated MCP stdio
+server. The package includes a version-matched public tool schema, while target
+binding, fresh-state checks, redaction, and verification remain enforced by ADB
+Ready itself. [Explore the agent contract →](./docs/agent-integration.md)
 
 ## Documentation
 
