@@ -177,6 +177,7 @@ server. It exposes focused Android workflows, not a generic shell or raw ADB.
 | [Logs and AI context](./docs/logs-and-context.md) | What is captured, redacted, saved, and exported? |
 | [Configuration](./docs/configuration.md) | How do projects, profiles, hooks, and precedence work? |
 | [Automation](./docs/automation.md) | What are the JSON, NDJSON, stdout, and exit-code contracts? |
+| [Threat model](./docs/threat-model.md) | Which trust boundaries, controls, and residual risks apply? |
 | [Troubleshooting](./docs/troubleshooting.md) | What should I do for each common failure? |
 | [Compatibility](./COMPATIBILITY.md) | Which hosts, runtimes, and environments are covered? |
 | [Example configs](./examples/README.md) | What can I copy for Expo, React Native, Gradle, or custom projects? |

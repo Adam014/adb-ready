@@ -64,3 +64,6 @@ client's approval or sandbox policy.
 ADB itself can access USB devices, emulators, or configured network/remote ADB
 servers. That existing ADB authority remains the outer device-access boundary;
 the MCP server does not expand it.
+
+See the public [threat model](./docs/threat-model.md) for trust boundaries,
+protected assets, implemented controls, and residual risks.

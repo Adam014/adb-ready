@@ -44,6 +44,13 @@ const requests = [
     method: "tools/call",
     params: { name: "ensure_ready", arguments: {} },
   },
+  { jsonrpc: "2.0", id: 5, method: "resources/templates/list", params: {} },
+  {
+    jsonrpc: "2.0",
+    id: 6,
+    method: "resources/read",
+    params: { uri: "adb-ready://targets" },
+  },
 ];
 const input = `${requests.map((request) => JSON.stringify(request)).join("\n")}\n`;
 const requiredTools = [
@@ -99,7 +106,7 @@ async function verifyRuntime(runtime) {
   };
   child.stdout.on("data", (chunk) => {
     stdout = collect(stdout, chunk);
-    if (!stdinEnded && stdout.includes('"id":4')) {
+    if (!stdinEnded && stdout.includes('"id":6')) {
       stdinEnded = true;
       child.stdin.end();
     }
@@ -134,19 +141,39 @@ async function verifyRuntime(runtime) {
   }
 
   const lines = stdout.trim().split(/\r?\n/u);
-  if (lines.length !== 4) {
-    throw new Error(`${runtime.name} MCP returned ${String(lines.length)} responses, expected 4`);
+  if (lines.length !== 6) {
+    throw new Error(`${runtime.name} MCP returned ${String(lines.length)} responses, expected 6`);
   }
   const responses = lines.map((line) => JSON.parse(line));
   const initialize = responses.find(({ id }) => id === 1)?.result;
   const tools = responses.find(({ id }) => id === 2)?.result?.tools;
   const resources = responses.find(({ id }) => id === 3)?.result?.resources;
   const readiness = responses.find(({ id }) => id === 4)?.result;
+  const templates = responses.find(({ id }) => id === 5)?.result?.resourceTemplates;
+  const targetResource = responses.find(({ id }) => id === 6)?.result?.contents?.[0];
   if (initialize?.serverInfo?.name !== "adb-ready") {
     throw new Error(`${runtime.name} MCP did not identify ADB Ready`);
   }
   if (!Array.isArray(tools) || !Array.isArray(resources)) {
     throw new Error(`${runtime.name} MCP is missing tools or resources`);
+  }
+  if (
+    !Array.isArray(templates) ||
+    !templates.some(({ uriTemplate }) => uriTemplate === "adb-ready://sessions/{sessionId}") ||
+    !templates.some(
+      ({ uriTemplate }) =>
+        uriTemplate === "adb-ready://sessions/{sessionId}/events/{offset}/{limit}",
+    ) ||
+    !templates.some(({ uriTemplate }) => uriTemplate === "adb-ready://sessions/{sessionId}/context")
+  ) {
+    throw new Error(`${runtime.name} MCP session resource templates are missing`);
+  }
+  const targetPayload = JSON.parse(targetResource?.text ?? "null");
+  if (
+    targetResource?.uri !== "adb-ready://targets" ||
+    targetPayload?.data?.targets?.[0]?.serial !== "fixture-usb"
+  ) {
+    throw new Error(`${runtime.name} MCP target resource is invalid`);
   }
 
   const toolNames = tools.map(({ name }) => name).sort();

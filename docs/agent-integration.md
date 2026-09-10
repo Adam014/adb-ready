@@ -148,9 +148,18 @@ Later tools cannot silently switch to another target.
 | Safe UI actions | `tap_ui`, `long_press_ui`, `swipe_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui` |
 | Saved diagnostics | `get_session_problems`, `compile_debug_context` |
 
-The `adb-ready://sessions` resource lists saved local sessions. Tool results
-contain the same structured success, problem, evidence, and verification data
-used by CLI JSON output.
+MCP resources keep larger read-only context outside tool calls:
+
+| Resource | Content |
+| --- | --- |
+| `adb-ready://targets` | current target inventory and this connection's bound target |
+| `adb-ready://sessions` | bounded saved-session manifests |
+| `adb-ready://sessions/{sessionId}` | one session manifest |
+| `adb-ready://sessions/{sessionId}/events/{offset}/{limit}` | a page of up to 200 redacted events |
+| `adb-ready://sessions/{sessionId}/context` | a bounded redacted Markdown context document |
+
+Tool results contain the same structured success, problem, evidence, and
+verification data used by CLI JSON output.
 
 The npm package also ships `schema/agent-tools-v1.json`, generated from the
 server's real `tools/list` response during every build. Integrations can inspect

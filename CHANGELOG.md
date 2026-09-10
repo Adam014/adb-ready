@@ -25,6 +25,8 @@ breaking changes.
   or destructive app removal.
 - Generate or safely merge project MCP setup for Codex, Claude Code, Cursor,
   and VS Code, with non-mutating snippets for Windsurf and generic clients.
+- Expose current targets, saved manifests, paginated redacted events, and
+  bounded Markdown context as local MCP resources.
 - Safely tap, long-press, swipe, type, press allowlisted keys, and wait for exact
   UI postconditions with stale-reference protection and before/after evidence.
 - Replace the command-heavy interactive home with focused workflow categories

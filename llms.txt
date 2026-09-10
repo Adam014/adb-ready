@@ -10,6 +10,7 @@
 - Machine output: `adb-ready COMMAND --json --non-interactive`
 - MCP stdio server: `node ./node_modules/adb-ready/dist/cli.js mcp`
 - Agent setup: `adb-ready agent setup CLIENT --dry-run`
+- MCP resources: `adb-ready://targets` and `adb-ready://sessions`
 
 ## Agent contract
 
@@ -33,3 +34,4 @@
 - Automation contract: `docs/automation.md`
 - Compatibility: `COMPATIBILITY.md`
 - Security: `SECURITY.md`
+- Threat model: `docs/threat-model.md`

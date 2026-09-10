@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
-import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
+import { type CallToolResult, McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import manifest from "../../package.json" with { type: "json" };
@@ -118,6 +118,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     },
   );
   const load = async () => await loadConfig({ cwd: options.cwd, env: options.env });
+  const sessionStore = { env: options.env };
   const register = <Shape extends z.ZodRawShape>(
     name: string,
     description: string,
@@ -560,7 +561,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "Read structured problems from one saved local development session.",
     z.object({ sessionId: z.string().min(1).optional() }),
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
-    async ({ sessionId }) => toolResult((await runProblemsCommand(sessionId)).result),
+    async ({ sessionId }) => toolResult((await runProblemsCommand(sessionId, sessionStore)).result),
   );
   register(
     "compile_debug_context",
@@ -571,17 +572,128 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     }),
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     async ({ sessionId, budget }) =>
-      toolResult((await runContextCommand(sessionId, budget)).result),
+      toolResult((await runContextCommand(sessionId, budget, sessionStore)).result),
+  );
+  server.registerResource(
+    "current-targets",
+    "adb-ready://targets",
+    { title: "ADB Ready current targets", mimeType: "application/json" },
+    async (uri) => {
+      const loaded = await load();
+      const value = loaded.ok
+        ? (await runDevices(commandConfig(loaded.config), dependencies)).result
+        : {
+            ok: false,
+            problems: loaded.errors.map(({ code, message }) => ({ code, message })),
+          };
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ ...value, boundTarget: bound ?? null }),
+          },
+        ],
+      };
+    },
   );
   server.registerResource(
     "saved-sessions",
     "adb-ready://sessions",
     { title: "ADB Ready saved sessions", mimeType: "application/json" },
     async (uri) => {
-      const execution = await runSessionCommand("list", undefined);
+      const execution = await runSessionCommand("list", undefined, sessionStore);
       return {
         contents: [
           { uri: uri.href, mimeType: "application/json", text: JSON.stringify(execution.result) },
+        ],
+      };
+    },
+  );
+  server.registerResource(
+    "session-manifest",
+    new ResourceTemplate("adb-ready://sessions/{sessionId}", { list: undefined }),
+    { title: "ADB Ready session manifest", mimeType: "application/json" },
+    async (uri, { sessionId }) => {
+      const execution = await runSessionCommand("show", String(sessionId), sessionStore);
+      return {
+        contents: [
+          { uri: uri.href, mimeType: "application/json", text: JSON.stringify(execution.result) },
+        ],
+      };
+    },
+  );
+  server.registerResource(
+    "session-events",
+    new ResourceTemplate("adb-ready://sessions/{sessionId}/events/{offset}/{limit}", {
+      list: undefined,
+    }),
+    { title: "ADB Ready paginated session events", mimeType: "application/json" },
+    async (uri, { sessionId, offset, limit }) => {
+      const parsedOffset = Number(offset);
+      const parsedLimit = Number(limit);
+      if (
+        !Number.isSafeInteger(parsedOffset) ||
+        parsedOffset < 0 ||
+        !Number.isSafeInteger(parsedLimit) ||
+        parsedLimit < 1 ||
+        parsedLimit > 200
+      ) {
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({
+                ok: false,
+                problems: [
+                  {
+                    code: "MCP_SESSION_PAGE_INVALID",
+                    message: "offset must be a non-negative integer and limit must be 1-200.",
+                  },
+                ],
+              }),
+            },
+          ],
+        };
+      }
+      const execution = await runSessionCommand("events", String(sessionId), sessionStore);
+      const data = execution.result.data;
+      const page =
+        data !== null && data.action === "events"
+          ? {
+              ...execution.result,
+              data: {
+                session: data.session,
+                offset: parsedOffset,
+                limit: parsedLimit,
+                total: data.events.length,
+                nextOffset:
+                  parsedOffset + parsedLimit < data.events.length
+                    ? parsedOffset + parsedLimit
+                    : null,
+                events: data.events.slice(parsedOffset, parsedOffset + parsedLimit),
+              },
+            }
+          : execution.result;
+      return {
+        contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(page) }],
+      };
+    },
+  );
+  server.registerResource(
+    "session-context",
+    new ResourceTemplate("adb-ready://sessions/{sessionId}/context", { list: undefined }),
+    { title: "ADB Ready redacted session context", mimeType: "text/markdown" },
+    async (uri, { sessionId }) => {
+      const execution = await runContextCommand(String(sessionId), 12_000, sessionStore);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: execution.result.ok ? "text/markdown" : "application/json",
+            text: execution.result.data?.markdown ?? JSON.stringify(execution.result),
+          },
         ],
       };
     },
