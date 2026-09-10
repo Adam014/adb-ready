@@ -92,6 +92,37 @@ describe("selectOne", () => {
     await expect(selection).resolves.toEqual({ kind: "selected", value: "emulator" });
   });
 
+  test("processes navigation and confirmation delivered in one input chunk", async () => {
+    const input = new FakeInput();
+    const selection = selectOne({
+      title: "Select",
+      options,
+      input,
+      sink: new MemorySink(),
+      capabilities,
+    });
+
+    input.send("\u001B[B\r");
+
+    await expect(selection).resolves.toEqual({ kind: "selected", value: "emulator" });
+  });
+
+  test("reassembles an arrow sequence split across input chunks", async () => {
+    const input = new FakeInput();
+    const selection = selectOne({
+      title: "Select",
+      options,
+      input,
+      sink: new MemorySink(),
+      capabilities,
+    });
+
+    input.send("\u001B");
+    input.send("[B\r");
+
+    await expect(selection).resolves.toEqual({ kind: "selected", value: "emulator" });
+  });
+
   test("restores raw mode and cursor after Ctrl-C", async () => {
     const input = new FakeInput();
     const sink = new MemorySink();

@@ -178,6 +178,8 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
     let frame = 0;
     let settled = false;
     let refreshTimer: ReturnType<typeof setInterval> | undefined;
+    let escapeTimer: ReturnType<typeof setTimeout> | undefined;
+    let bufferedInput = "";
 
     const attempt = (operation: () => unknown) => {
       try {
@@ -191,6 +193,9 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
       attempt(() => options.signal?.removeEventListener("abort", onAbort));
       if (refreshTimer !== undefined) {
         clearInterval(refreshTimer);
+      }
+      if (escapeTimer !== undefined) {
+        clearTimeout(escapeTimer);
       }
       if (!wasRaw) {
         attempt(() => options.input.setRawMode?.(false));
@@ -210,41 +215,61 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
       lineCount = renderMenu(options, selected, lineCount, frame);
     };
     const onAbort = () => settle({ kind: "cancelled", reason: "signal" });
-    const onData = (chunk: Uint8Array | string) => {
-      const input = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-      if (input.includes("\u0003")) {
-        settle({ kind: "cancelled", reason: "interrupt" });
-        return;
-      }
-      if (input === "\u001B") {
-        settle({ kind: "cancelled", reason: "escape" });
-        return;
-      }
-      if (input.includes("\u001B[A")) {
-        selected = nextEnabled(options.options, selected, -1);
-        draw();
-        return;
-      }
-      if (input.includes("\u001B[B")) {
-        selected = nextEnabled(options.options, selected, 1);
-        draw();
-        return;
-      }
-      const shortcut = input.match(/^[1-9]$/u);
-      if (shortcut !== null) {
-        const index = Number(shortcut[0]) - 1;
-        if (options.options[index] !== undefined && options.options[index]?.disabled !== true) {
-          selected = index;
+    const cancelEscape = () => {
+      escapeTimer = undefined;
+      settle({ kind: "cancelled", reason: "escape" });
+    };
+    const processInput = () => {
+      while (!settled && bufferedInput !== "") {
+        if (bufferedInput.startsWith("\u0003")) {
+          settle({ kind: "cancelled", reason: "interrupt" });
+          return;
+        }
+        if (bufferedInput.startsWith("\u001B[A")) {
+          bufferedInput = bufferedInput.slice(3);
+          selected = nextEnabled(options.options, selected, -1);
           draw();
+          continue;
         }
-        return;
-      }
-      if (input.includes("\r") || input.includes("\n")) {
-        const selectedOption = options.options[selected];
-        if (selectedOption !== undefined && selectedOption.disabled !== true) {
-          settle({ kind: "selected", value: selectedOption.value });
+        if (bufferedInput.startsWith("\u001B[B")) {
+          bufferedInput = bufferedInput.slice(3);
+          selected = nextEnabled(options.options, selected, 1);
+          draw();
+          continue;
+        }
+        if (bufferedInput.startsWith("\u001B")) {
+          if (bufferedInput.length === 1) {
+            escapeTimer ??= setTimeout(cancelEscape, 25);
+            return;
+          }
+          cancelEscape();
+          return;
+        }
+        const character = bufferedInput[0];
+        bufferedInput = bufferedInput.slice(1);
+        if (character === "\r" || character === "\n") {
+          const selectedOption = options.options[selected];
+          if (selectedOption !== undefined && selectedOption.disabled !== true) {
+            settle({ kind: "selected", value: selectedOption.value });
+          }
+          return;
+        }
+        if (character !== undefined && /^[1-9]$/u.test(character)) {
+          const index = Number(character) - 1;
+          if (options.options[index] !== undefined && options.options[index]?.disabled !== true) {
+            selected = index;
+            draw();
+          }
         }
       }
+    };
+    const onData = (chunk: Uint8Array | string) => {
+      if (escapeTimer !== undefined) {
+        clearTimeout(escapeTimer);
+        escapeTimer = undefined;
+      }
+      bufferedInput += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+      processInput();
     };
 
     try {
