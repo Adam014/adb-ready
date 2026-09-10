@@ -2,6 +2,7 @@ import process from "node:process";
 import { EventBus } from "../src/core/event-bus.js";
 import { type Problem, type ResultEnvelope, SCHEMA_VERSION } from "../src/domain/contracts.js";
 import { confirmAction } from "../src/ui/confirm.js";
+import { readPairingCode } from "../src/ui/pairing-code.js";
 import { ProgressRenderer } from "../src/ui/progress-renderer.js";
 import { renderResult } from "../src/ui/result-renderer.js";
 import { selectOne } from "../src/ui/select.js";
@@ -11,18 +12,25 @@ type ScenarioName =
   | "success"
   | "missing-adb"
   | "no-devices"
+  | "wireless-discovery"
   | "multiple-devices"
   | "unavailable-devices"
   | "slow-progress"
   | "recovery"
   | "interrupt"
   | "confirmation"
+  | "pairing-code"
   | "output-modes";
 
 const SCENARIOS: Array<{ value: ScenarioName; label: string; description: string }> = [
   { value: "success", label: "Successful discovery", description: "One ready USB target" },
   { value: "missing-adb", label: "Missing ADB", description: "Environment error and next action" },
   { value: "no-devices", label: "No devices", description: "Non-fatal empty inventory" },
+  {
+    value: "wireless-discovery",
+    label: "Wireless target discovered",
+    description: "Visible mDNS service with a safe connect action",
+  },
   {
     value: "multiple-devices",
     label: "Multiple devices",
@@ -44,6 +52,11 @@ const SCENARIOS: Array<{ value: ScenarioName; label: string; description: string
     value: "confirmation",
     label: "Safe confirmation",
     description: "Action, scope, risk, and automation equivalent",
+  },
+  {
+    value: "pairing-code",
+    label: "Secure pairing input",
+    description: "Six-digit input without terminal echo",
   },
   { value: "output-modes", label: "Output modes", description: "Plain, JSON, and NDJSON previews" },
 ];
@@ -75,6 +88,19 @@ const emulator = {
   model: "Android SDK emulator",
   properties: { model: "Android_SDK_emulator", transport_id: "2" },
   unparsed: [],
+};
+const wirelessService = {
+  instance: "adb-PHONE-DEMO-xYz",
+  rawServiceType: "_adb-tls-connect._tcp",
+  serviceType: "connect" as const,
+  endpoint: {
+    host: "192.0.2.20",
+    port: 37123,
+    serial: "192.0.2.20:37123",
+    version: 4 as const,
+  },
+  givenName: "Fixture Pixel",
+  deviceModel: "Pixel 9",
 };
 
 function problem(overrides: Partial<Problem> & Pick<Problem, "code" | "summary">): Problem {
@@ -179,6 +205,42 @@ async function runScenario(name: ScenarioName): Promise<void> {
     human(
       result([], [problem({ code: "NO_TARGETS", summary: "No Android targets are visible." })]),
     );
+  } else if (name === "wireless-discovery") {
+    human({
+      ...result(
+        [],
+        [
+          problem({
+            code: "NO_TARGETS",
+            summary: "Wireless Android services are visible, but no target is connected.",
+            detail: `Run adb-ready connect ${wirelessService.endpoint.serial} to establish and verify the target.`,
+            actions: [
+              {
+                id: "connect_discovered_target",
+                title: `Connect ${wirelessService.endpoint.serial}`,
+                kind: "command",
+                risk: "local-additive",
+                automatic: false,
+                idempotent: true,
+                command: {
+                  executable: "adb-ready",
+                  args: ["connect", wirelessService.endpoint.serial],
+                },
+              },
+            ],
+          }),
+        ],
+      ),
+      data: {
+        adbPath: "~/Android/sdk/platform-tools/adb",
+        devices: [],
+        targets: [],
+        discovery: {
+          mdns: { available: true, method: "track", services: [wirelessService] },
+          identity: { probed: 0, resolved: 0 },
+        },
+      },
+    });
   } else if (name === "multiple-devices") {
     let fixture = result([readyDevice, emulator]);
     if (capabilities.interactive) {
@@ -283,6 +345,23 @@ async function runScenario(name: ScenarioName): Promise<void> {
     } else {
       process.stderr.write(
         "Confirmation unavailable in non-interactive mode. No target was changed.\n",
+      );
+    }
+  } else if (name === "pairing-code") {
+    if (capabilities.interactive) {
+      const pairing = await readPairingCode({
+        input: process.stdin,
+        sink: process.stderr,
+        capabilities,
+      });
+      process.stderr.write(
+        pairing.kind === "submitted"
+          ? "Fixture result: six digits accepted and discarded. No target was changed.\n"
+          : `Fixture result: ${pairing.kind}. No target was changed.\n`,
+      );
+    } else {
+      process.stderr.write(
+        "Pairing input unavailable in non-interactive mode. No code was requested.\n",
       );
     }
   } else {
