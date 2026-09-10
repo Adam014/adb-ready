@@ -128,6 +128,8 @@ latest session is used when no ID is provided.
 
 Context options:
   --budget CHARACTERS    Maximum Markdown size (default: 12000, minimum: 1000)
+  --since DURATION       Keep only the final window, such as 30s or 5m
+  --only FILTERS         Keep comma-separated problems,recovery,logs,child,state,target,ports
   --format FORMAT        markdown (default), json, plain, or ndjson
 `,
   dev: `Usage: adb-ready dev [options] [-- EXECUTABLE ARG...]
@@ -624,6 +626,10 @@ async function runCliInternal(
             options.contextBudget,
             storeOptions,
             dependencies,
+            {
+              ...(options.contextSinceMs === undefined ? {} : { sinceMs: options.contextSinceMs }),
+              ...(options.contextOnly === undefined ? {} : { only: options.contextOnly }),
+            },
           )
         : options.command === "sessions"
           ? await runSessionCommand(

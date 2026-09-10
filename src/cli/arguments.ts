@@ -18,6 +18,14 @@ export type CommandName =
   | "sessions"
   | "version";
 export type OutputFormat = "human" | "json" | "markdown" | "ndjson" | "plain";
+export type ContextFilter =
+  | "child"
+  | "logs"
+  | "ports"
+  | "problems"
+  | "recovery"
+  | "state"
+  | "target";
 
 export interface CliOptions {
   command: CommandName;
@@ -65,6 +73,8 @@ export interface CliOptions {
   logDump?: boolean;
   logMaxRecords?: number;
   contextBudget?: number;
+  contextSinceMs?: number;
+  contextOnly?: ContextFilter[];
   configAction?: "explain" | "validate";
   force?: boolean;
 }
@@ -131,13 +141,13 @@ function failure(code: CliParseFailure["code"], message: string, option?: string
 }
 
 function parseDuration(value: string): number | undefined {
-  const match = value.match(/^(\d+(?:\.\d+)?)(ms|s|m)?$/u);
+  const match = value.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)?$/u);
   if (match === null) {
     return undefined;
   }
   const amount = Number(match[1]);
   const unit = match[2] ?? "ms";
-  const multiplier = unit === "m" ? 60_000 : unit === "s" ? 1_000 : 1;
+  const multiplier = unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : unit === "s" ? 1_000 : 1;
   const milliseconds = amount * multiplier;
   return Number.isSafeInteger(milliseconds) && milliseconds > 0 ? milliseconds : undefined;
 }
@@ -196,6 +206,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logDump = false;
   let logMaxRecords: number | undefined;
   let contextBudget: number | undefined;
+  let contextSinceMs: number | undefined;
+  const contextOnly: ContextFilter[] = [];
   let configAction: CliOptions["configAction"];
   let force = false;
 
@@ -489,14 +501,45 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     } else if (option === "--since") {
       const value = readValue();
       if (typeof value !== "string") return value;
-      if (!/^[0-9][0-9 .:-]{0,63}$/u.test(value)) {
+      if (command === "context") {
+        contextSinceMs = parseDuration(value);
+        if (contextSinceMs === undefined) {
+          return failure(
+            "CLI_INVALID_VALUE",
+            `Invalid context duration: ${value}. Use a value such as 30s, 5m, or 1h.`,
+            option,
+          );
+        }
+      } else if (!/^[0-9][0-9 .:-]{0,63}$/u.test(value)) {
         return failure(
           "CLI_INVALID_VALUE",
           `Invalid log start time: ${value}. Use an Android logcat timestamp.`,
           option,
         );
+      } else {
+        logSince = value;
       }
-      logSince = value;
+    } else if (option === "--only") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const filters = value.split(",").filter((item) => item !== "");
+      const allowed = new Set<ContextFilter>([
+        "child",
+        "logs",
+        "ports",
+        "problems",
+        "recovery",
+        "state",
+        "target",
+      ]);
+      if (
+        command !== "context" ||
+        filters.length === 0 ||
+        filters.some((item) => !allowed.has(item as ContextFilter))
+      ) {
+        return failure("CLI_INVALID_VALUE", `Invalid context filters: ${value}.`, option);
+      }
+      contextOnly.push(...(filters as ContextFilter[]));
     } else if (option === "--tail") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -716,6 +759,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (contextBudget !== undefined && command !== "context") {
     return failure("CLI_USAGE", "--budget can only be used with the context command.");
   }
+  if ((contextSinceMs !== undefined || contextOnly.length > 0) && command !== "context") {
+    return failure("CLI_USAGE", "Context filtering options can only be used with context.");
+  }
   if (format === "markdown" && command !== "context") {
     return failure("CLI_USAGE", "Markdown output is only available for the context command.");
   }
@@ -771,6 +817,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logDump ? { logDump: true } : {}),
       ...(logMaxRecords === undefined ? {} : { logMaxRecords }),
       ...(contextBudget === undefined ? {} : { contextBudget }),
+      ...(contextSinceMs === undefined ? {} : { contextSinceMs }),
+      ...(contextOnly.length === 0 ? {} : { contextOnly: [...new Set(contextOnly)] }),
       ...(configAction === undefined ? {} : { configAction }),
       ...(force ? { force: true } : {}),
     },

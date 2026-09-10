@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { type CompiledContext, compileSessionContext } from "../ai/context-compiler.js";
+import {
+  type CompiledContext,
+  type ContextCompilerOptions,
+  compileSessionContext,
+} from "../ai/context-compiler.js";
 import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ExitCode, SCHEMA_VERSION } from "../domain/contracts.js";
 import {
@@ -206,6 +210,7 @@ export async function runContextCommand(
   characterBudget: number | undefined,
   options: SessionStoreOptions = {},
   dependencies: SessionCommandDependencies = {},
+  compilerOptions: Omit<ContextCompilerOptions, "characterBudget"> = {},
 ): Promise<SessionCommandExecution<ContextCommandData>> {
   const resolved = await resolveManifest(sessionId, options);
   if (!resolved.ok) {
@@ -234,6 +239,7 @@ export async function runContextCommand(
   }
   const compiled = compileSessionContext(resolved.manifest, events.value, {
     ...(characterBudget === undefined ? {} : { characterBudget }),
+    ...compilerOptions,
   });
   return execution(
     "context",

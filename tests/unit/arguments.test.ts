@@ -285,12 +285,25 @@ describe("parseArguments", () => {
   });
 
   test("defaults AI context exports to bounded Markdown", () => {
-    expect(parseArguments(["context", "session-42", "--budget", "8000"])).toMatchObject({
+    expect(
+      parseArguments([
+        "context",
+        "session-42",
+        "--budget",
+        "8000",
+        "--since",
+        "5m",
+        "--only",
+        "problems,recovery,logs",
+      ]),
+    ).toMatchObject({
       ok: true,
       options: {
         command: "context",
         sessionId: "session-42",
         contextBudget: 8000,
+        contextSinceMs: 300_000,
+        contextOnly: ["problems", "recovery", "logs"],
         format: "markdown",
       },
     });
@@ -303,6 +316,10 @@ describe("parseArguments", () => {
       code: "CLI_USAGE",
     });
     expect(parseArguments(["context", "--budget", "999"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["context", "--only", "unknown"])).toMatchObject({
       ok: false,
       code: "CLI_INVALID_VALUE",
     });

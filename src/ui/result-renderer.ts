@@ -284,7 +284,7 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       }
       data.sessions.forEach((session, index) => {
         const branch = index === data.sessions.length - 1 ? glyphs.end : glyphs.branch;
-        const context = [session.projectName, session.preset].filter(Boolean).join(" · ");
+        const context = [session.preset, session.projectFingerprint].filter(Boolean).join(" · ");
         lines.push(
           `${style.dim(branch, capabilities)} ${clean(session.sessionId)} · ${clean(session.status)} · ${clean(session.updatedAt)}${context === "" ? "" : ` · ${clean(context)}`}`,
         );
@@ -335,6 +335,7 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       `${style.success(glyphs.success, capabilities)} Session   ${clean(result.data.sessionId)}`,
       `${style.success(glyphs.success, capabilities)} Context   ${String(result.data.characterCount)} characters`,
       `${style.success(glyphs.success, capabilities)} Evidence  ${String(result.data.includedEvents)} included · ${String(result.data.omittedEvents)} omitted`,
+      `${style.success(glyphs.success, capabilities)} Privacy   pseudonymized · redacted · local only`,
     );
   }
 
@@ -537,6 +538,7 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`character_count=${String(result.data.characterCount)}\n`);
     sink.write(`included_events=${String(result.data.includedEvents)}\n`);
     sink.write(`omitted_events=${String(result.data.omittedEvents)}\n`);
+    sink.write(`filtered_events=${String(result.data.filteredEvents)}\n`);
   }
   if (isInitData(result.data)) {
     sink.write(`status=${clean(result.data.status)}\n`);

@@ -7,13 +7,26 @@ export interface CompiledContext {
   characterCount: number;
   includedEvents: number;
   omittedEvents: number;
+  filteredEvents: number;
 }
+
+export type ContextEventFilter =
+  | "child"
+  | "logs"
+  | "ports"
+  | "problems"
+  | "recovery"
+  | "state"
+  | "target";
 
 export interface ContextCompilerOptions {
   characterBudget?: number;
+  sinceMs?: number;
+  only?: readonly ContextEventFilter[];
 }
 
 function eventPriority(event: AdbReadyEvent): number {
+  if (event.type === "log.problem") return 120;
   if (event.severity === "error") return 100;
   if (event.severity === "warning") return 80;
   if (/recovery|degraded|watch/u.test(event.type)) return 70;
@@ -26,6 +39,18 @@ function eventPriority(event: AdbReadyEvent): number {
     return 40;
   }
   return 10;
+}
+
+function matchesFilter(event: AdbReadyEvent, filter: ContextEventFilter): boolean {
+  if (filter === "child")
+    return event.source.startsWith("child") || event.type.startsWith("child.");
+  if (filter === "logs") return event.source === "logcat" || event.type.startsWith("log.");
+  if (filter === "ports") return event.source === "port" || /port|mapping/u.test(event.type);
+  if (filter === "problems") return event.severity === "error" || event.severity === "warning";
+  if (filter === "recovery") return /recovery|degraded|health|watch/u.test(event.type);
+  if (filter === "state") return event.type.startsWith("session.");
+  if (filter === "target") return event.source === "target" || event.type.startsWith("target.");
+  return false;
 }
 
 function eventLine(event: AdbReadyEvent): string {
@@ -58,6 +83,23 @@ export function compileSessionContext(
   if (!Number.isSafeInteger(characterBudget) || characterBudget < 1_000) {
     throw new RangeError("characterBudget must be a safe integer of at least 1000");
   }
+  if (
+    options.sinceMs !== undefined &&
+    (!Number.isSafeInteger(options.sinceMs) || options.sinceMs < 1)
+  ) {
+    throw new RangeError("sinceMs must be a positive safe integer");
+  }
+  const endTimestamp = Date.parse(
+    manifest.finishedAt ?? events.at(-1)?.timestamp ?? manifest.updatedAt,
+  );
+  const cutoff = options.sinceMs === undefined ? undefined : endTimestamp - options.sinceMs;
+  const eligibleEvents = events.filter((event) => {
+    if (cutoff !== undefined && Date.parse(event.timestamp) < cutoff) return false;
+    return options.only === undefined || options.only.length === 0
+      ? true
+      : options.only.some((filter) => matchesFilter(event, filter));
+  });
+  const filteredEvents = events.length - eligibleEvents.length;
   const candidateProblemLines = manifest.problems.map(
     (problem) =>
       `- **${compact(problem.code, 80)}** (${compact(problem.category, 80)}, ${problem.severity}, retryable=${String(problem.retryable)}): ${compact(problem.summary)} ${compact(problem.detail)}`,
@@ -73,8 +115,14 @@ export function compileSessionContext(
     `- Status: ${manifest.status}`,
     `- Started: ${manifest.startedAt}`,
     `- Finished: ${manifest.finishedAt ?? "still running or interrupted before finalization"}`,
-    `- Project: ${compact(manifest.projectName ?? "not recorded")}`,
+    `- Project: ${compact(manifest.projectFingerprint ?? "not recorded")}`,
     `- Preset: ${compact(manifest.preset ?? "not recorded")}`,
+    "",
+    "## Privacy",
+    "",
+    "- Device and project identities are pseudonymized before storage.",
+    "- Known credentials, tokens, pairing codes, paths, and private literals are redacted.",
+    "- No network request was made; review this local export before sharing it.",
     "",
     "## Problems",
     "",
@@ -100,7 +148,7 @@ export function compileSessionContext(
   ].join("\n");
   const footerReserve = 180;
   const available = Math.max(0, characterBudget - heading.length - footerReserve);
-  const ranked = events
+  const ranked = eligibleEvents
     .map((event) => ({ event, line: eventLine(event), priority: eventPriority(event) }))
     .sort(
       (left, right) => right.priority - left.priority || right.event.sequence - left.event.sequence,
@@ -121,7 +169,7 @@ export function compileSessionContext(
     timeline,
     fence,
     "",
-    `Included ${String(selected.length)} of ${String(events.length)} events; ${String(omittedEvents)} omitted by the context budget.`,
+    `Included ${String(selected.length)} of ${String(events.length)} events; ${String(filteredEvents)} filtered and ${String(eligibleEvents.length - selected.length)} omitted by the context budget.`,
     "",
   ].join("\n");
   const markdown = `${heading}${footer}`;
@@ -131,5 +179,6 @@ export function compileSessionContext(
     characterCount: markdown.length,
     includedEvents: selected.length,
     omittedEvents,
+    filteredEvents,
   };
 }

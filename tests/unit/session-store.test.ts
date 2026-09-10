@@ -78,7 +78,7 @@ describe("SessionRecorder", () => {
         value: {
           status: "completed",
           eventCount: 2,
-          projectName: "sample-app",
+          projectFingerprint: expect.stringMatching(/^sha256:[a-f0-9]{16}$/u),
           preset: "expo",
         },
       });

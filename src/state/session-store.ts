@@ -39,7 +39,7 @@ export interface SessionManifest {
   eventCount: number;
   eventBytes: number;
   targetFingerprint?: string;
-  projectName?: string;
+  projectFingerprint?: string;
   preset?: string;
   problems: StoredProblem[];
 }
@@ -395,7 +395,7 @@ export class SessionRecorder {
         : { targetFingerprint: fingerprint(input.targetIdentity) }),
       ...(input.projectName === undefined
         ? {}
-        : { projectName: redactText(input.projectName, redaction).value }),
+        : { projectFingerprint: fingerprint(input.projectName) }),
       ...(input.preset === undefined ? {} : { preset: input.preset }),
       problems: (input.problems ?? []).map((problem) => storedProblem(problem, redaction)),
     };
