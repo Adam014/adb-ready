@@ -1,98 +1,192 @@
+<div align="center">
+
 # ADB Ready
 
-> Make an Android target ready, then keep the development session working.
+**One Android target. One reliable development session.**
 
-ADB Ready is an early-alpha, Android-only developer CLI built around the real
-`adb` executable. It selects one target, prepares verified ports, starts the
-project's development command, and keeps the target identity and useful output
-inside one structured session.
+Select a device, prepare localhost ports, start your project, and keep the
+connection healthy—without stitching together fragile ADB scripts.
 
-## Try the alpha
+[![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
+[![Deno](https://img.shields.io/badge/Deno_2-tested-111827?logo=deno&logoColor=white)](https://deno.com/)
+[![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
 
-The standard npm entrypoint requires Node.js 22 or newer and Android SDK
-Platform-Tools. The same package is also exercised directly with Bun and Deno.
+[Quick start](#quick-start) · [Why ADB Ready](#why-adb-ready) ·
+[Workflows](#everyday-workflows) · [Configuration](#configuration) ·
+[Automation](#automation) · [Compatibility](#compatibility)
 
-```bash
-npx adb-ready@alpha
-npx adb-ready@alpha doctor
-npx adb-ready@alpha devices
+</div>
+
+```text
+$ adb-ready dev
+
+✓ Android target selected       Pixel 9 · wireless
+✓ Localhost ports ready         8081 → 8081
+✓ Development command started   pnpm run start --android
+● Session healthy               watching target, ports, and logs
 ```
 
-The registry alpha is the last published preview and may lag the current source.
-Until the next alpha is published, use the repository build below to exercise
-the complete command set documented here.
+ADB Ready is an ADB-first CLI for the complete everyday Android development
+loop. It uses the real `adb` installed on your machine, keeps every operation on
+one deterministic target, and works with Expo, React Native, native Gradle, or
+any custom command.
 
-To run the current repository build:
+> **Release status:** the published npm tag is an early preview and can lag the
+> current source while `0.1.0` is being validated. The command surface below
+> describes the current repository build.
+
+## Why ADB Ready?
+
+Android Studio and raw ADB remain excellent tools. The missing piece is a
+repeatable project-level session that joins them together.
+
+| Without ADB Ready | With ADB Ready |
+| --- | --- |
+| Find a usable serial and keep passing `-s` | Select one stable target once |
+| Reconnect Wireless debugging by hand | Detect degradation and attempt bounded recovery |
+| Recreate `adb reverse` mappings after a reconnect | Verify and repair the session's mappings |
+| Make Expo or React Native use the intended phone | Propagate `ANDROID_SERIAL` to every child process |
+| Read unrelated logcat noise | Stream package, PID, tag, level, and buffer-focused logs |
+| Copy terminal fragments into an AI chat | Export bounded, redacted diagnostic context |
+| Maintain a different shell script per project | Commit one validated project configuration |
+
+ADB Ready does not replace Android Studio, Expo, React Native, or ADB. It gives
+those tools one reliable target and one observable lifecycle.
+
+## Quick start
+
+### Requirements
+
+- Android SDK Platform-Tools with `adb` available through `PATH`, an Android SDK
+  installation, or `--adb PATH`.
+- Node.js 22 or newer for the standard npm entrypoint. Bun and Deno 2 can run
+  the same portable package.
+- An Android target visible over USB, an emulator, or Wireless debugging.
+
+Try the currently published preview without installing it:
+
+```bash
+npx adb-ready@alpha doctor
+npx adb-ready@alpha devices
+npx adb-ready@alpha
+```
+
+Or add it to a project:
+
+```bash
+npm install --save-dev adb-ready@alpha
+npx adb-ready init
+npx adb-ready dev
+```
+
+`adb-ready` opens the interactive home when no command is supplied. `adbr` is a
+short alias for the exact same executable.
+
+To test the latest source checkout:
 
 ```bash
 bun install --frozen-lockfile
 bun run build
+node dist/cli.js doctor
 node dist/cli.js dev
 ```
 
-The package also exposes the shorter `adbr` command. Both names invoke the same
-CLI entrypoint.
+## The development session
 
-## Available now
-
-- Interactive keyboard-driven home screen.
-- Environment and ADB diagnostics with `doctor`.
-- Unified USB, emulator, and wireless target discovery with `devices`.
-- Guided or explicit wireless connection with `connect`.
-- Secure Android Wireless debugging pairing with `pair`.
-- Verified, conflict-safe TCP reverse and forward port management.
-- One-command Expo, React Native, native Gradle, or custom development sessions.
-- Automatic project and package-manager detection with explicit overrides.
-- One selected target propagated to child tools through `ANDROID_SERIAL`.
-- Correlated, bounded, redacted child output and targeted logcat events.
-- Direct lifecycle hooks with timeouts and `fail`, `warn`, or `ignore` policies.
-- Deterministic selection by serial, alias, transport ID, or last verified
-  target.
-- Named project and user profiles with validated configuration.
-- Human, plain, JSON, and NDJSON output.
-- Portable execution through Node, Bun, and Deno.
-
-Run `adb-ready --help` for the complete command reference.
-
-## Development sessions
-
-From an Expo, React Native, or native Gradle project, the default workflow is:
+Run this from an Expo, React Native, or native Gradle project:
 
 ```bash
 adb-ready dev
 ```
 
-Expo and React Native receive a verified reverse mapping for TCP port 8081 by
-default. Add or replace the configured port set by repeating `--port`:
+ADB Ready then:
+
+1. discovers and deterministically selects one usable Android target;
+2. detects the project and its package manager;
+3. creates and verifies required reverse-port mappings;
+4. launches the project command with the same `ANDROID_SERIAL`;
+5. correlates child output, targeted logcat, ADB operations, and session state;
+6. watches the target and ports, applying bounded safe recovery when needed;
+7. removes only the mappings created by this session; and
+8. stores a bounded, redacted local record for later diagnosis.
+
+Expo and React Native default to reverse TCP port `8081`. Add any local API or
+development service by repeating `--port`:
 
 ```bash
 adb-ready dev --port 8081 --port 8000
 ```
 
-Any project can use a direct custom command. Arguments after `--` are passed as
-an argument array without a command shell:
+Use any executable without invoking a command shell:
 
 ```bash
 adb-ready dev -- pnpm run android:local
 adb-ready dev -- bun x expo start --host lan --port 8081 --android
 ```
 
-ADB Ready refuses to replace an existing conflicting reverse mapping. At exit
-it removes only mappings created by that session and independently verifies the
-result. A failed child keeps its exact exit code. Ctrl-C is forwarded to owned
-processes and returns the interrupted exit code after cleanup.
-
-Use `--dry-run` to inspect the exact target-bound ADB and child-process plan
-without running hooks, changing ports, or starting the project command:
+Inspect the exact target-bound plan without connecting, changing mappings,
+running hooks, or starting the child command:
 
 ```bash
 adb-ready dev --port 8081 --dry-run --json
 ```
 
-## Port workflows
+ADB Ready preserves child exit codes, forwards cancellation to owned processes,
+and independently verifies cleanup. It never silently replaces a conflicting
+port mapping.
 
-Forward and reverse mappings use explicit host/device semantics and are always
-verified after a mutation:
+## Everyday workflows
+
+### Check the machine
+
+```bash
+adb-ready doctor
+adb-ready doctor --json
+```
+
+`doctor` performs read-only host, runtime, ADB capability, server, and target
+checks, then reports actionable problems instead of dumping raw command output.
+
+### Find the right Android target
+
+```bash
+adb-ready devices
+adb-ready devices --select
+adb-ready devices --device emulator-5554
+adb-ready devices --transport-id 7
+adb-ready devices --last
+```
+
+Selection can use an exact serial, configured alias, transport ID, the last
+verified target, or the interactive picker. Ambiguous, offline, and unauthorized
+targets fail explicitly instead of being guessed.
+
+### Pair and connect wirelessly
+
+On Android, open **Developer options → Wireless debugging** and choose
+**Pair device with pairing code**.
+
+```bash
+adb-ready pair 192.168.1.42:41235
+adb-ready connect 192.168.1.42:37123
+```
+
+The pairing code is entered through a hidden prompt, never as a command-line
+argument. For non-interactive automation it can be read from standard input:
+
+```bash
+printf '%s\n' "$ANDROID_PAIRING_CODE" \
+  | adb-ready pair 192.168.1.42:41235 --pairing-code-stdin
+```
+
+Pairing and connection ports are intentionally kept separate. If `connect` is
+called without an endpoint, exactly one valid ADB mDNS connect service must be
+discoverable.
+
+### Manage verified ports
 
 ```bash
 adb-ready ports reverse list
@@ -105,63 +199,63 @@ adb-ready ports forward add 9229 3000
 adb-ready ports forward remove 9229
 ```
 
-The current command family intentionally supports TCP endpoints. Other ADB
-socket families remain available through raw ADB until they receive an equally
-clear public contract.
+The second port is optional and defaults to the first. Adds are idempotent,
+verified after mutation, and refuse to overwrite an existing conflicting
+mapping. The current public contract intentionally covers TCP endpoints.
 
-## Wireless connection
-
-Connect to an explicit endpoint, or omit it to use ADB's mDNS discovery:
+### Stream focused Android logs
 
 ```bash
-npx adb-ready@alpha connect 192.168.1.42:37123
-npx adb-ready@alpha connect
+adb-ready logs --package com.example.app
+adb-ready logs --tag ReactNativeJS --level W
+adb-ready logs --buffer main --buffer crash --tail 200
+adb-ready logs --package com.example.app --dump --json
 ```
 
-ADB Ready verifies the connected target before remembering it. A dry run shows
-the planned ADB operations without changing state:
+Logs can be filtered by package, PID, included or excluded tags, priority,
+buffer, tail count, and Android logcat timestamp. Known Android, native, ANR,
+and React Native failures become structured findings while unparsed lines stay
+visible.
+
+### Inspect a past session
 
 ```bash
-npx adb-ready@alpha connect 192.168.1.42:37123 --dry-run
+adb-ready sessions list
+adb-ready sessions show
+adb-ready sessions events
+adb-ready problems
 ```
 
-Pairing codes are never accepted as command-line arguments because command
-arguments can be exposed through shell history and process inspection. Use the
-hidden interactive prompt:
+`show`, `events`, and `problems` use the latest session when no ID is supplied.
+Pass an ID from `sessions list` to inspect a specific run.
+
+### Prepare context for any AI assistant
 
 ```bash
-npx adb-ready@alpha pair 192.168.1.42:41235
+adb-ready context
+adb-ready context --since 5m --only problems,recovery,logs
+adb-ready context SESSION_ID --budget 8000
 ```
 
-For non-interactive automation, send the six-digit code over standard input:
+The default output is a local Markdown brief with prioritized evidence. It has
+a strict character budget, pseudonymizes device and project identities, redacts
+known credentials and private literals, and makes no network request. Review it
+before sharing it with any external service.
+
+## Configuration
+
+Generate a minimal config from detected project signals:
 
 ```bash
-printf '%s\n' "$ANDROID_PAIRING_CODE" | npx adb-ready@alpha pair 192.168.1.42:41235 --pairing-code-stdin
+adb-ready init --dry-run
+adb-ready init
+adb-ready config validate
+adb-ready config explain
 ```
 
-Pairing and connection use different ports. ADB Ready keeps them separate and
-does not infer one from the other.
-
-## Selecting the right target
-
-Every selector is explicit and deterministic:
-
-```bash
-npx adb-ready@alpha devices --select
-npx adb-ready@alpha devices --device emulator-5554
-npx adb-ready@alpha devices --transport-id 7
-npx adb-ready@alpha devices --last
-```
-
-`-s` is an alias for `--device`. A device selector can be an exact ADB serial or
-a configured alias. Ambiguous or unavailable targets produce a structured
-error instead of silently choosing one.
-
-## Configuration and profiles
-
-ADB Ready searches parent directories for `adb-ready.config.json`. An explicit
-file can be selected with `--config PATH` or `ADB_READY_CONFIG`. The published
-JSON schema is included in the package as `schema/config-v1.schema.json`.
+ADB Ready searches parent directories for `adb-ready.config.json`. It supports
+an explicit file through `--config PATH` or `ADB_READY_CONFIG`, plus named
+profiles through `--profile NAME` or `ADB_READY_PROFILE`.
 
 ```json
 {
@@ -174,120 +268,150 @@ JSON schema is included in the package as `schema/config-v1.schema.json`.
     }
   },
   "profiles": {
-    "local": {
-      "timeoutMs": 8000,
+    "base": {
       "dev": {
         "preset": "expo",
         "packageManager": "pnpm",
         "reversePorts": [8081, 8000],
         "logs": true,
-        "cleanupPorts": true,
-        "journal": {
-          "maxEntries": 2000,
-          "maxBytes": 2097152,
-          "minimumSeverity": "info",
-          "redactEnvironment": ["PRIVATE_API_TOKEN"]
-        },
-        "hooks": {
-          "onReady": [
-            {
-              "run": ["node", "scripts/android-ready.mjs"],
-              "timeoutMs": 5000,
-              "failure": "warn",
-              "envAllowlist": ["CI"]
-            }
-          ]
-        }
+        "watch": true
       }
     },
-    "ci": {
-      "extends": "local",
-      "output": {
-        "interactive": false,
-        "animation": false,
-        "color": false
+    "local": {
+      "extends": "base",
+      "dev": {
+        "recovery": {
+          "maxAttempts": 3,
+          "totalTimeoutMs": 30000
+        },
+        "session": {
+          "maxSessions": 30,
+          "maxAgeDays": 14
+        }
       }
     }
   }
 }
 ```
 
-Select a profile with `--profile NAME` or `ADB_READY_PROFILE`. Precedence is
-command-line options, environment variables, selected profile, project config,
-user config, then built-in defaults. Invalid keys, values, references, and
-profile cycles fail early with actionable errors.
+Configuration precedence is deterministic:
 
-Project command resolution is deterministic: explicit config or CLI choice,
-then `packageManager`, npm `devEngines.packageManager`, lockfiles, and finally
-an available executable. Conflicting metadata is reported instead of guessed.
-Hook commands are direct executable/argument arrays; they do not invoke a shell,
-inherit only a small platform environment plus explicitly allowlisted names,
-and send their output through the session redactor.
-
-## Automation output
-
-Use JSON for one complete result or NDJSON for event-oriented consumers:
-
-```bash
-npx adb-ready@alpha doctor --json
-npx adb-ready@alpha devices --format ndjson --non-interactive
-npx adb-ready@alpha connect 192.168.1.42:37123 --dry-run --json
+```text
+CLI → environment → selected profile → project config → user config → defaults
 ```
 
-Machine data is written to `stdout`; human diagnostics and progress belong on
-`stderr`. Non-interactive mode never opens a prompt or takes over the terminal.
+Invalid keys, values, references, and profile cycles fail early.
+`config explain` shows each resolved value and where it came from. The complete
+machine-readable contract ships as
+[`schema/config-v1.schema.json`](./schema/config-v1.schema.json).
 
-## Runtime and package-manager entrypoints
+Advanced configuration supports lifecycle hooks, direct command arrays,
+recovery budgets, session retention, event-journal limits, source/severity
+filters, and additional environment names to redact. Hook commands run without
+a shell, inherit only a small safe environment plus explicit allowlisted names,
+and support `fail`, `warn`, or `ignore` policies.
 
-The packed npm artifact is continuously exercised through the common package
-manager entrypoints available in the test environment:
+## Automation
+
+Every command uses the same output and execution contract:
+
+```bash
+adb-ready devices --json --non-interactive
+adb-ready doctor --format plain --no-color
+adb-ready logs --format ndjson --non-interactive
+adb-ready connect 192.168.1.42:37123 --dry-run --json
+```
+
+- `--json` returns one versioned result envelope.
+- `--format ndjson` streams versioned events for long-running consumers.
+- Machine-readable data goes to `stdout`; human progress and diagnostics go to
+  `stderr`.
+- Redirected, CI, JSON, and `--non-interactive` runs never prompt or take over
+  the terminal.
+- `--timeout`, cancellation, stable problem codes, and meaningful exit codes
+  make failures scriptable.
+- `--adb-host` and `--adb-port` can target an explicitly configured remote ADB
+  server for environments such as WSL, containers, VMs, or device labs.
+
+## Runtime entrypoints
+
+The project uses Bun for development, but the distributed CLI does not require
+a project to use Bun.
 
 ```bash
 npx adb-ready@alpha doctor
 pnpm dlx adb-ready@alpha doctor
 yarn dlx adb-ready@alpha doctor
 bunx adb-ready@alpha doctor
-```
 
-Explicit alternative runtimes are also supported:
-
-```bash
 bunx --bun adb-ready@alpha doctor
 deno run -A npm:adb-ready@alpha doctor
 ```
 
-The public platform target is macOS, Linux, and Windows. ADB commands are run as
-owned child processes with bounded timeouts and cleanup. ADB Ready never
-implicitly restarts the shared ADB server or disconnects unrelated targets.
-See [COMPATIBILITY.md](./COMPATIBILITY.md) for the tested, runtime, and
-upstream-capable support tiers, including arm64, x64, WSL, containers, musl,
+One package serves npm, pnpm, Yarn, Bun, Node.js, and Deno users. Project-command
+detection is independent of the runtime used to launch ADB Ready.
+
+## Compatibility
+
+The public host target is macOS, Linux, and Windows. The npm artifact is
+architecture-neutral JavaScript with no native addon and no artificial OS or
+CPU installation block.
+
+ADB Ready feature-detects relevant ADB capabilities rather than assuming them
+from the Android version. USB access, mDNS, Wireless debugging, VPN routing,
+container networking, and remote ADB visibility still depend on the host and
+its Platform-Tools installation.
+
+See [COMPATIBILITY.md](./COMPATIBILITY.md) for CI-tested, runtime-tested, and
+upstream-capable support tiers, including arm64, x64, WSL 2, containers, musl,
 ChromeOS Linux, and BSD.
 
-## ADB compatibility
+## Safety and privacy
 
-ADB Ready feature-detects modern ADB capabilities instead of guessing from the
-Android version. With ADB 37 it can consume the ADB Wi-Fi 2.0 discovery stream;
-older Platform-Tools continue through the legacy mDNS snapshot path.
+- The real `adb` remains the backend; ADB Ready does not replace its protocol.
+- A selected target is explicit in every direct ADB operation and child process.
+- The shared ADB server is never restarted implicitly.
+- Unrelated devices, processes, connections, and port mappings are left alone.
+- Mutating operations support dry runs where a meaningful plan exists.
+- Pairing codes are excluded from argv and known secret patterns are redacted.
+- Session history is private, bounded, stored with restrictive permissions, and
+  can be disabled through configuration.
+- Nothing is uploaded by ADB Ready.
 
-Wireless discovery still depends on the local network. Guest or corporate Wi-Fi,
-client isolation, VPNs, containers, and virtual machines can prevent mDNS or
-direct device routing even when pairing settings are correct.
+## Command reference
+
+| Command | Purpose |
+| --- | --- |
+| `adb-ready` | Open the interactive workflow home |
+| `adb-ready dev` | Run and keep one target-bound development session healthy |
+| `adb-ready doctor` | Diagnose the local runtime and ADB environment |
+| `adb-ready devices` | Discover, inspect, and select Android targets |
+| `adb-ready pair` | Pair securely with Android Wireless debugging |
+| `adb-ready connect` | Connect and verify a wireless target |
+| `adb-ready ports` | List, add, and remove verified TCP mappings |
+| `adb-ready logs` | Stream structured, redacted, focused logcat |
+| `adb-ready sessions` | List saved sessions and inspect their timelines |
+| `adb-ready problems` | Show structured problems from a saved session |
+| `adb-ready context` | Compile bounded, redacted diagnostic context |
+| `adb-ready init` | Generate a detected project configuration |
+| `adb-ready config` | Validate config or explain resolved values |
+
+Run `adb-ready help COMMAND` for command-specific options and `adb-ready --help`
+for global targeting, output, timeout, and ADB-server flags.
 
 ## Development
-
-This repository uses Bun for dependency management and project commands:
 
 ```bash
 bun install --frozen-lockfile
 bun run verify
 ```
 
-`bun run verify` is the complete local gate: formatting and static analysis,
-unit and integration tests, packaged-command checks, Node/Bun/Deno runtime
-smoke tests, package-manager consumer tests, privacy checks, tarball validation,
-publint, and package type analysis.
+`bun run verify` is the authoritative local gate. It checks formatting and
+types, unit and integration behavior, command and runtime smoke tests, package
+manager entrypoints, privacy boundaries, the packed npm artifact, `publint`,
+and package type analysis.
 
-Useful focused checks:
+Focused checks:
 
 ```bash
 bun run ui:playground
@@ -295,15 +419,16 @@ bun run test:integration
 bun run verify:real-adb
 ```
 
-The real-ADB check is read-only. It reports the local ADB environment and never
-requires a device mutation.
+The real-ADB check is read-only and does not mutate a connected device.
 
-## Alpha boundary
+## Current boundary
 
-The current dev session prepares and verifies its initial state; it does not yet
-watch and repair a device or mapping after a later disconnect. App install and
-lifecycle commands, persistent session files, broader logcat filtering, and
-automatic reconnect recovery are intentionally not claimed as available yet.
+ADB Ready is Android-only and the current release candidate is intentionally
+focused on target acquisition, ports, development sessions, recovery, logs,
+diagnostics, and automation. App install/lifecycle, file transfer, screenshots,
+screen recording, interactive shell, and raw-ADB escape-hatch commands are not
+part of the current public command surface.
 
-The source repository remains private during early implementation. The alpha is
-currently distributed as `UNLICENSED` software.
+The repository remains private during release-candidate validation. The preview
+is currently distributed as `UNLICENSED` software; an open-source license will
+be selected before a public stable release.
