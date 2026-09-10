@@ -7,11 +7,13 @@ import {
   type CommandExecution,
   type DevData,
   type DevicesData,
+  type LogsData,
   type PortsData,
   runConnect,
   runDev,
   runDevices,
   runDoctor,
+  runLogs,
   runPair,
   runPorts,
   runWirelessDiscovery,
@@ -61,6 +63,7 @@ Commands:
   dev [OPTIONS] [-- CMD] Prepare one target and run a development session
   doctor                 Inspect the local ADB environment
   devices                List visible Android targets
+  logs [OPTIONS]         Stream focused logs from one Android target
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
   sessions [ACTION]      Inspect saved development sessions
@@ -125,6 +128,18 @@ Runs read-only host, ADB capability, server, and target diagnostics.
   devices: `Usage: adb-ready devices [options]
 
 Lists every target visible to ADB. Add --select to open the keyboard picker.
+`,
+  logs: `Usage: adb-ready logs [options]
+
+Streams parsed, redacted logcat records from one deterministic target.
+
+Log options:
+  --package NAME         Resolve and filter the currently running app process
+  --pid PID              Filter one explicit process ID
+  --tag TAG              Include a log tag; repeat for more tags
+  --level PRIORITY       V, D, I, W, E, F, A, or S (default: I)
+  --dump                 Read the current buffer and exit instead of following
+  --max-records COUNT    Bound records retained in the final result
 `,
   pair: `Usage: adb-ready pair [HOST:PORT] [options]
 
@@ -567,8 +582,14 @@ async function runCliInternal(
   let lastTarget: RememberedTarget | undefined;
   let stateWarning: Problem | undefined;
   if (
-    (options.command === "dev" || options.command === "devices" || options.command === "ports") &&
-    (options.command === "dev" || options.select || options.remembered)
+    (options.command === "dev" ||
+      options.command === "devices" ||
+      options.command === "logs" ||
+      options.command === "ports") &&
+    (options.command === "dev" ||
+      options.command === "logs" ||
+      options.select ||
+      options.remembered)
   ) {
     const state = await (dependencies.readTargetState ?? readTargetState)({
       env: io.env,
@@ -620,7 +641,11 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
-  if ((options.command === "ports" && options.select) || options.command === "dev") {
+  if (
+    (options.command === "ports" && options.select) ||
+    options.command === "dev" ||
+    options.command === "logs"
+  ) {
     let inventory = await runDevices(config, commandDependencies, signal);
     let selectable =
       inventory.result.data?.targets.filter((target) =>
@@ -670,7 +695,7 @@ async function runCliInternal(
     }
     const shouldPrompt =
       options.select ||
-      (options.command === "dev" &&
+      ((options.command === "dev" || options.command === "logs") &&
         errorCapabilities.interactive &&
         inventory.result.data?.selected === undefined &&
         selectable.length !== 1);
@@ -834,7 +859,7 @@ async function runCliInternal(
     pairingCode = input.value;
   }
   const progress =
-    options.format === "human" && !options.quiet
+    options.format === "human" && !options.quiet && options.command !== "logs"
       ? new ProgressRenderer({
           bus,
           sink: io.error,
@@ -849,11 +874,29 @@ async function runCliInternal(
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
+    | CommandExecution<LogsData>
     | Awaited<ReturnType<typeof runPair>>
     | Awaited<ReturnType<typeof runPorts>>;
   try {
     if (options.command === "doctor") {
       execution = await runDoctor(config, commandDependencies, signal);
+    } else if (options.command === "logs") {
+      execution = await runLogs(
+        {
+          ...(options.logPackage === undefined ? {} : { packageName: options.logPackage }),
+          ...(options.logPid === undefined ? {} : { pid: options.logPid }),
+          ...(options.logTags === undefined ? {} : { tags: options.logTags }),
+          ...(options.logPriority === undefined ? {} : { minimumPriority: options.logPriority }),
+          ...(options.logDump === undefined ? {} : { dump: options.logDump }),
+          ...(options.logMaxRecords === undefined ? {} : { maxRecords: options.logMaxRecords }),
+          ...(options.format === "human" && !options.quiet
+            ? { onLine: (line: string) => io.error.write(`${line}\n`) }
+            : {}),
+        },
+        config,
+        commandDependencies,
+        signal,
+      );
     } else if (options.command === "dev") {
       execution = await runDev(
         {
@@ -999,6 +1042,16 @@ async function runCliInternal(
       }
     } else if (options.command === "dev") {
       const data = execution.result.data as DevData | null;
+      if (data !== null) {
+        selectedTarget = {
+          serial: data.selected.transport.serial,
+          ...(data.selected.target.hardwareSerial === undefined
+            ? {}
+            : { hardwareSerial: data.selected.target.hardwareSerial }),
+        };
+      }
+    } else if (options.command === "logs") {
+      const data = execution.result.data as LogsData | null;
       if (data !== null) {
         selectedTarget = {
           serial: data.selected.transport.serial,

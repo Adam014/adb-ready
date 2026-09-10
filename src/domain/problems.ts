@@ -46,6 +46,8 @@ export const ProblemCode = {
   HookFailed: "HOOK_FAILED",
   SessionRecoveryFailed: "SESSION_RECOVERY_FAILED",
   SessionPersistenceFailed: "SESSION_PERSISTENCE_FAILED",
+  LogPackageNotRunning: "LOG_PACKAGE_NOT_RUNNING",
+  LogcatFailed: "LOGCAT_FAILED",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {

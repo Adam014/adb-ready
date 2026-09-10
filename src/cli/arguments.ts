@@ -8,6 +8,7 @@ export type CommandName =
   | "devices"
   | "doctor"
   | "help"
+  | "logs"
   | "pair"
   | "ports"
   | "problems"
@@ -50,6 +51,12 @@ export interface CliOptions {
   customCommand?: { executable: string; args: string[] };
   sessionAction?: "events" | "list" | "show";
   sessionId?: string;
+  logPackage?: string;
+  logPid?: number;
+  logTags?: string[];
+  logPriority?: "A" | "D" | "E" | "F" | "I" | "S" | "V" | "W";
+  logDump?: boolean;
+  logMaxRecords?: number;
 }
 
 export interface CliParseFailure {
@@ -72,6 +79,7 @@ const COMMANDS = new Set<CommandName>([
   "devices",
   "doctor",
   "help",
+  "logs",
   "pair",
   "ports",
   "problems",
@@ -101,6 +109,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--no-logs",
   "--cleanup-ports",
   "--no-cleanup-ports",
+  "--dump",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -162,6 +171,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let customCommand: CliOptions["customCommand"];
   let sessionAction: CliOptions["sessionAction"];
   let sessionId: string | undefined;
+  let logPackage: string | undefined;
+  let logPid: number | undefined;
+  const logTags: string[] = [];
+  let logPriority: CliOptions["logPriority"];
+  let logDump = false;
+  let logMaxRecords: number | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -197,6 +212,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "dev" ||
           candidate === "devices" ||
           candidate === "doctor" ||
+          candidate === "logs" ||
           candidate === "pair" ||
           candidate === "problems" ||
           candidate === "sessions"
@@ -392,6 +408,46 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       cleanupPorts = true;
     } else if (option === "--no-cleanup-ports") {
       cleanupPorts = false;
+    } else if (option === "--package") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid Android package name: ${value}.`, option);
+      }
+      logPackage = value;
+    } else if (option === "--pid") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1) {
+        return failure("CLI_INVALID_VALUE", `Invalid process ID: ${value}.`, option);
+      }
+      logPid = parsed;
+    } else if (option === "--tag") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[^\s:]{1,128}$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid log tag: ${value}.`, option);
+      }
+      logTags.push(value);
+    } else if (option === "--level") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const normalized = value.toUpperCase();
+      if (!new Set(["A", "D", "E", "F", "I", "S", "V", "W"]).has(normalized)) {
+        return failure("CLI_INVALID_VALUE", `Invalid log priority: ${value}.`, option);
+      }
+      logPriority = normalized as NonNullable<CliOptions["logPriority"]>;
+    } else if (option === "--dump") {
+      logDump = true;
+    } else if (option === "--max-records") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1) {
+        return failure("CLI_INVALID_VALUE", `Invalid record limit: ${value}.`, option);
+      }
+      logMaxRecords = parsed;
     } else if (option === "--timeout") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -462,7 +518,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
 
   command ??= "help";
   if (command === "sessions") sessionAction ??= "list";
-  const targetCommand = command === "dev" || command === "devices" || command === "ports";
+  const targetCommand =
+    command === "dev" || command === "devices" || command === "logs" || command === "ports";
   if (select && !targetCommand) {
     return failure(
       "CLI_USAGE",
@@ -542,6 +599,20 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   ) {
     return failure("CLI_USAGE", "Development options can only be used with the dev command.");
   }
+  if (
+    command !== "logs" &&
+    (logPackage !== undefined ||
+      logPid !== undefined ||
+      logTags.length > 0 ||
+      logPriority !== undefined ||
+      logDump ||
+      logMaxRecords !== undefined)
+  ) {
+    return failure("CLI_USAGE", "Log filtering options can only be used with the logs command.");
+  }
+  if (logPackage !== undefined && logPid !== undefined) {
+    return failure("CLI_USAGE", "--package and --pid cannot be combined.");
+  }
 
   return {
     ok: true,
@@ -580,6 +651,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(customCommand === undefined ? {} : { customCommand }),
       ...(sessionAction === undefined ? {} : { sessionAction }),
       ...(sessionId === undefined ? {} : { sessionId }),
+      ...(logPackage === undefined ? {} : { logPackage }),
+      ...(logPid === undefined ? {} : { logPid }),
+      ...(logTags.length === 0 ? {} : { logTags }),
+      ...(logPriority === undefined ? {} : { logPriority }),
+      ...(logDump ? { logDump: true } : {}),
+      ...(logMaxRecords === undefined ? {} : { logMaxRecords }),
     },
   };
 }

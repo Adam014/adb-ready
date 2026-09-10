@@ -1550,6 +1550,236 @@ export interface DevPort {
   host?: string | number;
 }
 
+export interface LogsOptions {
+  packageName?: string;
+  pid?: number;
+  tags?: readonly string[];
+  minimumPriority?: "A" | "D" | "E" | "F" | "I" | "S" | "V" | "W";
+  dump?: boolean;
+  maxRecords?: number;
+  onLine?: (line: string) => void;
+}
+
+export interface LogRecord {
+  raw: string;
+  parsed: boolean;
+  message: string;
+  priority?: string;
+  tag?: string;
+  pid?: number;
+  tid?: number;
+}
+
+export interface LogsData {
+  adbPath: string;
+  selected: SelectedTarget;
+  packageName?: string;
+  pid?: number;
+  filters: string[];
+  records: LogRecord[];
+  dropped: number;
+  process: {
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    durationMs: number;
+    stdoutTruncated: boolean;
+    stderrTruncated: boolean;
+  };
+}
+
+export async function runLogs(
+  options: LogsOptions,
+  config: CommandConfig = {},
+  dependencies: CommandDependencies = {},
+  signal?: AbortSignal,
+): Promise<CommandExecution<LogsData>> {
+  const context = createContext("logs", dependencies);
+  const problems: Problem[] = [];
+  const executable = await resolveAdb(context, config, dependencies);
+  if (executable === undefined) {
+    problems.push(adbNotFoundProblem({ commandId: context.commandId }, config.adbPath));
+    return finish<LogsData>(context, null, problems);
+  }
+  const discoveryClient = createClient(executable, context, config, dependencies);
+  const devices = await discoveryClient.devices(signal);
+  if (!processSucceeded(devices.process)) {
+    problems.push(operationProblem("devices", devices, context.commandId));
+    return finish<LogsData>(context, null, problems);
+  }
+  const inspection = await inspectTargets(
+    discoveryClient,
+    devices.value,
+    context.commandId,
+    signal,
+  );
+  if (inspection.interruption !== undefined) {
+    problems.push(inspection.interruption);
+    return finish<LogsData>(context, null, problems);
+  }
+  problems.push(...inspection.optionalProblems);
+  const selection = selectTarget(inspection.targets, {
+    ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
+    ...(config.targetTransportId === undefined ? {} : { transportId: config.targetTransportId }),
+    ...(config.targetAliases === undefined ? {} : { aliases: config.targetAliases }),
+    ...(config.rememberedSerial === undefined ? {} : { rememberedSerial: config.rememberedSerial }),
+    ...(config.rememberedHardwareSerial === undefined
+      ? {}
+      : { rememberedHardwareSerial: config.rememberedHardwareSerial }),
+    ...(config.rememberedOnly === undefined ? {} : { rememberedOnly: config.rememberedOnly }),
+  });
+  if (selection.kind !== "selected") {
+    problems.push(targetSelectionProblem(selection, { commandId: context.commandId }));
+    return finish<LogsData>(context, null, problems);
+  }
+  const selected = selection.selection;
+  const target = targetForAdb(selected);
+  const correlation = { commandId: context.commandId, targetId: selected.target.id };
+  const client = new AdbClient({
+    executable,
+    bus: context.bus,
+    correlation,
+    ...(config.adbHost === undefined ? {} : { host: config.adbHost }),
+    ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
+    ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
+    ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+    ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
+  });
+  let resolvedPid = options.pid;
+  if (resolvedPid === undefined && options.packageName !== undefined) {
+    const pid = await client.shell(target, ["pidof", "-s", options.packageName], signal);
+    const parsedPid = processSucceeded(pid.process) ? Number(pid.value) : Number.NaN;
+    if (!Number.isSafeInteger(parsedPid) || parsedPid < 1) {
+      problems.push(
+        commandProblem(
+          ProblemCode.LogPackageNotRunning,
+          "logcat.package",
+          `Android package ${options.packageName} is not running on the selected target.`,
+          "Start the app and retry, or omit --package to inspect target-wide logs.",
+          context.commandId,
+        ),
+      );
+      return finish<LogsData>(context, null, problems);
+    }
+    resolvedPid = parsedPid;
+  }
+  const priority = options.minimumPriority ?? "I";
+  const filters =
+    options.tags === undefined || options.tags.length === 0
+      ? [`*:${priority}`]
+      : [...options.tags.map((tag) => `${tag}:${priority}`), "*:S"];
+  const maxRecords = options.maxRecords ?? 2_000;
+  if (!Number.isSafeInteger(maxRecords) || maxRecords < 1) {
+    problems.push(
+      commandProblem(
+        ProblemCode.LogcatFailed,
+        "input.logs.max-records",
+        "The log record limit must be a positive integer.",
+        "Use --max-records with a value of at least 1.",
+        context.commandId,
+      ),
+    );
+    return finish<LogsData>(context, null, problems);
+  }
+  const records: LogRecord[] = [];
+  let dropped = 0;
+  const lines = new TextLineBuffer((raw) => {
+    const safeRaw = redactText(raw).value;
+    const parsed = parseLogcatThreadtimeLine(safeRaw);
+    const record: LogRecord = {
+      raw: safeRaw,
+      parsed: parsed !== undefined,
+      message: parsed?.message ?? safeRaw,
+      ...(parsed === undefined
+        ? {}
+        : { priority: parsed.priority, tag: parsed.tag, pid: parsed.pid, tid: parsed.tid }),
+    };
+    records.push(record);
+    while (records.length > maxRecords) {
+      records.shift();
+      dropped += 1;
+    }
+    context.bus.emit({
+      type: "log.record",
+      source: "logcat",
+      severity: streamSeverity(parsed),
+      message: record.message,
+      correlation,
+      data: {
+        raw: record.raw,
+        parsed: record.parsed,
+        ...(record.priority === undefined ? {} : { priority: record.priority }),
+        ...(record.tag === undefined ? {} : { tag: record.tag }),
+        ...(record.pid === undefined ? {} : { pid: record.pid }),
+        ...(record.tid === undefined ? {} : { tid: record.tid }),
+      },
+    });
+    options.onLine?.(safeRaw);
+  });
+  const runner = dependencies.runner ?? runProcess;
+  const selectorArgs =
+    target.transportId === undefined ? ["-s", target.serial] : ["-t", target.transportId];
+  const processResult = await runner({
+    executable,
+    args: [
+      ...(config.adbHost === undefined ? [] : ["-H", config.adbHost]),
+      ...(config.adbPort === undefined ? [] : ["-P", String(config.adbPort)]),
+      ...selectorArgs,
+      "logcat",
+      "-v",
+      "threadtime",
+      ...(options.dump ? ["-d"] : []),
+      ...(resolvedPid === undefined ? [] : [`--pid=${String(resolvedPid)}`]),
+      ...filters,
+    ],
+    ...(signal === undefined ? {} : { signal }),
+    maxBufferBytes: 4 * 1024 * 1024,
+    onStdoutChunk: (chunk) => lines.push(chunk),
+    onStderrChunk: (chunk) => lines.push(chunk),
+  });
+  lines.flush();
+  if (processResult.aborted && signal?.aborted === true) {
+    problems.push(
+      commandProblem(
+        ProblemCode.OperationInterrupted,
+        "logcat.interrupted",
+        "Log streaming was interrupted.",
+        "ADB Ready stopped its owned logcat process safely.",
+        context.commandId,
+      ),
+    );
+  } else if (!processSucceeded(processResult)) {
+    problems.push(
+      commandProblem(
+        ProblemCode.LogcatFailed,
+        "logcat.exit",
+        "Logcat failed for the selected target.",
+        `The process exited with ${processResult.exitCode === null ? String(processResult.signal) : String(processResult.exitCode)}.`,
+        context.commandId,
+      ),
+    );
+  }
+  return finish(
+    context,
+    {
+      adbPath: redactedPath(executable),
+      selected,
+      ...(options.packageName === undefined ? {} : { packageName: options.packageName }),
+      ...(resolvedPid === undefined ? {} : { pid: resolvedPid }),
+      filters,
+      records,
+      dropped,
+      process: {
+        exitCode: processResult.exitCode,
+        signal: processResult.signal,
+        durationMs: processResult.durationMs,
+        stdoutTruncated: processResult.stdoutTruncated,
+        stderrTruncated: processResult.stderrTruncated,
+      },
+    },
+    problems,
+  );
+}
+
 export interface DevCommand {
   executable: string;
   args: string[];

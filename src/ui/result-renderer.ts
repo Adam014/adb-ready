@@ -4,6 +4,7 @@ import type {
   DevData,
   DevicesData,
   DoctorData,
+  LogsData,
   PairedData,
   PortsData,
   TargetDiscoveryData,
@@ -81,6 +82,16 @@ function isDevData(value: unknown): value is DevData {
     isRecord(value.command) &&
     isRecord(value.ports) &&
     isRecord(value.journal)
+  );
+}
+
+function isLogsData(value: unknown): value is LogsData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    Array.isArray(value.filters) &&
+    Array.isArray(value.records) &&
+    typeof value.dropped === "number"
   );
 }
 
@@ -207,6 +218,15 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     }
     lines.push(
       `${style.success(glyphs.success, capabilities)} Journal  ${String(data.journal.events.length)} events${data.journal.dropped === 0 ? "" : ` · ${String(data.journal.dropped)} dropped`}`,
+    );
+  }
+
+  if (result.command === "logs" && isLogsData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} Filter   ${data.filters.map(clean).join(" ")}${data.packageName === undefined ? "" : ` · ${clean(data.packageName)}`}${data.pid === undefined ? "" : ` · PID ${String(data.pid)}`}`,
+      `${style.success(glyphs.success, capabilities)} Records  ${String(data.records.length)} retained${data.dropped === 0 ? "" : ` · ${String(data.dropped)} dropped`}`,
     );
   }
 
@@ -378,6 +398,19 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     if (result.data.child !== undefined) {
       sink.write(`child_exit_code=${String(result.data.child.exitCode)}\n`);
     }
+  }
+  if (isLogsData(result.data)) {
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`filters=${result.data.filters.map(clean).join(",")}\n`);
+    if (result.data.packageName !== undefined) {
+      sink.write(`package=${clean(result.data.packageName)}\n`);
+    }
+    if (result.data.pid !== undefined) sink.write(`pid=${String(result.data.pid)}\n`);
+    sink.write(`record_count=${String(result.data.records.length)}\n`);
+    sink.write(`record_dropped=${String(result.data.dropped)}\n`);
+    result.data.records.forEach((record, index) => {
+      sink.write(`record_${String(index)}=${clean(record.raw)}\n`);
+    });
   }
   if (isSessionCommandData(result.data)) {
     sink.write(`action=${clean(result.data.action)}\n`);

@@ -592,6 +592,61 @@ describe("runCli", () => {
     expect(remembered).toMatchObject({ serial: "USB-1", hardwareSerial: "PHONE-1" });
   });
 
+  test("dumps package-filtered logs as clean structured JSON", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    const requests: ProcessRequest[] = [];
+    fixture.runner = async (request) => {
+      requests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+      }
+      if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("pidof")) return result(request, "321\n");
+      if (args.includes("logcat")) {
+        const output = "09-10 10:00:00.000  321  322 E DemoTag: crash\n";
+        request.onStdoutChunk?.(new TextEncoder().encode(output));
+        return result(request, output);
+      }
+      return result(request, "");
+    };
+
+    const exitCode = await runCli(
+      [
+        "logs",
+        "--package",
+        "com.example.demo",
+        "--tag",
+        "DemoTag",
+        "--level",
+        "E",
+        "--dump",
+        "--json",
+        "--non-interactive",
+      ],
+      streams,
+      fixture,
+    );
+    const payload = JSON.parse(streams.output.value);
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload.data).toMatchObject({
+      packageName: "com.example.demo",
+      pid: 321,
+      filters: ["DemoTag:E", "*:S"],
+      records: [{ tag: "DemoTag", priority: "E", message: "crash" }],
+    });
+    expect(requests.find(({ args }) => args?.includes("logcat"))?.args).toContain("--pid=321");
+    expect(streams.error.value).toBe("");
+  });
+
   test("acquires one unambiguous wireless target before starting dev", async () => {
     const streams = io();
     const fixture = dependencies();

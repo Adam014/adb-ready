@@ -183,6 +183,20 @@ export class AdbClient {
     );
   }
 
+  async shell(
+    target: string | AdbTargetSelector,
+    args: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<AdbObservation<string | undefined>> {
+    return await this.#observe(
+      "shell",
+      `Running a read-only shell query for ${typeof target === "string" ? target : target.serial}`,
+      [...targetArguments(target), "shell", ...args],
+      parseSingleLine,
+      signal,
+    );
+  }
+
   async connect(endpoint: string, signal?: AbortSignal): Promise<AdbObservation<AdbConnectResult>> {
     return await this.#observe(
       "connect",

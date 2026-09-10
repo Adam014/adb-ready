@@ -223,6 +223,47 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses targeted logcat filters", () => {
+    expect(
+      parseArguments([
+        "logs",
+        "--package",
+        "com.example.app",
+        "--tag",
+        "ReactNativeJS",
+        "--tag=AndroidRuntime",
+        "--level",
+        "w",
+        "--dump",
+        "--max-records",
+        "500",
+        "--last",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "logs",
+        logPackage: "com.example.app",
+        logTags: ["ReactNativeJS", "AndroidRuntime"],
+        logPriority: "W",
+        logDump: true,
+        logMaxRecords: 500,
+        remembered: true,
+      },
+    });
+    expect(parseArguments(["logs", "--pid", "42"])).toMatchObject({
+      ok: true,
+      options: { command: "logs", logPid: 42 },
+    });
+    expect(parseArguments(["logs", "--package", "bad", "--pid", "1"])).toMatchObject({
+      ok: false,
+    });
+    expect(parseArguments(["doctor", "--dump"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("rejects invalid or misplaced development options", () => {
     expect(parseArguments(["dev", "--preset", "flutter"])).toMatchObject({
       ok: false,
