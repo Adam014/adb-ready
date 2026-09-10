@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a concrete Android developer workflow or improvement.
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Developer problem
+      description: What currently requires manual ADB commands, a fragile script, or repeated recovery work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the result from the user's perspective, not only a proposed flag or implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current workflow
+      description: Which tools, commands, platforms, frameworks, and Android targets are involved?
+    validations:
+      required: true
+
+  - type: textarea
+    id: automation
+    attributes:
+      label: Human and automation expectations
+      description: Explain whether the workflow must be interactive, non-interactive, JSON/NDJSON, or all of them.
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety or privacy constraints
+      description: Note target scope, destructive actions, credentials, stored data, or network access.

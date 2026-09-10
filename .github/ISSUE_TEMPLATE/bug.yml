@@ -1,0 +1,72 @@
+name: Bug report
+description: Report reproducible ADB Ready behavior that is incorrect or unsafe.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include pairing codes, credentials, private device identifiers, or unreviewed session logs. Report vulnerabilities through the private security advisory link instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: ADB Ready version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS/architecture, Node/Bun/Deno version, ADB version, and USB/emulator/wireless transport.
+      placeholder: "macOS 15 arm64 · Node 24 · adb 1.0.41 / 36.0.0 · Android Wireless debugging"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and configuration shape
+      description: Redact serials, paths, endpoints, secrets, and project-specific data.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List the smallest deterministic sequence that triggers the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Include stable problem codes and exit codes when available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Reviewed diagnostic context
+      description: Optional output from `adb-ready context`; confirm that you reviewed its contents before attaching it.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, pairing codes, personal identifiers, and private application data.
+          required: true
