@@ -1,13 +1,25 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import { AdbClient } from "../adb/client.js";
 import {
   type AdbDevice,
   type AdbMdnsService,
   type AdbVersion,
   parseAdbNetworkEndpoint,
+  parseLogcatThreadtimeLine,
 } from "../adb/parsers.js";
 import { EventBus } from "../core/event-bus.js";
+import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.js";
 import { redactText } from "../core/redaction.js";
+import { TextLineBuffer } from "../core/text-lines.js";
+import {
+  type DevPreset,
+  detectProject,
+  type PackageManagerName,
+  type ProjectDetection,
+  packageScriptCommand,
+} from "../dev/project.js";
 import {
   ExitCode,
   type OperationPlan,
@@ -26,8 +38,8 @@ import {
   targetInventoryProblems,
   targetSelectionProblem,
 } from "../domain/problems.js";
-import { locateAdb } from "../platform/executable.js";
-import type { ProcessResult, ProcessRunner } from "../platform/process-runner.js";
+import { locateAdb, locateExecutable } from "../platform/executable.js";
+import { type ProcessResult, type ProcessRunner, runProcess } from "../platform/process-runner.js";
 import { detectRuntime, type RuntimeInfo } from "../platform/runtime.js";
 import {
   mappingArguments,
@@ -62,6 +74,8 @@ export interface CommandDependencies {
   locateAdb?: typeof locateAdb;
   runner?: ProcessRunner;
   runtime?: () => RuntimeInfo;
+  detectProject?: typeof detectProject;
+  locateExecutable?: typeof locateExecutable;
 }
 
 export interface CommandExecution<T> {
@@ -192,6 +206,9 @@ function exitCodeForProblems(problems: readonly Problem[]): ExitCode {
   }
   if (errors.some(({ category }) => category.startsWith("target."))) {
     return ExitCode.Target;
+  }
+  if (errors.some(({ category }) => category.startsWith("child."))) {
+    return ExitCode.ChildProcess;
   }
   return ExitCode.AdbOperation;
 }
@@ -1512,4 +1529,662 @@ export async function runPair(
     },
     problems,
   );
+}
+
+export interface DevPort {
+  device: string | number;
+  host?: string | number;
+}
+
+export interface DevCommand {
+  executable: string;
+  args: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+export interface DevOptions {
+  cwd: string;
+  preset?: DevPreset;
+  packageManager?: PackageManagerName;
+  command?: DevCommand;
+  reversePorts?: readonly DevPort[];
+  cleanupPorts?: boolean;
+  logs?: boolean;
+  journal?: {
+    maxEntries?: number;
+    maxBytes?: number;
+    sources?: readonly string[];
+    minimumSeverity?: "debug" | "error" | "info" | "warning";
+  };
+  childStdin?: "ignore" | "inherit";
+  onChildLine?: (stream: "stderr" | "stdout", line: string) => void;
+}
+
+export interface DevData {
+  sessionId: string;
+  status: "completed" | "planned";
+  adbPath: string;
+  selected: SelectedTarget;
+  project: {
+    root: string;
+    name?: string;
+  };
+  preset: DevPreset;
+  packageManager?: {
+    name: PackageManagerName;
+    source: NonNullable<ProjectDetection["packageManager"]["source"]>;
+  };
+  ports: {
+    requested: Array<{ device: string; host: string }>;
+    created: Array<{ device: string; host: string }>;
+    reused: Array<{ device: string; host: string }>;
+    cleaned: boolean;
+  };
+  command: {
+    executable: string;
+    args: string[];
+    cwd: string;
+    envKeys: string[];
+  };
+  child?: {
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    durationMs: number;
+    stdoutTruncated: boolean;
+    stderrTruncated: boolean;
+  };
+  plan?: OperationPlan;
+  journal: EventJournalSnapshot;
+}
+
+async function regularFile(file: string): Promise<boolean> {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function directPackageCommand(
+  manager: PackageManagerName,
+  executable: string,
+  binary: string,
+  args: readonly string[],
+): DevCommand {
+  if (manager === "npm") {
+    return { executable, args: ["exec", "--", binary, ...args] };
+  }
+  if (manager === "pnpm") {
+    return { executable, args: ["exec", binary, ...args] };
+  }
+  if (manager === "bun") {
+    return { executable, args: ["x", binary, ...args] };
+  }
+  return { executable, args: [binary, ...args] };
+}
+
+async function resolveDevCommand(
+  preset: DevPreset,
+  project: ProjectDetection,
+  options: DevOptions,
+  dependencies: CommandDependencies,
+): Promise<DevCommand | undefined> {
+  if (options.command !== undefined) return options.command;
+  if (preset === "custom") return undefined;
+  if (preset === "gradle") {
+    const wrapperJar = path.join(project.root, "gradle", "wrapper", "gradle-wrapper.jar");
+    const locate = dependencies.locateExecutable ?? locateExecutable;
+    const java = await locate("java");
+    if (java !== undefined && (await regularFile(wrapperJar))) {
+      return {
+        executable: java,
+        args: ["-classpath", wrapperJar, "org.gradle.wrapper.GradleWrapperMain", "installDebug"],
+      };
+    }
+    const wrapper = path.join(
+      project.root,
+      process.platform === "win32" ? "gradlew.bat" : "gradlew",
+    );
+    return (await regularFile(wrapper))
+      ? { executable: wrapper, args: ["installDebug"] }
+      : undefined;
+  }
+  const manager = project.packageManager;
+  if (manager.name === undefined || manager.executable === undefined) return undefined;
+  const script = preset === "expo" ? "start" : "android";
+  const frameworkArgs = preset === "expo" ? ["--android"] : [];
+  if (project.packageJson?.scripts[script] !== undefined) {
+    return {
+      ...packageScriptCommand(manager.name, manager.executable, script, frameworkArgs),
+    };
+  }
+  return directPackageCommand(
+    manager.name,
+    manager.executable,
+    preset === "expo" ? "expo" : "react-native",
+    preset === "expo" ? ["start", "--android"] : ["run-android"],
+  );
+}
+
+function normalizeDevPorts(
+  ports: readonly DevPort[],
+  commandId: string,
+): { mappings: Array<{ device: string; host: string }>; problems: Problem[] } {
+  const mappings: Array<{ device: string; host: string }> = [];
+  const problems: Problem[] = [];
+  const seen = new Set<string>();
+  for (const port of ports) {
+    const device = tcpEndpoint(port.device);
+    const host = tcpEndpoint(port.host ?? port.device);
+    if (device === undefined) {
+      problems.push(portInputProblem("device", port.device, commandId));
+      continue;
+    }
+    if (host === undefined) {
+      problems.push(portInputProblem("host", port.host, commandId));
+      continue;
+    }
+    const key = `${device}\0${host}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      mappings.push({ device, host });
+    }
+  }
+  return { mappings, problems };
+}
+
+function streamSeverity(
+  priority: ReturnType<typeof parseLogcatThreadtimeLine>,
+): "debug" | "error" | "info" | "warning" {
+  if (priority?.priority === "E" || priority?.priority === "F" || priority?.priority === "A") {
+    return "error";
+  }
+  if (priority?.priority === "W") return "warning";
+  if (priority?.priority === "D" || priority?.priority === "V") return "debug";
+  return "info";
+}
+
+export async function runDev(
+  options: DevOptions,
+  config: CommandConfig = {},
+  dependencies: CommandDependencies = {},
+  signal?: AbortSignal,
+): Promise<CommandExecution<DevData>> {
+  const bus = dependencies.bus ?? new EventBus(dependencies.clock);
+  const idFactory = dependencies.idFactory ?? randomUUID;
+  const sessionId = idFactory();
+  const journal = new EventJournal(bus, options.journal);
+  const context = createContext("dev", { ...dependencies, bus, idFactory });
+  const problems: Problem[] = [];
+  const complete = (data: Omit<DevData, "journal"> | null): CommandExecution<DevData> => {
+    const execution = finish<DevData>(context, data as DevData | null, problems);
+    const snapshot = journal.close();
+    if (execution.result.data !== null) execution.result.data.journal = snapshot;
+    return execution;
+  };
+  const correlation = { commandId: context.commandId, sessionId };
+  bus.emit({
+    type: "session.started",
+    source: "session",
+    severity: "info",
+    message: "Development session started",
+    correlation,
+  });
+
+  const executable = await resolveAdb(context, config, dependencies);
+  if (executable === undefined) {
+    problems.push(adbNotFoundProblem(correlation, config.adbPath));
+    return complete(null);
+  }
+  const discoveryClient = new AdbClient({
+    executable,
+    bus,
+    correlation,
+    ...(config.adbHost === undefined ? {} : { host: config.adbHost }),
+    ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
+    ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
+    ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+    idFactory,
+  });
+  const devices = await discoveryClient.devices(signal);
+  if (!processSucceeded(devices.process)) {
+    problems.push(operationProblem("devices", devices, context.commandId));
+    return complete(null);
+  }
+  const inspection = await inspectTargets(
+    discoveryClient,
+    devices.value,
+    context.commandId,
+    signal,
+  );
+  if (inspection.interruption !== undefined) {
+    problems.push(inspection.interruption);
+    return complete(null);
+  }
+  problems.push(...inspection.optionalProblems);
+  const selection = selectTarget(inspection.targets, {
+    ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
+    ...(config.targetTransportId === undefined ? {} : { transportId: config.targetTransportId }),
+    ...(config.targetAliases === undefined ? {} : { aliases: config.targetAliases }),
+    ...(config.rememberedSerial === undefined ? {} : { rememberedSerial: config.rememberedSerial }),
+    ...(config.rememberedHardwareSerial === undefined
+      ? {}
+      : { rememberedHardwareSerial: config.rememberedHardwareSerial }),
+    ...(config.rememberedOnly === undefined ? {} : { rememberedOnly: config.rememberedOnly }),
+  });
+  if (selection.kind !== "selected") {
+    problems.push(targetSelectionProblem(selection, correlation));
+    return complete(null);
+  }
+  const selected = selection.selection;
+  const target = targetForAdb(selected);
+  bus.emit({
+    type: "target.selected",
+    source: "target",
+    severity: "info",
+    message: `Selected ${selected.transport.serial}`,
+    correlation: { ...correlation, targetId: selected.target.id },
+    data: { serial: selected.transport.serial, reason: selected.reason },
+  });
+
+  const project = await (dependencies.detectProject ?? detectProject)({
+    cwd: options.cwd,
+    ...(options.packageManager === undefined
+      ? {}
+      : { explicitPackageManager: options.packageManager }),
+  });
+  const preset = options.preset ?? (options.command === undefined ? project.preset : "custom");
+  if (preset === undefined) {
+    problems.push(
+      commandProblem(
+        ProblemCode.DevPresetNotFound,
+        "input.dev.preset",
+        "ADB Ready could not determine a development preset.",
+        "Choose --preset expo, react-native, gradle, or pass a custom command after --.",
+        context.commandId,
+      ),
+    );
+    return complete(null);
+  }
+  if (
+    project.packageManager.conflicts.length > 0 &&
+    (preset === "expo" || preset === "react-native")
+  ) {
+    problems.push(
+      commandProblem(
+        ProblemCode.PackageManagerConflict,
+        "input.dev.package-manager",
+        "Multiple package-manager lockfiles conflict.",
+        "Declare packageManager in package.json, use --package-manager, or remove stale lockfiles.",
+        context.commandId,
+        [{ source: "project", field: "lockfiles", value: project.packageManager.conflicts }],
+      ),
+    );
+    return complete(null);
+  }
+  if (
+    (preset === "expo" || preset === "react-native") &&
+    (project.packageManager.name === undefined || project.packageManager.executable === undefined)
+  ) {
+    problems.push(
+      commandProblem(
+        ProblemCode.PackageManagerNotFound,
+        "environment.package-manager",
+        "The project's package manager is unavailable.",
+        "Install the declared package manager or select an available one with --package-manager.",
+        context.commandId,
+      ),
+    );
+    return complete(null);
+  }
+  const childCommand = await resolveDevCommand(preset, project, options, dependencies);
+  if (childCommand === undefined || childCommand.executable.trim() === "") {
+    problems.push(
+      commandProblem(
+        ProblemCode.DevCommandNotFound,
+        "input.dev.command",
+        "No runnable development command was found.",
+        "Configure an executable and argument array or pass a custom command after --.",
+        context.commandId,
+      ),
+    );
+    return complete(null);
+  }
+  const defaultPorts = preset === "expo" || preset === "react-native" ? [{ device: 8081 }] : [];
+  const normalizedPorts = normalizeDevPorts(
+    options.reversePorts ?? defaultPorts,
+    context.commandId,
+  );
+  problems.push(...normalizedPorts.problems);
+  if (normalizedPorts.problems.length > 0) return complete(null);
+
+  const targetCorrelation = { ...correlation, targetId: selected.target.id };
+  const client = new AdbClient({
+    executable,
+    bus,
+    correlation: targetCorrelation,
+    ...(config.adbHost === undefined ? {} : { host: config.adbHost }),
+    ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
+    ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
+    ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+    idFactory,
+  });
+  const listed = await client.listPortMappings(target, "reverse", signal);
+  if (!processSucceeded(listed.process)) {
+    problems.push(operationProblem("reverse-list", listed, context.commandId));
+    return complete(null);
+  }
+  const existing = listed.value.map((mapping) => normalizePortMapping("reverse", mapping));
+  const created: Array<{ device: string; host: string }> = [];
+  const reused: Array<{ device: string; host: string }> = [];
+  for (const requested of normalizedPorts.mappings) {
+    const atDevicePort = existing.find((mapping) => mapping.device === requested.device);
+    if (atDevicePort === undefined) continue;
+    if (atDevicePort.host === requested.host) {
+      reused.push(requested);
+    } else {
+      problems.push(
+        commandProblem(
+          ProblemCode.PortMappingConflict,
+          "adb.port.conflict",
+          `Device port ${requested.device} is already mapped to ${atDevicePort.host}.`,
+          "ADB Ready will not replace a mapping owned by another tool or session.",
+          context.commandId,
+        ),
+      );
+    }
+  }
+  if (problems.some(({ severity }) => severity === "error")) return complete(null);
+  const pending = normalizedPorts.mappings.filter(
+    (mapping) =>
+      !reused.some((item) => item.device === mapping.device && item.host === mapping.host),
+  );
+  const commandCwd = path.resolve(project.root, childCommand.cwd ?? ".");
+  const commandData = {
+    executable: redactedPath(childCommand.executable),
+    args: childCommand.args.map((argument) => redactText(argument).value),
+    cwd: redactedPath(commandCwd),
+    envKeys: [...new Set(["ANDROID_SERIAL", ...Object.keys(childCommand.env ?? {})])].sort(),
+  };
+  const baseData = {
+    sessionId,
+    adbPath: redactedPath(executable),
+    selected,
+    project: {
+      root: redactedPath(project.root),
+      ...(project.packageJson?.name === undefined ? {} : { name: project.packageJson.name }),
+    },
+    preset,
+    ...(project.packageManager.name === undefined || project.packageManager.source === undefined
+      ? {}
+      : {
+          packageManager: {
+            name: project.packageManager.name,
+            source: project.packageManager.source,
+          },
+        }),
+    command: commandData,
+  };
+  if (config.dryRun) {
+    const selectorArgs =
+      target.transportId === undefined ? ["-s", target.serial] : ["-t", target.transportId];
+    const steps = [
+      ...pending.map((mapping, index) => ({
+        id: `reverse-${String(index + 1)}`,
+        title: `Map device ${mapping.device} to host ${mapping.host}`,
+        risk: "device-reversible" as const,
+        executable: redactedPath(executable),
+        args: [...selectorArgs, "reverse", "--no-rebind", mapping.device, mapping.host],
+      })),
+      {
+        id: "start-child",
+        title: `Start ${preset} development command`,
+        risk: "open-world" as const,
+        executable: commandData.executable,
+        args: commandData.args,
+      },
+    ];
+    bus.emit({
+      type: "session.planned",
+      source: "session",
+      severity: "info",
+      message: "Development session plan is ready",
+      correlation: targetCorrelation,
+    });
+    return complete({
+      ...baseData,
+      status: "planned",
+      ports: {
+        requested: normalizedPorts.mappings,
+        created,
+        reused,
+        cleaned: false,
+      },
+      plan: { schemaVersion: SCHEMA_VERSION, dryRun: true, steps },
+    });
+  }
+
+  for (const mapping of pending) {
+    const added = await client.addPortMapping(
+      target,
+      "reverse",
+      mapping.device,
+      mapping.host,
+      signal,
+    );
+    if (!processSucceeded(added.process)) {
+      problems.push(operationProblem("reverse-add", added, context.commandId));
+      break;
+    }
+    created.push(mapping);
+  }
+  if (!problems.some(({ severity }) => severity === "error")) {
+    const verified = await client.listPortMappings(target, "reverse", signal);
+    if (!processSucceeded(verified.process)) {
+      problems.push(operationProblem("reverse-verify", verified, context.commandId));
+    } else {
+      const after = verified.value.map((mapping) => normalizePortMapping("reverse", mapping));
+      for (const mapping of normalizedPorts.mappings) {
+        if (!after.some((item) => item.device === mapping.device && item.host === mapping.host)) {
+          problems.push(
+            commandProblem(
+              ProblemCode.PortMappingVerificationFailed,
+              "adb.port.verification",
+              `Reverse mapping ${mapping.device} to ${mapping.host} was not verified.`,
+              "ADB reported success but the mapping is absent from the follow-up list.",
+              context.commandId,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  let cleaned = false;
+  const cleanup = async (): Promise<void> => {
+    if (options.cleanupPorts === false || created.length === 0) return;
+    bus.emit({
+      type: "session.stopping",
+      source: "session",
+      severity: "info",
+      message: "Cleaning session-owned port mappings",
+      correlation: targetCorrelation,
+    });
+    for (const mapping of created) {
+      await client.removePortMapping(target, "reverse", mapping.device);
+    }
+    const remaining = await client.listPortMappings(target, "reverse");
+    cleaned =
+      processSucceeded(remaining.process) &&
+      !remaining.value
+        .map((mapping) => normalizePortMapping("reverse", mapping))
+        .some((mapping) => created.some((item) => item.device === mapping.device));
+  };
+  if (problems.some(({ severity }) => severity === "error")) {
+    await cleanup();
+    return complete(null);
+  }
+
+  bus.emit({
+    type: "port.verified",
+    source: "port",
+    severity: "info",
+    message: `${String(normalizedPorts.mappings.length)} reverse mapping(s) ready`,
+    correlation: targetCorrelation,
+    data: { created: created.length, reused: reused.length },
+  });
+  const runner = dependencies.runner ?? runProcess;
+  const logController = new AbortController();
+  if (signal?.aborted) logController.abort();
+  const abortLogs = () => logController.abort();
+  signal?.addEventListener("abort", abortLogs, { once: true });
+  let logPromise: Promise<ProcessResult> | undefined;
+  if (options.logs !== false) {
+    const logLines = new TextLineBuffer((raw) => {
+      const parsed = parseLogcatThreadtimeLine(raw);
+      const safeRaw = redactText(raw).value;
+      bus.emit({
+        type: "log.record",
+        source: "logcat",
+        severity: streamSeverity(parsed),
+        message: parsed === undefined ? safeRaw : redactText(parsed.message).value,
+        correlation: targetCorrelation,
+        data: {
+          raw: safeRaw,
+          parsed: parsed !== undefined,
+          ...(parsed === undefined
+            ? {}
+            : { tag: parsed.tag, pid: parsed.pid, tid: parsed.tid, priority: parsed.priority }),
+        },
+      });
+    });
+    const selectorArgs =
+      target.transportId === undefined ? ["-s", target.serial] : ["-t", target.transportId];
+    logPromise = runner({
+      executable,
+      args: [
+        ...(config.adbHost === undefined ? [] : ["-H", config.adbHost]),
+        ...(config.adbPort === undefined ? [] : ["-P", String(config.adbPort)]),
+        ...selectorArgs,
+        "logcat",
+        "-v",
+        "threadtime",
+        "ReactNativeJS:V",
+        "ReactNative:V",
+        "AndroidRuntime:E",
+        "*:S",
+      ],
+      signal: logController.signal,
+      maxBufferBytes: 256 * 1024,
+      onStdoutChunk: (chunk) => logLines.push(chunk),
+      onStderrChunk: (chunk) => logLines.push(chunk),
+    }).finally(() => logLines.flush());
+  }
+  const childStdout = new TextLineBuffer((line) => {
+    const safe = redactText(line).value;
+    bus.emit({
+      type: "child.stdout",
+      source: "child.stdout",
+      severity: "info",
+      message: safe,
+      correlation: targetCorrelation,
+      data: { raw: safe },
+    });
+    options.onChildLine?.("stdout", safe);
+  });
+  const childStderr = new TextLineBuffer((line) => {
+    const safe = redactText(line).value;
+    bus.emit({
+      type: "child.stderr",
+      source: "child.stderr",
+      severity: "info",
+      message: safe,
+      correlation: targetCorrelation,
+      data: { raw: safe },
+    });
+    options.onChildLine?.("stderr", safe);
+  });
+  bus.emit({
+    type: "child.started",
+    source: "child",
+    severity: "info",
+    message: `Starting ${preset} development command`,
+    correlation: targetCorrelation,
+    data: commandData,
+  });
+  const child = await runner({
+    executable: childCommand.executable,
+    args: childCommand.args,
+    cwd: commandCwd,
+    env: { ...childCommand.env, ANDROID_SERIAL: selected.transport.serial },
+    ...(signal === undefined ? {} : { signal }),
+    stdin: options.childStdin ?? "ignore",
+    maxBufferBytes: 4 * 1024 * 1024,
+    onStdoutChunk: (chunk) => childStdout.push(chunk),
+    onStderrChunk: (chunk) => childStderr.push(chunk),
+  });
+  childStdout.flush();
+  childStderr.flush();
+  logController.abort();
+  if (logPromise !== undefined) await logPromise;
+  signal?.removeEventListener("abort", abortLogs);
+  bus.emit({
+    type: "child.exited",
+    source: "child",
+    severity: child.exitCode === 0 ? "info" : "error",
+    message: `Development command exited ${child.exitCode === null ? `by ${String(child.signal)}` : `with ${String(child.exitCode)}`}`,
+    correlation: targetCorrelation,
+    data: { exitCode: child.exitCode, signal: child.signal, durationMs: child.durationMs },
+  });
+  await cleanup();
+  if (child.aborted) {
+    problems.push(
+      commandProblem(
+        ProblemCode.OperationInterrupted,
+        "child.interrupted",
+        "The development session was interrupted.",
+        "The owned child process and session-owned port mappings were stopped safely.",
+        context.commandId,
+      ),
+    );
+  } else if (!processSucceeded(child)) {
+    problems.push(
+      commandProblem(
+        ProblemCode.ChildProcessFailed,
+        "child.exit",
+        "The development command failed.",
+        `The child exited with ${child.exitCode === null ? String(child.signal) : String(child.exitCode)}.`,
+        context.commandId,
+        [
+          { source: "child", field: "exitCode", value: child.exitCode },
+          { source: "child", field: "signal", value: child.signal },
+        ],
+      ),
+    );
+  }
+  bus.emit({
+    type: "session.ended",
+    source: "session",
+    severity: problems.some(({ severity }) => severity === "error") ? "error" : "info",
+    message: "Development session ended",
+    correlation: targetCorrelation,
+  });
+  return complete({
+    ...baseData,
+    status: "completed",
+    ports: {
+      requested: normalizedPorts.mappings,
+      created,
+      reused,
+      cleaned,
+    },
+    child: {
+      exitCode: child.exitCode,
+      signal: child.signal,
+      durationMs: child.durationMs,
+      stdoutTruncated: child.stdoutTruncated,
+      stderrTruncated: child.stderrTruncated,
+    },
+  });
 }

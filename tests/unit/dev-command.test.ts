@@ -1,0 +1,227 @@
+import { describe, expect, test } from "bun:test";
+import { runDev } from "../../src/app/commands.js";
+import { ExitCode } from "../../src/domain/contracts.js";
+import { ProblemCode } from "../../src/domain/problems.js";
+import type {
+  ProcessRequest,
+  ProcessResult,
+  ProcessRunner,
+} from "../../src/platform/process-runner.js";
+
+function result(request: ProcessRequest, overrides: Partial<ProcessResult> = {}): ProcessResult {
+  return {
+    executable: request.executable,
+    args: [...(request.args ?? [])],
+    startedAt: "2026-09-10T10:00:00.000Z",
+    finishedAt: "2026-09-10T10:00:00.010Z",
+    durationMs: 10,
+    exitCode: 0,
+    signal: null,
+    stdout: "",
+    stderr: "",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    timedOut: false,
+    aborted: false,
+    stoppedAfterIdle: false,
+    killEscalated: false,
+    ...overrides,
+  };
+}
+
+function dependencies(runner: ProcessRunner) {
+  let id = 0;
+  return {
+    runner,
+    locateAdb: async () => "/sdk/adb",
+    detectProject: async () => ({
+      root: "/workspace/app",
+      presetEvidence: [],
+      packageManager: { conflicts: [] },
+    }),
+    idFactory: () => `id-${String(++id)}`,
+    clock: () => new Date("2026-09-10T10:00:00.000Z"),
+  };
+}
+
+function targetProbe(request: ProcessRequest): ProcessResult | undefined {
+  const args = request.args ?? [];
+  if (args.includes("devices")) {
+    return result(request, {
+      stdout: "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    });
+  }
+  if (args.includes("ro.serialno")) return result(request, { stdout: "PHONE-1\n" });
+  if (args.includes("host-features")) return result(request, { stdout: "shell_v2\n" });
+  if (args.includes("mdns")) {
+    return result(request, { stdout: "List of discovered mdns services\n" });
+  }
+  return undefined;
+}
+
+describe("runDev", () => {
+  test("owns one target, streams a redacted journal, and cleans only its reverse mapping", async () => {
+    const requests: ProcessRequest[] = [];
+    const lines: string[] = [];
+    let mapped = false;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-server", args: ["serve"] },
+        reversePorts: [{ device: 8081 }],
+        childStdin: "inherit",
+        onChildLine: (stream, line) => lines.push(`${stream}:${line}`),
+      },
+      {},
+      dependencies(async (request) => {
+        requests.push(request);
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (args.includes("logcat")) {
+          const line = "09-10 10:00:00.000  100  101 E ReactNativeJS: token=secret-value\n";
+          request.onStdoutChunk?.(new TextEncoder().encode(line));
+          return result(request, {
+            stdout: line,
+          });
+        }
+        if (args.includes("--no-rebind")) {
+          mapped = true;
+          return result(request);
+        }
+        if (args.includes("--remove")) {
+          mapped = false;
+          return result(request);
+        }
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        if (request.executable === "dev-server") {
+          request.onStdoutChunk?.(new TextEncoder().encode("ready\npassword=hunter2\n"));
+          request.onStderrChunk?.(new TextEncoder().encode("stderr is not failure\n"));
+          return result(request, {
+            stdout: "ready\npassword=hunter2\n",
+            stderr: "stderr is not failure\n",
+          });
+        }
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data).toMatchObject({
+      status: "completed",
+      selected: { transport: { serial: "USB-1", transportId: "7" } },
+      ports: {
+        requested: [{ device: "tcp:8081", host: "tcp:8081" }],
+        created: [{ device: "tcp:8081", host: "tcp:8081" }],
+        reused: [],
+        cleaned: true,
+      },
+      child: { exitCode: 0 },
+    });
+    const childRequest = requests.find(({ executable }) => executable === "dev-server");
+    expect(childRequest).toMatchObject({
+      args: ["serve"],
+      cwd: "/workspace/app",
+      stdin: "inherit",
+      env: { ANDROID_SERIAL: "USB-1" },
+    });
+    expect(lines).toEqual([
+      "stdout:ready",
+      "stdout:password=[REDACTED]",
+      "stderr:stderr is not failure",
+    ]);
+    const serializedJournal = JSON.stringify(execution.result.data?.journal.events);
+    expect(serializedJournal).not.toContain("hunter2");
+    expect(serializedJournal).not.toContain("secret-value");
+    expect(serializedJournal).toContain("child.stdout");
+    expect(serializedJournal).toContain("log.record");
+  });
+
+  test("dry-run plans ports and the child without mutating or starting either", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "node", args: ["server.mjs"] },
+        reversePorts: [{ device: 8081 }, { device: 3000, host: 4000 }],
+      },
+      { dryRun: true },
+      dependencies(async (request) => {
+        requests.push(request);
+        return targetProbe(request) ?? result(request);
+      }),
+    );
+
+    expect(execution.result.data).toMatchObject({
+      status: "planned",
+      plan: {
+        dryRun: true,
+        steps: [
+          { args: ["-t", "7", "reverse", "--no-rebind", "tcp:8081", "tcp:8081"] },
+          { args: ["-t", "7", "reverse", "--no-rebind", "tcp:3000", "tcp:4000"] },
+          { id: "start-child", executable: "node", args: ["server.mjs"] },
+        ],
+      },
+    });
+    expect(requests.some(({ args }) => args?.includes("--no-rebind"))).toBe(false);
+    expect(requests.some(({ executable }) => executable === "node")).toBe(false);
+  });
+
+  test("returns the child exit code class and still cleans a created mapping", async () => {
+    let mapped = false;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "broken-dev", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (args.includes("--no-rebind")) mapped = true;
+        if (args.includes("--remove")) mapped = false;
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        if (request.executable === "broken-dev") return result(request, { exitCode: 17 });
+        return result(request);
+      }),
+    );
+    expect(execution.exitCode).toBe(ExitCode.ChildProcess);
+    expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.ChildProcessFailed);
+    expect(execution.result.data?.ports.cleaned).toBe(true);
+  });
+
+  test("stops before mutation when an existing mapping conflicts", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-server", args: [] },
+        reversePorts: [{ device: 8081, host: 3000 }],
+      },
+      {},
+      dependencies(async (request) => {
+        requests.push(request);
+        return (
+          targetProbe(request) ??
+          result(request, {
+            stdout: request.args?.includes("--list") ? "host tcp:8081 tcp:9000\n" : "",
+          })
+        );
+      }),
+    );
+    expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.PortMappingConflict);
+    expect(requests.some(({ args }) => args?.includes("--no-rebind"))).toBe(false);
+    expect(requests.some(({ executable }) => executable === "dev-server")).toBe(false);
+  });
+});

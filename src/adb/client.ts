@@ -30,7 +30,8 @@ import {
 export interface AdbClientOptions {
   executable: string;
   bus: EventBus;
-  correlation: Pick<Correlation, "commandId">;
+  correlation: Pick<Correlation, "commandId"> &
+    Partial<Pick<Correlation, "sessionId" | "targetId">>;
   host?: string;
   port?: number;
   timeoutMs?: number;
@@ -274,7 +275,7 @@ export class AdbClient {
     } = {},
   ): Promise<AdbObservation<T>> {
     const operationId = this.#idFactory();
-    const correlation = { commandId: this.#options.correlation.commandId, operationId };
+    const correlation = { ...this.#options.correlation, operationId };
     const finalArgs = [
       ...(options.useServerArguments === false ? [] : this.#serverArguments()),
       ...args,

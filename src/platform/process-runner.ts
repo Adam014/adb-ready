@@ -13,6 +13,7 @@ export interface ProcessRequest {
   killSignal?: NodeJS.Signals;
   killGraceMs?: number;
   stdio?: ProcessStdio;
+  stdin?: "ignore" | "inherit";
   maxBufferBytes?: number;
   stopAfterIdleMs?: number;
   onStdoutChunk?: (chunk: Uint8Array) => void;
@@ -120,6 +121,9 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   if (request.stdio === "inherit" && request.input !== undefined) {
     throw new RangeError("input cannot be combined with inherited stdio");
   }
+  if (request.stdin === "inherit" && request.input !== undefined) {
+    throw new RangeError("input cannot be combined with inherited stdin");
+  }
   if (request.stdio === "inherit" && request.stopAfterIdleMs !== undefined) {
     throw new RangeError("stopAfterIdleMs cannot be combined with inherited stdio");
   }
@@ -148,7 +152,15 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
       stdio:
         stdio === "inherit"
           ? "inherit"
-          : [request.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+          : [
+              request.stdin === "inherit"
+                ? "inherit"
+                : request.input === undefined
+                  ? "ignore"
+                  : "pipe",
+              "pipe",
+              "pipe",
+            ],
       windowsHide: true,
     });
 

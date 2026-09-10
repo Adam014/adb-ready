@@ -47,6 +47,10 @@ export function redactText(input: string, options: RedactionOptions = {}): Redac
       replacement: (_match, name, separator) => `${name}${separator}${REDACTED}`,
     },
     {
+      expression: /(^|\s)(token)(\s*[:=]\s*)(["']?)[^\s,"';]+\4/giu,
+      replacement: (_match, prefix, name, separator) => `${prefix}${name}${separator}${REDACTED}`,
+    },
+    {
       expression: /\b(authorization)(\s*[:=]\s*)(?!Bearer\b)(["']?)[^\s,"';]+\3/giu,
       replacement: (_match, name, separator) => `${name}${separator}${REDACTED}`,
     },
