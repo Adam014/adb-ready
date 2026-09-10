@@ -45,6 +45,7 @@ export const ProblemCode = {
   ChildProcessFailed: "CHILD_PROCESS_FAILED",
   HookFailed: "HOOK_FAILED",
   SessionRecoveryFailed: "SESSION_RECOVERY_FAILED",
+  SessionPersistenceFailed: "SESSION_PERSISTENCE_FAILED",
 } as const;
 
 function retryDevicesAction(): SuggestedAction {

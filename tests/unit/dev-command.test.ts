@@ -10,6 +10,7 @@ import type {
   ProcessResult,
   ProcessRunner,
 } from "../../src/platform/process-runner.js";
+import { listSessions, readSessionEvents } from "../../src/state/session-store.js";
 
 function result(request: ProcessRequest, overrides: Partial<ProcessResult> = {}): ProcessResult {
   return {
@@ -141,6 +142,43 @@ describe("runDev", () => {
     expect(serializedJournal).not.toContain("secret-value");
     expect(serializedJournal).toContain("child.stdout");
     expect(serializedJournal).toContain("log.record");
+  });
+
+  test("persists a finalized private session when storage is enabled", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-dev-session-"));
+    try {
+      const execution = await runDev(
+        {
+          cwd: "/workspace/app",
+          preset: "custom",
+          command: { executable: "dev-server", args: [] },
+          reversePorts: [],
+          logs: false,
+          watch: false,
+          sessionStore: { directory },
+        },
+        {},
+        dependencies(async (request) => targetProbe(request) ?? result(request)),
+      );
+
+      const sessions = await listSessions({ directory });
+      expect(sessions).toMatchObject({
+        ok: true,
+        value: [{ sessionId: execution.result.data?.sessionId, status: "completed" }],
+      });
+      const events = await readSessionEvents(execution.result.data?.sessionId ?? "", {
+        directory,
+      });
+      expect(events.ok).toBeTrue();
+      if (events.ok) {
+        const serialized = JSON.stringify(events.value);
+        expect(serialized).not.toContain("USB-1");
+        expect(serialized).not.toContain("PHONE-1");
+        expect(events.value.at(-1)?.type).toBe("command.completed");
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("dry-run plans ports and the child without mutating or starting either", async () => {

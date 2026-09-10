@@ -53,6 +53,7 @@ import {
 import type { RecoveryPolicyInput } from "../session/recovery-policy.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { type SessionHealth, type SessionWatchSummary, watchSession } from "../session/watcher.js";
+import { SessionRecorder, type SessionStoreOptions } from "../state/session-store.js";
 import { type AndroidTarget, buildTargetInventory, isStableAdbSerial } from "../target/model.js";
 import { type SelectedTarget, selectTarget } from "../target/selection.js";
 
@@ -1579,6 +1580,7 @@ export interface DevOptions {
   watch?: boolean;
   watchIntervalMs?: number;
   recovery?: RecoveryPolicyInput;
+  sessionStore?: false | SessionStoreOptions;
 }
 
 export interface DevData {
@@ -1742,10 +1744,65 @@ export async function runDev(
   const journal = new EventJournal(bus, options.journal);
   const context = createContext("dev", { ...dependencies, bus, idFactory });
   const problems: Problem[] = [];
-  const complete = (data: Omit<DevData, "journal"> | null): CommandExecution<DevData> => {
+  let recorder: SessionRecorder | undefined;
+  if (options.sessionStore !== undefined && options.sessionStore !== false && !config.dryRun) {
+    try {
+      recorder = await SessionRecorder.create(
+        bus,
+        {
+          sessionId,
+          command: "dev",
+          startedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
+        },
+        options.sessionStore,
+      );
+    } catch {
+      problems.push(
+        commandProblem(
+          ProblemCode.SessionPersistenceFailed,
+          "session.persistence",
+          "Session history could not be started.",
+          "The development session can continue, but this run will not be available afterward.",
+          context.commandId,
+        ),
+      );
+    }
+  }
+  const complete = async (
+    data: Omit<DevData, "journal"> | null,
+  ): Promise<CommandExecution<DevData>> => {
     const execution = finish<DevData>(context, data as DevData | null, problems);
     const snapshot = journal.close();
     if (execution.result.data !== null) execution.result.data.journal = snapshot;
+    if (recorder !== undefined) {
+      const targetIdentity =
+        data?.selected.target.hardwareSerial ?? data?.selected.transport.serial;
+      const persisted = await recorder.finish({
+        status: execution.result.problems.some(
+          ({ code }) => code === ProblemCode.OperationInterrupted,
+        )
+          ? "interrupted"
+          : execution.result.ok
+            ? "completed"
+            : "failed",
+        finishedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
+        problems: execution.result.problems,
+        ...(targetIdentity === undefined ? {} : { targetIdentity }),
+        ...(data?.project.name === undefined ? {} : { projectName: data.project.name }),
+        ...(data?.preset === undefined ? {} : { preset: data.preset }),
+      });
+      if (!persisted.ok) {
+        execution.result.problems.push(
+          commandProblem(
+            ProblemCode.SessionPersistenceFailed,
+            "session.persistence",
+            persisted.message,
+            "The development session completed, but its local history is incomplete.",
+            context.commandId,
+          ),
+        );
+      }
+    }
     return execution;
   };
   const correlation = { commandId: context.commandId, sessionId };
@@ -1760,7 +1817,7 @@ export async function runDev(
   const executable = await resolveAdb(context, config, dependencies);
   if (executable === undefined) {
     problems.push(adbNotFoundProblem(correlation, config.adbPath));
-    return complete(null);
+    return await complete(null);
   }
   const discoveryClient = new AdbClient({
     executable,
@@ -1775,7 +1832,7 @@ export async function runDev(
   const devices = await discoveryClient.devices(signal);
   if (!processSucceeded(devices.process)) {
     problems.push(operationProblem("devices", devices, context.commandId));
-    return complete(null);
+    return await complete(null);
   }
   const inspection = await inspectTargets(
     discoveryClient,
@@ -1785,7 +1842,7 @@ export async function runDev(
   );
   if (inspection.interruption !== undefined) {
     problems.push(inspection.interruption);
-    return complete(null);
+    return await complete(null);
   }
   problems.push(...inspection.optionalProblems);
   const selection = selectTarget(inspection.targets, {
@@ -1800,10 +1857,13 @@ export async function runDev(
   });
   if (selection.kind !== "selected") {
     problems.push(targetSelectionProblem(selection, correlation));
-    return complete(null);
+    return await complete(null);
   }
   let selected = selection.selection;
   let target = targetForAdb(selected);
+  recorder?.addPrivateLiteral(selected.transport.serial);
+  recorder?.addPrivateLiteral(selected.target.hardwareSerial);
+  recorder?.addPrivateLiteral(selected.target.id);
   bus.emit({
     type: "target.selected",
     source: "target",
@@ -1819,6 +1879,7 @@ export async function runDev(
       ? {}
       : { explicitPackageManager: options.packageManager }),
   });
+  recorder?.addPrivateLiteral(project.root);
   const preset = options.preset ?? (options.command === undefined ? project.preset : "custom");
   if (preset === undefined) {
     problems.push(
@@ -1830,7 +1891,7 @@ export async function runDev(
         context.commandId,
       ),
     );
-    return complete(null);
+    return await complete(null);
   }
   if (
     project.packageManager.conflicts.length > 0 &&
@@ -1846,7 +1907,7 @@ export async function runDev(
         [{ source: "project", field: "candidates", value: project.packageManager.conflicts }],
       ),
     );
-    return complete(null);
+    return await complete(null);
   }
   if (
     (preset === "expo" || preset === "react-native") &&
@@ -1861,7 +1922,7 @@ export async function runDev(
         context.commandId,
       ),
     );
-    return complete(null);
+    return await complete(null);
   }
   const childCommand = await resolveDevCommand(preset, project, options, dependencies);
   if (childCommand === undefined || childCommand.executable.trim() === "") {
@@ -1874,7 +1935,7 @@ export async function runDev(
         context.commandId,
       ),
     );
-    return complete(null);
+    return await complete(null);
   }
   const defaultPorts = preset === "expo" || preset === "react-native" ? [{ device: 8081 }] : [];
   const normalizedPorts = normalizeDevPorts(
@@ -1882,7 +1943,7 @@ export async function runDev(
     context.commandId,
   );
   problems.push(...normalizedPorts.problems);
-  if (normalizedPorts.problems.length > 0) return complete(null);
+  if (normalizedPorts.problems.length > 0) return await complete(null);
 
   const targetCorrelation = { ...correlation, targetId: selected.target.id };
   const client = new AdbClient({
@@ -1898,7 +1959,7 @@ export async function runDev(
   const listed = await client.listPortMappings(target, "reverse", signal);
   if (!processSucceeded(listed.process)) {
     problems.push(operationProblem("reverse-list", listed, context.commandId));
-    return complete(null);
+    return await complete(null);
   }
   const existing = listed.value.map((mapping) => normalizePortMapping("reverse", mapping));
   const created: Array<{ device: string; host: string }> = [];
@@ -1920,7 +1981,7 @@ export async function runDev(
       );
     }
   }
-  if (problems.some(({ severity }) => severity === "error")) return complete(null);
+  if (problems.some(({ severity }) => severity === "error")) return await complete(null);
   const pending = normalizedPorts.mappings.filter(
     (mapping) =>
       !reused.some((item) => item.device === mapping.device && item.host === mapping.host),
@@ -2067,7 +2128,7 @@ export async function runDev(
       message: "Development session plan is ready",
       correlation: targetCorrelation,
     });
-    return complete({
+    return await complete({
       ...baseData(),
       status: "planned",
       ports: {
@@ -2098,7 +2159,7 @@ export async function runDev(
 
   if (!(await runHookPhase("beforeDev")) || !(await runHookPhase("onTargetReady"))) {
     await runHookPhase("finally", {}, false);
-    return complete(failedData());
+    return await complete(failedData());
   }
 
   for (const mapping of pending) {
@@ -2182,7 +2243,7 @@ export async function runDev(
   if (problems.some(({ severity }) => severity === "error")) {
     await cleanup();
     await runHookPhase("finally", {}, false);
-    return complete(failedData());
+    return await complete(failedData());
   }
 
   bus.emit({
@@ -2196,7 +2257,7 @@ export async function runDev(
   if (!(await runHookPhase("onPortsReady"))) {
     await cleanup();
     await runHookPhase("finally", {}, false);
-    return complete(failedData());
+    return await complete(failedData());
   }
   const runner = dependencies.runner ?? runProcess;
   const logController = new AbortController();
@@ -2369,6 +2430,9 @@ export async function runDev(
       if (remembered.kind === "selected") {
         selected = remembered.selection;
         target = targetForAdb(selected);
+        recorder?.addPrivateLiteral(selected.transport.serial);
+        recorder?.addPrivateLiteral(selected.target.hardwareSerial);
+        recorder?.addPrivateLiteral(selected.target.id);
       } else {
         const acquisition = planTargetAcquisition({
           remembered: {
@@ -2394,6 +2458,7 @@ export async function runDev(
         );
         let recoveredSelection: SelectedTarget | undefined;
         for (const endpoint of safeCandidates) {
+          recorder?.addPrivateLiteral(endpoint);
           const connected = await discoveryClient.connect(endpoint, watchSignal);
           if (
             !processSucceeded(connected.process) ||
@@ -2439,6 +2504,9 @@ export async function runDev(
         }
         selected = recoveredSelection;
         target = targetForAdb(selected);
+        recorder?.addPrivateLiteral(selected.transport.serial);
+        recorder?.addPrivateLiteral(selected.target.hardwareSerial);
+        recorder?.addPrivateLiteral(selected.target.id);
       }
     }
 
@@ -2638,7 +2706,7 @@ export async function runDev(
     message: "Development session ended",
     correlation: targetCorrelation,
   });
-  const execution = complete({
+  const execution = await complete({
     ...baseData(),
     status: problems.some(({ severity }) => severity === "error") ? "failed" : "completed",
     ports: {

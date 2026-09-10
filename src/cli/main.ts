@@ -28,6 +28,7 @@ import {
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
+import type { SessionStoreOptions } from "../state/session-store.js";
 import {
   type RememberedTarget,
   readTargetState,
@@ -162,6 +163,7 @@ export interface CliDependencies extends CommandDependencies {
   loadConfig?: typeof loadConfig;
   readTargetState?: typeof readTargetState;
   writeRememberedTarget?: typeof writeRememberedTarget;
+  sessionStore?: false | SessionStoreOptions;
 }
 
 function inferredFormat(argv: readonly string[]): OutputFormat {
@@ -846,6 +848,7 @@ async function runCliInternal(
                 }),
           },
           childStdin: errorCapabilities.interactive ? "inherit" : "ignore",
+          sessionStore: dependencies.sessionStore ?? { env: io.env },
           ...(options.format === "human" && !options.quiet
             ? {
                 onChildLine: (stream: "stderr" | "stdout", line: string) => {
