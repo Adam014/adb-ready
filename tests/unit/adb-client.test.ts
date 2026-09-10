@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { homedir } from "node:os";
 import { AdbClient } from "../../src/adb/client.js";
 import { EventBus } from "../../src/core/event-bus.js";
 import type {
@@ -156,6 +157,29 @@ describe("AdbClient", () => {
     expect(observation.value).toMatchObject({ paired: true, endpoint: "192.168.1.8:37123" });
     expect(JSON.stringify(events)).not.toContain("739201");
     expect(JSON.stringify(observation.process)).not.toContain("739201");
+  });
+
+  test("redacts machine-local paths from structured operation events", async () => {
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events: Array<{ type: string; data?: Record<string, unknown> }> = [];
+    bus.subscribe((event) => events.push(event));
+    const executable = `${homedir()}/Android SDK/platform-tools/adb`;
+    const client = new AdbClient({
+      executable,
+      bus,
+      correlation: { commandId: "command-1" },
+      runner: async (request) => processResult({ executable: request.executable }),
+      idFactory: () => "operation-1",
+    });
+
+    await client.devices();
+
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(homedir());
+    expect(events[0]?.data).toMatchObject({
+      executable: "~/Android SDK/platform-tools/adb",
+      args: ["devices", "-l"],
+    });
   });
 
   test("uses explicit target arguments for state and identity probes", async () => {

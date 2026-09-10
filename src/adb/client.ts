@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { EventBus } from "../core/event-bus.js";
+import { redactText } from "../core/redaction.js";
 import type { Correlation, JsonValue } from "../domain/contracts.js";
 import {
   type ProcessRequest,
@@ -226,7 +227,10 @@ export class AdbClient {
       severity: "info",
       message,
       correlation,
-      data: { executable: this.#options.executable, args: finalArgs },
+      data: {
+        executable: redactText(this.#options.executable).value,
+        args: finalArgs.map((argument) => redactText(argument).value),
+      },
     });
 
     const request: ProcessRequest = {
