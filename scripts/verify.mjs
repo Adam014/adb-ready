@@ -29,6 +29,7 @@ const steps = [
   ["Node, Bun, and Deno runtime smoke", "bun", ["run", "scripts/runtime-smoke.mjs"]],
   ["available package-manager consumers", "bun", ["run", "scripts/package-manager-smoke.mjs"]],
   ["npm package allowlist", "bun", ["run", "scripts/package-check.mjs"]],
+  ["release preparation", "bun", ["run", "scripts/release-check.mjs"]],
   ["package manifest lint", "bun", ["x", "--bun", "publint"]],
   ["package type-resolution audit", "bun", ["x", "--bun", "attw", "--pack", "."]],
 ];
