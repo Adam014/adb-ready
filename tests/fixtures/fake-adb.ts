@@ -13,6 +13,9 @@ const command = [
   "pair",
   "forward",
   "reverse",
+  "uiautomator",
+  "wm",
+  "input",
 ].find((candidate) => args.includes(candidate));
 const scenario = process.env.ADB_READY_FAKE_SCENARIO ?? "ready";
 
@@ -41,6 +44,14 @@ if (scenario === "failure") {
   process.stdout.write("List of discovered mdns services\n");
 } else if (command === "ro.serialno") {
   process.stdout.write("fixture-hardware-serial\n");
+} else if (command === "uiautomator") {
+  process.stdout.write(
+    '<?xml version="1.0"?><hierarchy><node package="com.example.app" bounds="[0,0][1080,2400]"><node text="Open" resource-id="com.example.app:id/open" clickable="true" enabled="true" bounds="[20,100][220,200]" /></node></hierarchy>\n',
+  );
+} else if (command === "wm") {
+  process.stdout.write("Physical size: 1080x2400\n");
+} else if (command === "input") {
+  process.stdout.write("");
 } else if (command === "connect") {
   process.stdout.write(`connected to ${args.at(-1) ?? "fixture.local:37123"}\n`);
 } else if (command === "get-state") {

@@ -34,6 +34,12 @@ Deterministic fixtures cover platform paths, ADB output variants, target states,
 IPv4/IPv6 discovery, selection, cancellation, timeouts, and packaging. A local
 read-only smoke test is available as `bun run verify:real-adb`.
 
+Recorded physical acceptance:
+
+| Host and target | Transport | Verified workflows |
+| --- | --- | --- |
+| macOS arm64 · Samsung Galaxy Z Fold4 (SM-F936B) · API 36 | Wireless debugging (TLS) | discovery and stable identity; app resolve/info/launch/restart; UI inspect/tap/stale-ref rejection/wait; multi-display screenshot; screen recording; Expo dev/reverse/Ctrl-C cleanup; concurrent MCP request ordering |
+
 Physical USB, emulator, wireless, VPN, container, WSL, and remote-server claims
 must be recorded as tested only after they pass on that real environment. ADB
 Ready never treats a fixture as proof of hardware compatibility.

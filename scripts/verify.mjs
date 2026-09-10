@@ -25,6 +25,7 @@ const steps = [
   ["Biome", "bun", ["run", "lint"]],
   ["unit and integration tests", "bun", ["test"]],
   ["production build", "bun", ["run", "build"]],
+  ["MCP stdio protocol", "node", ["scripts/mcp-smoke.mjs"]],
   ["static UI scenarios", "bun", ["run", "scripts/ui-playground.ts", "--all", "--non-interactive"]],
   ["packaged command matrix", "bun", ["run", "scripts/command-matrix.mjs"]],
   ["Node, Bun, and Deno runtime smoke", "bun", ["run", "scripts/runtime-smoke.mjs"]],

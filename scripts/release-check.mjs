@@ -61,6 +61,7 @@ for (const name of [
   "COMPATIBILITY.md",
   "CONTRIBUTING.md",
   "LICENSE",
+  "llms.txt",
   "README.md",
   "SECURITY.md",
 ]) {
@@ -136,12 +137,14 @@ if (packed.exitCode !== 0) {
       "CHANGELOG.md",
       "COMPATIBILITY.md",
       "LICENSE",
+      "llms.txt",
       "README.md",
       "dist/cli.js",
       "docs/getting-started.md",
       "examples/expo/adb-ready.config.json",
       "package.json",
       "schema/config-v1.schema.json",
+      "schema/agent-tools-v1.json",
     ]) {
       requireCondition(files.includes(required), `packed artifact is missing ${required}`);
     }
@@ -167,5 +170,5 @@ if (errors.length > 0) {
 process.stdout.write(
   publishMode
     ? `Release ${manifest.version} is structurally ready for npm publishing.\n`
-    : `Release preparation is safe; publishing remains blocked for ${manifest.version}.\n`,
+    : `Release ${manifest.version} is structurally ready; tagged CI performs publishing.\n`,
 );

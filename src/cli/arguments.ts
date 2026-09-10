@@ -1,8 +1,21 @@
+import type { AgentClient } from "../agent/setup.js";
+import type { AppAction, PackageScope } from "../app/app-commands.js";
 import type { PortAction } from "../app/commands.js";
 import type { DevPreset, PackageManagerName } from "../dev/project.js";
+import type {
+  UiAction,
+  UiActionRequest,
+  UiDirection,
+  UiKey,
+  UiWaitState,
+} from "../evidence/ui-actions.js";
 import type { PortDirection } from "../ports/model.js";
 
 export type CommandName =
+  | "agent"
+  | "app"
+  | "apps"
+  | "capture"
   | "config"
   | "connect"
   | "context"
@@ -11,11 +24,15 @@ export type CommandName =
   | "doctor"
   | "help"
   | "init"
+  | "inspect"
   | "logs"
+  | "mcp"
+  | "open"
   | "pair"
   | "ports"
   | "problems"
   | "sessions"
+  | "ui"
   | "version";
 export type OutputFormat = "human" | "json" | "markdown" | "ndjson" | "plain";
 export type ContextFilter =
@@ -77,6 +94,24 @@ export interface CliOptions {
   contextOnly?: ContextFilter[];
   configAction?: "explain" | "validate";
   force?: boolean;
+  appAction?: AppAction;
+  appId?: string;
+  artifactPath?: string;
+  activity?: string;
+  packageScope?: PackageScope;
+  replace?: boolean;
+  grantRuntimePermissions?: boolean;
+  allowDestructive?: boolean;
+  url?: string;
+  packageFilter?: string;
+  captureKind?: "screen-record" | "screenshot";
+  outputPath?: string;
+  durationSeconds?: number;
+  inspectKind?: "app" | "ui";
+  interactiveOnly?: boolean;
+  maxDepth?: number;
+  agentClient?: AgentClient;
+  uiRequest?: UiActionRequest;
 }
 
 export interface CliParseFailure {
@@ -94,6 +129,10 @@ export interface CliParseSuccess {
 export type CliParseResult = CliParseFailure | CliParseSuccess;
 
 const COMMANDS = new Set<CommandName>([
+  "agent",
+  "app",
+  "apps",
+  "capture",
   "config",
   "connect",
   "context",
@@ -102,12 +141,35 @@ const COMMANDS = new Set<CommandName>([
   "doctor",
   "help",
   "init",
+  "inspect",
   "logs",
+  "mcp",
+  "open",
   "pair",
   "ports",
   "problems",
   "sessions",
+  "ui",
   "version",
+]);
+const UI_ACTIONS = new Set<UiAction>(["long-press", "press", "swipe", "tap", "type", "wait"]);
+const APP_ACTIONS = new Set<AppAction>([
+  "clear-data",
+  "info",
+  "install",
+  "launch",
+  "resolve",
+  "restart",
+  "stop",
+  "uninstall",
+]);
+const AGENT_CLIENTS = new Set<AgentClient>([
+  "claude-code",
+  "codex",
+  "cursor",
+  "generic",
+  "vscode",
+  "windsurf",
 ]);
 const BOOLEAN_OPTIONS = new Set([
   "-h",
@@ -134,6 +196,14 @@ const BOOLEAN_OPTIONS = new Set([
   "--no-cleanup-ports",
   "--dump",
   "--force",
+  "--replace",
+  "--grant-runtime-permissions",
+  "--allow-destructive",
+  "--user",
+  "--system",
+  "--all",
+  "--interactive-only",
+  "--submit",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -210,6 +280,30 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   const contextOnly: ContextFilter[] = [];
   let configAction: CliOptions["configAction"];
   let force = false;
+  let appAction: AppAction | undefined;
+  let appId: string | undefined;
+  let artifactPath: string | undefined;
+  let activity: string | undefined;
+  let packageScope: PackageScope | undefined;
+  let replace = false;
+  let grantRuntimePermissions = false;
+  let allowDestructive = false;
+  let url: string | undefined;
+  let packageOption: string | undefined;
+  let appsListSeen = false;
+  let packageFilter: string | undefined;
+  let captureKind: CliOptions["captureKind"];
+  let outputPath: string | undefined;
+  let durationSeconds: number | undefined;
+  let inspectKind: CliOptions["inspectKind"];
+  let interactiveOnly = false;
+  let maxDepth: number | undefined;
+  let agentSetupSeen = false;
+  let agentClient: AgentClient | undefined;
+  let uiAction: UiAction | undefined;
+  const uiOperands: string[] = [];
+  let uiWaitState: UiWaitState | undefined;
+  let uiSubmit = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -241,6 +335,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (command === "help" && COMMANDS.has(argument as CommandName)) {
         const candidate = argument as CommandName;
         if (
+          candidate === "agent" ||
+          candidate === "app" ||
+          candidate === "apps" ||
+          candidate === "capture" ||
           candidate === "connect" ||
           candidate === "config" ||
           candidate === "context" ||
@@ -248,11 +346,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "devices" ||
           candidate === "doctor" ||
           candidate === "logs" ||
+          candidate === "mcp" ||
+          candidate === "open" ||
           candidate === "init" ||
+          candidate === "inspect" ||
           candidate === "pair" ||
           candidate === "ports" ||
           candidate === "problems" ||
-          candidate === "sessions"
+          candidate === "sessions" ||
+          candidate === "ui"
         ) {
           helpTarget = candidate;
           continue;
@@ -260,6 +362,82 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       if ((command === "connect" || command === "pair") && endpoint === undefined) {
         endpoint = argument;
+        continue;
+      }
+      if (command === "agent" && argument === "setup" && !agentSetupSeen) {
+        agentSetupSeen = true;
+        continue;
+      }
+      if (command === "agent" && agentSetupSeen && agentClient === undefined) {
+        if (!AGENT_CLIENTS.has(argument as AgentClient)) {
+          return failure(
+            "CLI_INVALID_VALUE",
+            `Invalid agent client: ${argument}. Expected codex, claude-code, cursor, vscode, windsurf, or generic.`,
+          );
+        }
+        agentClient = argument as AgentClient;
+        continue;
+      }
+      if (command === "apps" && argument === "list" && !appsListSeen) {
+        appsListSeen = true;
+        continue;
+      }
+      if (command === "app") {
+        if (appAction === undefined && APP_ACTIONS.has(argument as AppAction)) {
+          appAction = argument as AppAction;
+          continue;
+        }
+        if (appAction === "install" && artifactPath === undefined) {
+          artifactPath = argument;
+          continue;
+        }
+        if (appAction !== undefined && appAction !== "install" && appId === undefined) {
+          if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(argument)) {
+            return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
+          }
+          appId = argument;
+          continue;
+        }
+      }
+      if (command === "open" && url === undefined) {
+        url = argument;
+        continue;
+      }
+      if (
+        command === "capture" &&
+        captureKind === undefined &&
+        (argument === "screenshot" || argument === "screen-record")
+      ) {
+        captureKind = argument;
+        continue;
+      }
+      if (
+        command === "inspect" &&
+        inspectKind === undefined &&
+        (argument === "app" || argument === "ui")
+      ) {
+        inspectKind = argument;
+        continue;
+      }
+      if (command === "inspect" && inspectKind === "app" && appId === undefined) {
+        if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(argument)) {
+          return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
+        }
+        appId = argument;
+        continue;
+      }
+      if (command === "ui") {
+        if (uiAction === undefined) {
+          if (!UI_ACTIONS.has(argument as UiAction)) {
+            return failure(
+              "CLI_INVALID_VALUE",
+              `Invalid UI action: ${argument}. Expected tap, long-press, swipe, type, press, or wait.`,
+            );
+          }
+          uiAction = argument as UiAction;
+        } else {
+          uiOperands.push(argument);
+        }
         continue;
       }
       if (command === "sessions") {
@@ -464,7 +642,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(value)) {
         return failure("CLI_INVALID_VALUE", `Invalid Android package name: ${value}.`, option);
       }
-      logPackage = value;
+      packageOption = value;
     } else if (option === "--pid") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -560,6 +738,76 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       logDump = true;
     } else if (option === "--force") {
       force = true;
+    } else if (option === "--out") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() === "" || value.length > 1_024) {
+        return failure("CLI_INVALID_VALUE", "--out must be a non-empty relative path.", option);
+      }
+      outputPath = value;
+    } else if (option === "--duration") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const milliseconds = parseDuration(value);
+      if (
+        milliseconds === undefined ||
+        milliseconds % 1_000 !== 0 ||
+        milliseconds < 1_000 ||
+        milliseconds > 180_000
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid recording duration: ${value}. Use whole seconds from 1s to 180s.`,
+          option,
+        );
+      }
+      durationSeconds = milliseconds / 1_000;
+    } else if (option === "--interactive-only") {
+      interactiveOnly = true;
+    } else if (option === "--submit") {
+      uiSubmit = true;
+    } else if (option === "--state") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value !== "visible" && value !== "gone") {
+        return failure("CLI_INVALID_VALUE", `Invalid UI wait state: ${value}.`, option);
+      }
+      uiWaitState = value;
+    } else if (option === "--max-depth") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {
+        return failure("CLI_INVALID_VALUE", `Invalid UI depth: ${value}. Expected 1-100.`, option);
+      }
+      maxDepth = parsed;
+    } else if (option === "--activity") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[A-Za-z0-9_.$]+(?:\/[A-Za-z0-9_.$]+)?$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid Android activity: ${value}.`, option);
+      }
+      activity = value;
+    } else if (option === "--filter") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() === "" || value.length > 256) {
+        return failure("CLI_INVALID_VALUE", "--filter must be 1-256 characters.", option);
+      }
+      packageFilter = value;
+    } else if (option === "--replace") {
+      replace = true;
+    } else if (option === "--grant-runtime-permissions") {
+      grantRuntimePermissions = true;
+    } else if (option === "--allow-destructive") {
+      allowDestructive = true;
+    } else if (option === "--user" || option === "--system" || option === "--all") {
+      const nextScope: PackageScope =
+        option === "--user" ? "user" : option === "--system" ? "system" : "all";
+      if (packageScope !== undefined && packageScope !== nextScope) {
+        return failure("CLI_USAGE", "Choose only one of --user, --system, or --all.");
+      }
+      packageScope = nextScope;
     } else if (option === "--max-records") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -649,11 +897,35 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
+  if (packageOption !== undefined) {
+    if (command === "logs") logPackage = packageOption;
+    else if (
+      command === "app" ||
+      command === "open" ||
+      (command === "inspect" && inspectKind === "app")
+    )
+      appId = packageOption;
+    else
+      return failure(
+        "CLI_USAGE",
+        "--package can only be used with app, inspect app, logs, or open.",
+      );
+  }
+  if (command === "apps") packageScope ??= "user";
   if (command === "config") configAction ??= "validate";
   if (command === "context" && format === "human") format = "markdown";
   if (command === "sessions") sessionAction ??= "list";
   const targetCommand =
-    command === "dev" || command === "devices" || command === "logs" || command === "ports";
+    command === "app" ||
+    command === "apps" ||
+    command === "capture" ||
+    command === "dev" ||
+    command === "devices" ||
+    command === "inspect" ||
+    command === "logs" ||
+    command === "open" ||
+    command === "ports" ||
+    command === "ui";
   if (select && !targetCommand) {
     return failure(
       "CLI_USAGE",
@@ -696,13 +968,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     dryRun &&
     command !== "connect" &&
     command !== "dev" &&
+    command !== "app" &&
+    command !== "open" &&
     command !== "pair" &&
     command !== "ports" &&
-    command !== "init"
+    command !== "init" &&
+    command !== "agent" &&
+    command !== "ui"
   ) {
     return failure(
       "CLI_USAGE",
-      "--dry-run can only be used with connect, dev, init, pair, or ports.",
+      "--dry-run can only be used with app, connect, dev, init, open, pair, or ports.",
       "--dry-run",
     );
   }
@@ -722,6 +998,155 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     if (portAction === "remove" && secondaryPort !== undefined) {
       return failure("CLI_USAGE", `ports ${portDirection} remove accepts one port.`);
     }
+  }
+  if (command === "app") {
+    if (appAction === undefined) return failure("CLI_USAGE", "app requires an action.");
+    if (appAction === "install" && artifactPath === undefined) {
+      return failure("CLI_USAGE", "app install requires an APK path.");
+    }
+    if (appAction !== "install" && artifactPath !== undefined) {
+      return failure("CLI_USAGE", `app ${appAction} does not accept an artifact path.`);
+    }
+  }
+  if (command === "open" && url === undefined) return failure("CLI_USAGE", "open requires a URL.");
+  if (command === "capture" && captureKind === undefined) {
+    return failure("CLI_USAGE", "capture requires screenshot or screen-record.");
+  }
+  if (command === "inspect" && inspectKind === undefined) {
+    return failure("CLI_USAGE", "inspect requires app or ui.");
+  }
+  let uiRequest: UiActionRequest | undefined;
+  if (command === "ui") {
+    if (uiAction === undefined) return failure("CLI_USAGE", "ui requires an action.");
+    const coordinate = (value: string | undefined): number | undefined => {
+      if (value === undefined || !/^\d+$/u.test(value)) return undefined;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed <= 100_000 ? parsed : undefined;
+    };
+    if (uiAction === "tap" || uiAction === "long-press") {
+      const [first, second] = uiOperands;
+      const x = coordinate(first);
+      const y = coordinate(second);
+      if (uiOperands.length === 1 && /^ui:[a-f0-9]{12}:\d+$/u.test(first ?? ""))
+        uiRequest =
+          uiAction === "tap"
+            ? { action: "tap", ref: first ?? "" }
+            : { action: "long-press", ref: first ?? "" };
+      else if (uiOperands.length === 2 && x !== undefined && y !== undefined)
+        uiRequest = uiAction === "tap" ? { action: "tap", x, y } : { action: "long-press", x, y };
+      else
+        return failure(
+          "CLI_USAGE",
+          `ui ${uiAction} requires one current UI ref or two integer coordinates.`,
+        );
+    } else if (uiAction === "swipe") {
+      const direction = uiOperands[0] as UiDirection | undefined;
+      if (
+        uiOperands.length === 1 &&
+        direction !== undefined &&
+        new Set<UiDirection>(["down", "left", "right", "up"]).has(direction)
+      ) {
+        uiRequest = { action: "swipe", direction };
+      } else if (uiOperands.length === 4) {
+        const values = uiOperands.map(coordinate);
+        if (values.some((value) => value === undefined)) {
+          return failure("CLI_INVALID_VALUE", "UI swipe coordinates must be bounded integers.");
+        }
+        uiRequest = {
+          action: "swipe",
+          x1: values[0] ?? 0,
+          y1: values[1] ?? 0,
+          x2: values[2] ?? 0,
+          y2: values[3] ?? 0,
+        };
+      } else {
+        return failure(
+          "CLI_USAGE",
+          "ui swipe requires up, down, left, right, or four integer coordinates.",
+        );
+      }
+    } else if (uiAction === "type") {
+      if (uiOperands.length !== 1) return failure("CLI_USAGE", "ui type requires one text value.");
+      uiRequest = {
+        action: "type",
+        text: uiOperands[0] ?? "",
+        ...(uiSubmit ? { submit: true } : {}),
+      };
+    } else if (uiAction === "press") {
+      const key = uiOperands[0] as UiKey | undefined;
+      if (
+        uiOperands.length !== 1 ||
+        key === undefined ||
+        !new Set<UiKey>(["back", "enter", "home", "menu", "volume-down", "volume-up"]).has(key)
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "ui press requires back, home, enter, menu, volume-up, or volume-down.",
+        );
+      }
+      uiRequest = { action: "press", key };
+    } else {
+      if (uiOperands.length !== 1) {
+        return failure("CLI_USAGE", "ui wait requires one exact selector.");
+      }
+      uiRequest = {
+        action: "wait",
+        selector: uiOperands[0] ?? "",
+        ...(uiWaitState === undefined ? {} : { state: uiWaitState }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      };
+    }
+  }
+  if (command === "agent" && (!agentSetupSeen || agentClient === undefined)) {
+    return failure("CLI_USAGE", "agent requires setup and a supported client name.");
+  }
+  if (interactiveOnly && (command !== "inspect" || inspectKind !== "ui")) {
+    return failure("CLI_USAGE", "--interactive-only can only be used with inspect ui.");
+  }
+  if (maxDepth !== undefined && (command !== "inspect" || inspectKind !== "ui")) {
+    return failure("CLI_USAGE", "--max-depth can only be used with inspect ui.");
+  }
+  if (uiSubmit && (command !== "ui" || uiAction !== "type")) {
+    return failure("CLI_USAGE", "--submit can only be used with ui type.");
+  }
+  if (uiWaitState !== undefined && (command !== "ui" || uiAction !== "wait")) {
+    return failure("CLI_USAGE", "--state can only be used with ui wait.");
+  }
+  if (dryRun && command === "ui" && uiAction === "wait") {
+    return failure("CLI_USAGE", "--dry-run is not meaningful for the read-only ui wait action.");
+  }
+  if (outputPath !== undefined && command !== "capture") {
+    return failure("CLI_USAGE", "--out can only be used with capture.");
+  }
+  if (durationSeconds !== undefined && (command !== "capture" || captureKind !== "screen-record")) {
+    return failure("CLI_USAGE", "--duration can only be used with capture screen-record.");
+  }
+  if (packageScope !== undefined && command !== "apps") {
+    return failure("CLI_USAGE", "--user, --system, and --all can only be used with apps list.");
+  }
+  if (packageFilter !== undefined && command !== "apps") {
+    return failure("CLI_USAGE", "--filter can only be used with apps list.");
+  }
+  if (
+    (activity !== undefined || replace || grantRuntimePermissions || allowDestructive) &&
+    command !== "app"
+  ) {
+    return failure("CLI_USAGE", "App lifecycle options can only be used with the app command.");
+  }
+  if (activity !== undefined && appAction !== "launch" && appAction !== "restart") {
+    return failure("CLI_USAGE", "--activity can only be used with app launch or app restart.");
+  }
+  if ((replace || grantRuntimePermissions) && appAction !== "install") {
+    return failure(
+      "CLI_USAGE",
+      "--replace and --grant-runtime-permissions can only be used with app install.",
+    );
+  }
+  if (allowDestructive && appAction !== "clear-data" && appAction !== "uninstall") {
+    return failure(
+      "CLI_USAGE",
+      "--allow-destructive can only be used with app clear-data or app uninstall.",
+    );
   }
   if (
     command !== "dev" &&
@@ -765,8 +1190,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (format === "markdown" && command !== "context") {
     return failure("CLI_USAGE", "Markdown output is only available for the context command.");
   }
-  if (force && command !== "init") {
-    return failure("CLI_USAGE", "--force can only be used with the init command.");
+  if (command === "mcp" && argv.some((argument) => argument !== "mcp")) {
+    return failure(
+      "CLI_USAGE",
+      "mcp does not accept CLI output or target options; configure the spawned stdio server through the project and environment.",
+    );
+  }
+  if (force && command !== "init" && command !== "capture") {
+    return failure("CLI_USAGE", "--force can only be used with init or capture.");
   }
 
   return {
@@ -821,6 +1252,29 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(contextOnly.length === 0 ? {} : { contextOnly: [...new Set(contextOnly)] }),
       ...(configAction === undefined ? {} : { configAction }),
       ...(force ? { force: true } : {}),
+      ...(appAction === undefined ? {} : { appAction }),
+      ...(appId === undefined ? {} : { appId }),
+      ...(artifactPath === undefined ? {} : { artifactPath }),
+      ...(activity === undefined ? {} : { activity }),
+      ...(packageScope === undefined ? {} : { packageScope }),
+      ...(replace ? { replace: true } : {}),
+      ...(grantRuntimePermissions ? { grantRuntimePermissions: true } : {}),
+      ...(allowDestructive ? { allowDestructive: true } : {}),
+      ...(url === undefined ? {} : { url }),
+      ...(packageFilter === undefined ? {} : { packageFilter }),
+      ...(captureKind === undefined ? {} : { captureKind }),
+      ...(outputPath === undefined ? {} : { outputPath }),
+      ...(durationSeconds === undefined ? {} : { durationSeconds }),
+      ...(inspectKind === undefined ? {} : { inspectKind }),
+      ...(interactiveOnly ? { interactiveOnly: true } : {}),
+      ...(maxDepth === undefined ? {} : { maxDepth }),
+      ...(agentClient === undefined ? {} : { agentClient }),
+      ...(uiRequest === undefined
+        ? {}
+        : {
+            uiRequest:
+              dryRun && uiRequest.action !== "wait" ? { ...uiRequest, dryRun: true } : uiRequest,
+          }),
     },
   };
 }

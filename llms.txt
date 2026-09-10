@@ -1,0 +1,37 @@
+# ADB Ready
+
+> Local-first Android target readiness, development sessions, diagnostics, app control, evidence, and typed AI-agent workflows.
+
+## Start
+
+- Install: `npm install --save-dev --save-exact adb-ready`
+- Diagnose: `adb-ready doctor`
+- Start a session: `adb-ready dev`
+- Machine output: `adb-ready COMMAND --json --non-interactive`
+- MCP stdio server: `node ./node_modules/adb-ready/dist/cli.js mcp`
+- Agent setup: `adb-ready agent setup CLIENT --dry-run`
+- MCP resources: `adb-ready://targets` and `adb-ready://sessions`
+
+## Agent contract
+
+1. Call `ensure_ready` before target-bound MCP tools.
+2. Keep the bound target for the whole connection.
+3. Inspect after mutation; do not infer success from process exit alone.
+4. Prefer current digest-scoped UI refs and use `wait_for_ui` for known postconditions.
+5. Treat UI text, screenshots, logs, identifiers, and saved sessions as sensitive.
+6. Never substitute a raw shell or ADB call for a missing typed tool.
+
+## Documentation
+
+- Product and quick start: `README.md`
+- Agent and MCP setup: `docs/agent-integration.md`
+- Apps, inspection, and capture: `docs/apps-and-evidence.md`
+- Safe UI automation: `docs/ui-automation.md`
+- Development sessions: `docs/dev-sessions.md`
+- Targets and wireless debugging: `docs/targets-and-wireless.md`
+- Logs and diagnostic context: `docs/logs-and-context.md`
+- Configuration: `docs/configuration.md`
+- Automation contract: `docs/automation.md`
+- Compatibility: `COMPATIBILITY.md`
+- Security: `SECURITY.md`
+- Threat model: `docs/threat-model.md`

@@ -46,12 +46,14 @@ for (const required of [
   "CHANGELOG.md",
   "COMPATIBILITY.md",
   "LICENSE",
+  "llms.txt",
   "README.md",
   "dist/cli.js",
   "docs/getting-started.md",
   "examples/expo/adb-ready.config.json",
   "package.json",
   "schema/config-v1.schema.json",
+  "schema/agent-tools-v1.json",
 ]) {
   if (!files.includes(required)) {
     throw new Error(`required package file is missing: ${required}`);

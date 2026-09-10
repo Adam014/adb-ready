@@ -105,6 +105,49 @@ describe("loadConfig", () => {
     }
   });
 
+  test("loads project app identity with provenance and rejects invalid package names", async () => {
+    const directory = await temporaryDirectory();
+    const validFile = path.join(directory, "app-valid.json");
+    const invalidFile = path.join(directory, "app-invalid.json");
+    await writeJson(validFile, {
+      version: 1,
+      app: { android: { package: "com.example.mobile" } },
+    });
+    await writeJson(invalidFile, {
+      version: 1,
+      app: { android: { package: "not a package" } },
+    });
+
+    const valid = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: validFile,
+      explicitProjectConfig: true,
+    });
+    expect(valid).toMatchObject({
+      ok: true,
+      config: {
+        values: { appPackage: "com.example.mobile" },
+        provenance: { appPackage: { source: "project", location: validFile } },
+      },
+    });
+
+    const invalid = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: invalidFile,
+      explicitProjectConfig: true,
+    });
+    expect(invalid).toMatchObject({
+      ok: false,
+      errors: [{ path: "app.android.package" }],
+    });
+  });
+
   test("returns every validation error instead of stopping at the first", async () => {
     const directory = await temporaryDirectory();
     const projectFile = path.join(directory, "invalid.json");

@@ -43,6 +43,9 @@
           "targets": {
             "$ref": "#/$defs/targets"
           },
+          "app": {
+            "$ref": "#/$defs/app"
+          },
           "dev": {
             "$ref": "#/$defs/dev"
           }
@@ -107,6 +110,9 @@
         }
       }
     },
+    "app": {
+      "$ref": "#/$defs/app"
+    },
     "dev": {
       "$ref": "#/$defs/dev"
     }
@@ -141,6 +147,22 @@
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"
           },
           "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "android": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "package": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+$"
+            }
+          }
         }
       }
     },

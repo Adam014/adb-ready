@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import process from "node:process";
 import manifest from "../../package.json" with { type: "json" };
 import type { AdbMdnsService } from "../adb/parsers.js";
+import { runMcpStdio } from "../agent/mcp-server.js";
+import { runAgentSetup } from "../agent/setup.js";
+import {
+  type AppData,
+  type AppsData,
+  type OpenData,
+  runApp,
+  runApps,
+  runOpen,
+} from "../app/app-commands.js";
 import {
   type CommandDependencies,
   type CommandExecution,
@@ -35,6 +46,14 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import { type CaptureData, runCapture } from "../evidence/capture.js";
+import {
+  type InspectAppData,
+  type InspectUiData,
+  runInspectApp,
+  runInspectUi,
+} from "../evidence/inspect.js";
+import { runUiAction, type UiActionData } from "../evidence/ui-actions.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
 import {
@@ -44,6 +63,7 @@ import {
   writeRememberedTarget,
 } from "../state/target-state.js";
 import type { AndroidTarget } from "../target/model.js";
+import { confirmAction } from "../ui/confirm.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
@@ -65,17 +85,25 @@ Usage:
   adbr [command] [options]
 
 Commands:
+  agent setup CLIENT     Configure a project-local AI agent bridge
+  app ACTION [APP_ID]   Resolve, inspect, install, or control one app
+  apps list             List packages on one Android target
+  capture ACTION         Save a verified screenshot or bounded screen recording
   config ACTION          Validate or explain resolved configuration
   connect [HOST:PORT]    Connect and verify a wireless Android target
   context [SESSION]      Export bounded AI-ready diagnostic context
   dev [OPTIONS] [-- CMD] Prepare one target and run a development session
   doctor                 Inspect the local ADB environment
   init                   Create a detected project configuration
+  inspect ACTION         Build a bounded app or UI evidence snapshot
   devices                List visible Android targets
   logs [OPTIONS]         Stream focused logs from one Android target
+  mcp                    Serve typed tools over local stdio
+  open URL               Open a deep link or web URL on one target
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
   sessions [ACTION]      Inspect saved development sessions
+  ui ACTION              Perform a bounded, verified Android UI action
   problems [SESSION]     Show problems from a saved session
   help [COMMAND]         Show help
   version                Show version
@@ -110,6 +138,43 @@ Other:
 `;
 
 const COMMAND_HELP = {
+  agent: `Usage:
+  adb-ready agent setup codex [--dry-run]
+  adb-ready agent setup claude-code [--dry-run]
+  adb-ready agent setup cursor [--dry-run]
+  adb-ready agent setup vscode [--dry-run]
+  adb-ready agent setup windsurf [--dry-run]
+  adb-ready agent setup generic [--dry-run]
+
+Creates or safely merges a project MCP configuration without replacing an
+existing adb-ready server entry. Windsurf and generic clients return a manual
+snippet because their configuration is user-scoped or client-defined.
+`,
+  app: `Usage:
+  adb-ready app resolve [APP_ID] [options]
+  adb-ready app info [APP_ID] [options]
+  adb-ready app install APK [--package APP_ID] [options]
+  adb-ready app launch [APP_ID] [--activity ACTIVITY] [options]
+  adb-ready app stop [APP_ID] [options]
+  adb-ready app restart [APP_ID] [--activity ACTIVITY] [options]
+  adb-ready app clear-data [APP_ID] [--allow-destructive]
+  adb-ready app uninstall [APP_ID] [--allow-destructive]
+
+Resolves one project application with provenance and runs verified lifecycle
+operations against the same deterministic Android target.
+`,
+  apps: `Usage: adb-ready apps list [--user|--system|--all] [options]
+
+Lists packages from one deterministic Android target. User-installed packages
+are shown by default.
+`,
+  capture: `Usage:
+  adb-ready capture screenshot [--out PATH] [--force]
+  adb-ready capture screen-record [--out PATH] [--duration 10s] [--force]
+
+Writes verified binary evidence inside the current project. Existing files are
+never replaced unless --force is explicit. Recordings are bounded to 180s.
+`,
   config: `Usage:
   adb-ready config validate [options]
   adb-ready config explain [options]
@@ -157,6 +222,27 @@ Runs read-only host, ADB capability, server, and target diagnostics.
 Creates adb-ready.config.json from detected project signals. Existing files are
 never replaced unless --force is explicit. Use --dry-run to preview the file.
 `,
+  inspect: `Usage:
+  adb-ready inspect app [APP_ID] [options]
+  adb-ready inspect ui [--interactive-only] [--max-depth N] [options]
+
+Returns a bounded evidence snapshot for one deterministic target. UI text and
+hierarchy data are explicitly marked sensitive and are never added to AI
+context implicitly.
+`,
+  ui: `Usage:
+  adb-ready ui tap REF|X Y [--dry-run]
+  adb-ready ui long-press REF|X Y [--dry-run]
+  adb-ready ui swipe up|down|left|right [--dry-run]
+  adb-ready ui swipe X1 Y1 X2 Y2 [--dry-run]
+  adb-ready ui type TEXT [--submit] [--dry-run]
+  adb-ready ui press back|home|enter|menu|volume-up|volume-down [--dry-run]
+  adb-ready ui wait SELECTOR [--state visible|gone] [--timeout 5s]
+
+Uses fresh UI evidence before every mutation. A ui:* reference is accepted only
+while its snapshot digest still matches. Selectors are exact id=, text=, desc=,
+or package= values. Typed text uses a conservative shell-safe character set.
+`,
   devices: `Usage: adb-ready devices [options]
 
 Lists every target visible to ADB. Add --select to open the keyboard picker.
@@ -177,6 +263,16 @@ Log options:
   --since TIMESTAMP      Start at an Android logcat timestamp
   --dump                 Read the current buffer and exit instead of following
   --max-records COUNT    Bound records retained in the final result
+`,
+  mcp: `Usage: adb-ready mcp
+
+Starts the local MCP stdio server. Standard output is reserved for the MCP
+protocol; the command never opens a network listener or exposes raw shell/ADB.
+`,
+  open: `Usage: adb-ready open URL [--package APP_ID] [options]
+
+Opens one absolute deep link or web URL through Android's VIEW intent on the
+selected target.
 `,
   pair: `Usage: adb-ready pair [HOST:PORT] [options]
 
@@ -449,8 +545,26 @@ async function runInteractiveSession(
       return ExitCode.Success;
     }
 
+    const actionArguments: Record<Exclude<typeof home.action, "exit">, string[]> = {
+      "app-info": ["app", "info"],
+      "app-restart": ["app", "restart"],
+      "capture-screenshot": ["capture", "screenshot"],
+      connect: ["connect"],
+      context: ["context"],
+      dev: ["dev"],
+      devices: ["devices"],
+      doctor: ["doctor"],
+      help: ["help"],
+      init: ["init"],
+      "inspect-app": ["inspect", "app"],
+      "inspect-ui": ["inspect", "ui", "--interactive-only"],
+      logs: ["logs"],
+      pair: ["pair"],
+      sessions: ["sessions"],
+      version: ["version"],
+    };
     clearInteractiveScreen(io.error, terminal);
-    await runCliInternal([home.action], io, dependencies, signal);
+    await runCliInternal(actionArguments[home.action], io, dependencies, signal);
     if (signal?.aborted === true) {
       return ExitCode.Interrupted;
     }
@@ -588,6 +702,37 @@ async function runCliInternal(
     io.output.write(`${VERSION}\n`);
     return ExitCode.Success;
   }
+  if (options.command === "mcp") {
+    const explicitRoot = io.env.ADB_READY_MCP_PROJECT_ROOT?.trim();
+    await runMcpStdio(
+      {
+        cwd:
+          explicitRoot === undefined || explicitRoot === "" ? io.cwd : path.resolve(explicitRoot),
+        env: io.env,
+        dependencies,
+        version: VERSION,
+      },
+      signal,
+    );
+    return ExitCode.Success;
+  }
+  if (options.command === "agent") {
+    const execution = await runAgentSetup(
+      {
+        client: options.agentClient ?? "generic",
+        cwd: io.cwd,
+        ...(options.dryRun ? { dryRun: true } : {}),
+      },
+      dependencies,
+    );
+    renderResult(execution.result, {
+      format: options.format,
+      capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return execution.exitCode;
+  }
   if (options.command === "init") {
     const execution = await runInit(
       {
@@ -685,12 +830,24 @@ async function runCliInternal(
   let lastTarget: RememberedTarget | undefined;
   let stateWarning: Problem | undefined;
   if (
-    (options.command === "dev" ||
+    (options.command === "app" ||
+      options.command === "apps" ||
+      options.command === "capture" ||
+      options.command === "dev" ||
       options.command === "devices" ||
+      options.command === "inspect" ||
       options.command === "logs" ||
-      options.command === "ports") &&
-    (options.command === "dev" ||
+      options.command === "open" ||
+      options.command === "ports" ||
+      options.command === "ui") &&
+    (options.command === "app" ||
+      options.command === "apps" ||
+      options.command === "capture" ||
+      options.command === "dev" ||
+      options.command === "inspect" ||
       options.command === "logs" ||
+      options.command === "open" ||
+      options.command === "ui" ||
       options.select ||
       options.remembered)
   ) {
@@ -745,9 +902,15 @@ async function runCliInternal(
     ...(options.dryRun ? { dryRun: true } : {}),
   };
   if (
-    (options.command === "ports" && options.select) ||
+    (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||
+    options.command === "apps" ||
+    options.command === "capture" ||
     options.command === "dev" ||
-    options.command === "logs"
+    options.command === "inspect" ||
+    options.command === "logs" ||
+    options.command === "open" ||
+    options.command === "ui" ||
+    (options.command === "ports" && options.select)
   ) {
     let inventory = await runDevices(config, commandDependencies, signal);
     let selectable =
@@ -798,7 +961,14 @@ async function runCliInternal(
     }
     const shouldPrompt =
       options.select ||
-      ((options.command === "dev" || options.command === "logs") &&
+      (((options.command === "app" && options.appAction !== "resolve") ||
+        options.command === "apps" ||
+        options.command === "capture" ||
+        options.command === "dev" ||
+        options.command === "inspect" ||
+        options.command === "logs" ||
+        options.command === "open" ||
+        options.command === "ui") &&
         errorCapabilities.interactive &&
         inventory.result.data?.selected === undefined &&
         selectable.length !== 1);
@@ -973,15 +1143,154 @@ async function runCliInternal(
   const events = options.format === "ndjson" ? new NdjsonEventRenderer(bus, io.output) : undefined;
 
   let execution:
+    | CommandExecution<AppData>
+    | CommandExecution<AppsData>
+    | CommandExecution<CaptureData>
     | CommandExecution<DevicesData>
+    | CommandExecution<InspectAppData>
+    | CommandExecution<InspectUiData>
+    | CommandExecution<UiActionData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
     | CommandExecution<LogsData>
+    | CommandExecution<OpenData>
     | Awaited<ReturnType<typeof runPair>>
     | Awaited<ReturnType<typeof runPorts>>;
   try {
-    if (options.command === "doctor") {
+    if (options.command === "app") {
+      let destructiveApproved = options.allowDestructive === true;
+      if (
+        !destructiveApproved &&
+        !options.dryRun &&
+        (options.appAction === "clear-data" || options.appAction === "uninstall") &&
+        errorCapabilities.interactive
+      ) {
+        const confirmation = await confirmAction({
+          action: options.appAction === "clear-data" ? "Clear all app data" : "Uninstall app",
+          scope: options.appId ?? values.appPackage ?? "resolved project app",
+          risk: "destructive",
+          nonInteractiveFlag: "--allow-destructive",
+          input: io.input,
+          sink: io.error,
+          capabilities: errorCapabilities,
+          ...(signal === undefined ? {} : { signal }),
+        });
+        if (confirmation.kind === "confirmed") {
+          destructiveApproved = true;
+        } else {
+          const cancelled = failureResult(
+            `app ${options.appAction}`,
+            [
+              inputProblem(
+                ProblemCode.OperationInterrupted,
+                "The destructive app action was cancelled.",
+                "The Android target was not changed.",
+              ),
+            ],
+            dependencies,
+          );
+          renderFailure(cancelled, options.format, io);
+          return ExitCode.Interrupted;
+        }
+      }
+      execution = await runApp(
+        {
+          action: options.appAction ?? "resolve",
+          cwd: io.cwd,
+          ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+          ...(values.appPackage === undefined
+            ? {}
+            : {
+                configuredPackage: {
+                  value: values.appPackage,
+                  ...(loaded.config.provenance.appPackage?.location === undefined
+                    ? {}
+                    : { location: loaded.config.provenance.appPackage.location }),
+                },
+              }),
+          ...(options.artifactPath === undefined ? {} : { artifactPath: options.artifactPath }),
+          ...(options.activity === undefined ? {} : { activity: options.activity }),
+          ...(options.replace === undefined ? {} : { replace: options.replace }),
+          ...(options.grantRuntimePermissions === undefined
+            ? {}
+            : { grantRuntimePermissions: options.grantRuntimePermissions }),
+          ...(destructiveApproved ? { destructiveApproved: true } : {}),
+        },
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "apps") {
+      execution = await runApps(
+        options.packageScope ?? "user",
+        options.packageFilter,
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "capture") {
+      execution = await runCapture(
+        {
+          kind: options.captureKind ?? "screenshot",
+          cwd: io.cwd,
+          ...(options.outputPath === undefined ? {} : { out: options.outputPath }),
+          ...(options.force === undefined ? {} : { force: options.force }),
+          ...(options.durationSeconds === undefined
+            ? {}
+            : { durationSeconds: options.durationSeconds }),
+        },
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "inspect") {
+      execution =
+        options.inspectKind === "ui"
+          ? await runInspectUi(
+              {
+                ...(options.interactiveOnly === undefined
+                  ? {}
+                  : { interactiveOnly: options.interactiveOnly }),
+                ...(options.maxDepth === undefined ? {} : { maxDepth: options.maxDepth }),
+              },
+              config,
+              commandDependencies,
+              signal,
+            )
+          : await runInspectApp(
+              {
+                cwd: io.cwd,
+                ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+                ...(values.appPackage === undefined
+                  ? {}
+                  : {
+                      configuredPackage: {
+                        value: values.appPackage,
+                        ...(loaded.config.provenance.appPackage?.location === undefined
+                          ? {}
+                          : { location: loaded.config.provenance.appPackage.location }),
+                      },
+                    }),
+              },
+              config,
+              commandDependencies,
+              signal,
+            );
+    } else if (options.command === "ui") {
+      if (options.uiRequest === undefined) {
+        throw new Error("Validated UI command is missing its action request.");
+      }
+      execution = await runUiAction(options.uiRequest, config, commandDependencies, signal);
+    } else if (options.command === "open") {
+      execution = await runOpen(
+        options.url ?? "",
+        options.appId ?? values.appPackage,
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "doctor") {
       execution = await runDoctor(config, commandDependencies, signal);
     } else if (options.command === "logs") {
       execution = await runLogs(
@@ -1212,6 +1521,31 @@ async function runCliInternal(
     } else if (options.command === "ports") {
       const data = execution.result.data as PortsData | null;
       if (data !== null) {
+        selectedTarget = {
+          serial: data.selected.transport.serial,
+          ...(data.selected.target.hardwareSerial === undefined
+            ? {}
+            : { hardwareSerial: data.selected.target.hardwareSerial }),
+        };
+      }
+    } else if (
+      options.command === "app" ||
+      options.command === "apps" ||
+      options.command === "capture" ||
+      options.command === "inspect" ||
+      options.command === "open" ||
+      options.command === "ui"
+    ) {
+      const data = execution.result.data as
+        | AppData
+        | AppsData
+        | CaptureData
+        | InspectAppData
+        | InspectUiData
+        | OpenData
+        | UiActionData
+        | null;
+      if (data !== null && "selected" in data) {
         selectedTarget = {
           serial: data.selected.transport.serial,
           ...(data.selected.target.hardwareSerial === undefined

@@ -227,12 +227,14 @@ try {
       ["bare non-TTY", [], "ADB Ready"],
       ["help flag", ["--help"], "adb-ready [command]"],
       ["help command", ["help"], "ADB Ready"],
+      ["agent help", ["help", "agent"], "adb-ready agent setup"],
       ["doctor help", ["help", "doctor"], "adb-ready doctor"],
       ["devices help", ["devices", "--help"], "adb-ready devices"],
       ["connect help", ["connect", "--help"], "adb-ready connect"],
       ["dev help", ["dev", "--help"], "adb-ready dev"],
       ["pair help", ["help", "pair"], "adb-ready pair"],
       ["ports help", ["ports", "--help"], "adb-ready ports reverse"],
+      ["UI help", ["ui", "--help"], "adb-ready ui tap"],
       ["version flag", ["--version"], manifest.version],
       ["version command", ["version"], manifest.version],
     ]) {
@@ -241,6 +243,52 @@ try {
       expectIncludes(execution.stdout, expected, `${alias} ${label}`);
       assertions += 1;
     }
+
+    const agentPlan = command(
+      alias,
+      ["agent", "setup", "cursor", "--dry-run", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(agentPlan, 0, `${alias} agent setup dry-run`);
+    const agentPayload = parseJson(agentPlan.stdout, `${alias} agent setup dry-run`);
+    if (
+      agentPayload.data?.status !== "planned" ||
+      agentPayload.data?.path !== ".cursor/mcp.json" ||
+      !agentPayload.data?.content?.includes('"adb-ready"')
+    ) {
+      throw new Error(`${alias} agent setup: invalid project configuration plan`);
+    }
+    assertions += 1;
+
+    const appResolution = command(
+      alias,
+      ["app", "resolve", "com.example.app", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(appResolution, 0, `${alias} local app resolution`);
+    const appPayload = parseJson(appResolution.stdout, `${alias} local app resolution`);
+    if (
+      appPayload.data?.resolution?.applicationId !== "com.example.app" ||
+      appPayload.data?.selected !== undefined
+    ) {
+      throw new Error(`${alias} app resolve: local identity unexpectedly required a target`);
+    }
+    assertions += 1;
+
+    const uiPlan = command(
+      alias,
+      ["ui", "press", "back", "--dry-run", "--json", "--non-interactive"],
+      env,
+    );
+    expectStatus(uiPlan, 0, `${alias} UI dry-run`);
+    const uiPayload = parseJson(uiPlan.stdout, `${alias} UI dry-run`);
+    if (
+      uiPayload.data?.status !== "planned" ||
+      uiPayload.data?.plan?.steps?.[0]?.args?.join(" ") !== "-t 1 shell input keyevent 4"
+    ) {
+      throw new Error(`${alias} UI: invalid packaged dry-run plan`);
+    }
+    assertions += 1;
 
     const connect = command(
       alias,

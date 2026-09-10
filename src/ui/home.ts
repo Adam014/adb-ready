@@ -1,10 +1,13 @@
 import { renderLinkCoreFrame } from "./ascii-scene.js";
-import { type SelectInput, selectOne } from "./select.js";
+import { type SelectInput, type SelectOption, selectOne } from "./select.js";
 import type { TextSink } from "./spinner.js";
 import { style } from "./style.js";
 import type { TerminalCapabilities } from "./terminal.js";
 
 export type HomeAction =
+  | "app-info"
+  | "app-restart"
+  | "capture-screenshot"
   | "connect"
   | "context"
   | "dev"
@@ -13,10 +16,14 @@ export type HomeAction =
   | "exit"
   | "help"
   | "init"
+  | "inspect-app"
+  | "inspect-ui"
   | "logs"
   | "pair"
   | "sessions"
   | "version";
+type HomeSection = "debug" | "device" | "project";
+type HomeMenuValue = HomeAction | HomeSection;
 export type HomeResult =
   | { kind: "action"; action: HomeAction }
   | { kind: "cancelled"; reason: "interrupt" | "signal" }
@@ -147,93 +154,167 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
   }
 
   const presentation = options.presentation ?? "full";
-  if (presentation === "full") {
-    clearInteractiveScreen(options.sink, options.capabilities);
-  }
-  const selection = await selectOne({
-    title: presentation === "full" ? "WHAT DO YOU WANT TO DO?" : "ACTIONS",
-    options: [
+  if (presentation === "full") clearInteractiveScreen(options.sink, options.capabilities);
+
+  const rootOptions: ReadonlyArray<SelectOption<HomeMenuValue>> = [
+    {
+      value: "dev" as const,
+      label: "Start development",
+      description: "Prepare one target, ports, logs, and your project command.",
+      recommended: true,
+    },
+    {
+      value: "device" as const,
+      label: "Device & app",
+      description: "Find, connect, and manage the Android target used by this project.",
+    },
+    {
+      value: "debug" as const,
+      label: "Debug & evidence",
+      description: "Follow useful signals and collect a shareable record of a failure.",
+    },
+    {
+      value: "project" as const,
+      label: "Project & setup",
+      description: "Validate this machine, configure the project, or find a command.",
+    },
+    { value: "exit" as const, label: "Exit", description: "Close ADB Ready." },
+  ];
+  const sectionOptions: Record<HomeSection, ReadonlyArray<SelectOption<HomeMenuValue>>> = {
+    device: [
       {
-        value: "dev" as const,
-        label: "Start development session",
-        description: "Prepare one target, ports, logs, and your project command",
-        recommended: true,
+        value: "devices",
+        label: "Android targets",
+        description: "See connected devices, emulators, and unavailable targets.",
       },
       {
-        value: "logs" as const,
-        label: "Inspect app logs",
-        description: "Stream or dump redacted logs by package, PID, tag, and level",
+        value: "app-info",
+        label: "Project app details",
+        description: "Resolve the project app and check its installed state.",
       },
       {
-        value: "doctor" as const,
-        label: "Check my setup",
-        description: "Validate runtime, ADB, server, and target access",
+        value: "app-restart",
+        label: "Restart project app",
+        description: "Verify a clean stop and launch on the selected target.",
       },
       {
-        value: "devices" as const,
-        label: "Show Android targets",
-        description: "See connected devices and running emulators",
-      },
-      {
-        value: "connect" as const,
+        value: "connect",
         label: "Connect wirelessly",
-        description: "Discover and verify a Wireless debugging target",
+        description: "Discover and verify an already paired Wireless debugging target.",
       },
       {
-        value: "pair" as const,
+        value: "pair",
         label: "Pair a new target",
-        description: "Use Android's hidden six-digit pairing code",
+        description: "Pair safely with Android's temporary six-digit code.",
+      },
+    ],
+    debug: [
+      {
+        value: "inspect-app",
+        label: "Inspect project app",
+        description: "Collect app state and a small classified log window.",
       },
       {
-        value: "sessions" as const,
-        label: "Browse saved sessions",
-        description: "Review private run summaries and diagnostic timelines",
+        value: "inspect-ui",
+        label: "Inspect current UI",
+        description: "Read a bounded, sensitive accessibility snapshot.",
       },
       {
-        value: "context" as const,
-        label: "Create AI debug context",
-        description: "Export a bounded redacted Markdown brief from the latest run",
+        value: "capture-screenshot",
+        label: "Capture screenshot",
+        description: "Save a verified PNG inside this project.",
       },
       {
-        value: "version" as const,
-        label: "Show version",
+        value: "logs",
+        label: "Follow app logs",
+        description: "Stream focused, redacted Android logs for one target.",
+      },
+      {
+        value: "sessions",
+        label: "Saved sessions",
+        description: "Review recent runs and their bounded diagnostic timeline.",
+      },
+      {
+        value: "context",
+        label: "Create AI context",
+        description: "Build a compact, redacted brief from the latest session.",
+      },
+    ],
+    project: [
+      {
+        value: "doctor",
+        label: "Check environment",
+        description: "Validate runtime, ADB, server, and target access.",
+      },
+      {
+        value: "init",
+        label: "Initialize project",
+        description: "Create a validated config from detected project signals.",
+      },
+      {
+        value: "help",
+        label: "Command reference",
+        description: "Explore commands, flags, and automation output.",
+      },
+      {
+        value: "version",
+        label: "Version",
         description: `ADB Ready ${options.version}`,
       },
-      {
-        value: "init" as const,
-        label: "Initialize this project",
-        description: "Create a validated config from detected project signals",
-      },
-      {
-        value: "help" as const,
-        label: "View command reference",
-        description: "Explore commands, flags, and automation output",
-      },
-      { value: "exit" as const, label: "Exit", description: "Close ADB Ready" },
     ],
-    input: options.input,
-    sink: options.sink,
-    capabilities:
-      presentation === "full"
-        ? options.capabilities
-        : { ...options.capabilities, animation: false },
-    preamble: (frame: number) =>
-      presentation === "full"
-        ? homePreamble(frame, options.version, options.capabilities)
-        : compactSessionPreamble(options.capabilities),
-    ...(options.refreshIntervalMs === undefined
-      ? {}
-      : { refreshIntervalMs: options.refreshIntervalMs }),
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-  });
+  };
 
-  if (selection.kind === "unavailable") {
-    return selection;
+  let section: HomeSection | undefined;
+  let firstRender = true;
+  while (true) {
+    const atRoot = section === undefined;
+    const currentOptions: ReadonlyArray<SelectOption<HomeMenuValue>> = atRoot
+      ? rootOptions
+      : sectionOptions[section ?? "device"];
+    const selection = await selectOne<HomeMenuValue>({
+      title: atRoot
+        ? "WHAT DO YOU WANT TO DO?"
+        : `HOME / ${section === "device" ? "DEVICE & APP" : section === "debug" ? "DEBUG & EVIDENCE" : "PROJECT & SETUP"}`,
+      options: currentOptions,
+      input: options.input,
+      sink: options.sink,
+      capabilities:
+        presentation === "full" && firstRender
+          ? options.capabilities
+          : { ...options.capabilities, animation: false },
+      preamble: (frame: number) =>
+        presentation === "full" && firstRender
+          ? homePreamble(frame, options.version, options.capabilities)
+          : compactSessionPreamble(options.capabilities),
+      help: atRoot
+        ? options.capabilities.unicode
+          ? "↑↓ move · 1-5 jump · enter open"
+          : "up/down · 1-5 jump · enter open"
+        : options.capabilities.unicode
+          ? "↑↓ move · 1-9 jump · enter open"
+          : "up/down · 1-9 jump · enter open",
+      escapeLabel: atRoot ? "close" : "back",
+      eraseOnExit: true,
+      ...(options.refreshIntervalMs === undefined
+        ? {}
+        : { refreshIntervalMs: options.refreshIntervalMs }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    firstRender = false;
+
+    if (selection.kind === "unavailable") return selection;
+    if (selection.kind === "cancelled") {
+      if (selection.reason === "escape") {
+        if (atRoot) return { kind: "action", action: "exit" };
+        section = undefined;
+        continue;
+      }
+      return { kind: "cancelled", reason: selection.reason };
+    }
+    if (atRoot && selection.value !== "dev" && selection.value !== "exit") {
+      section = selection.value as HomeSection;
+      continue;
+    }
+    return { kind: "action", action: selection.value as HomeAction };
   }
-  if (selection.kind === "cancelled") {
-    return selection.reason === "escape"
-      ? { kind: "action", action: "exit" }
-      : { kind: "cancelled", reason: selection.reason };
-  }
-  return { kind: "action", action: selection.value };
 }

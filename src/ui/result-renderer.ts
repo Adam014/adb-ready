@@ -1,4 +1,6 @@
 import type { AdbDevice, AdbMdnsService } from "../adb/parsers.js";
+import type { AgentSetupData } from "../agent/setup.js";
+import type { AppData, AppsData, OpenData } from "../app/app-commands.js";
 import type {
   ConnectedData,
   DevData,
@@ -19,6 +21,9 @@ import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import type { CaptureData } from "../evidence/capture.js";
+import type { InspectAppData, InspectUiData } from "../evidence/inspect.js";
+import type { UiActionData } from "../evidence/ui-actions.js";
 import type { AndroidTarget } from "../target/model.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
@@ -101,6 +106,65 @@ function isLogsData(value: unknown): value is LogsData {
   );
 }
 
+function isAppsData(value: unknown): value is AppsData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    (value.scope === "all" || value.scope === "system" || value.scope === "user") &&
+    Array.isArray(value.packages)
+  );
+}
+
+function isAppData(value: unknown): value is AppData {
+  return (
+    isRecord(value) &&
+    typeof value.action === "string" &&
+    (value.action === "resolve"
+      ? isRecord(value.resolution)
+      : isRecord(value.selected) &&
+        (isRecord(value.resolution) || typeof value.applicationId === "string"))
+  );
+}
+
+function isOpenData(value: unknown): value is OpenData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    typeof value.url === "string" &&
+    typeof value.verified === "boolean"
+  );
+}
+
+function isCaptureData(value: unknown): value is CaptureData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    isRecord(value.evidence) &&
+    (value.kind === "screenshot" || value.kind === "screen-record")
+  );
+}
+
+function isInspectAppData(value: unknown): value is InspectAppData {
+  return isRecord(value) && value.kind === "app" && isRecord(value.selected) && isRecord(value.app);
+}
+
+function isInspectUiData(value: unknown): value is InspectUiData {
+  return (
+    isRecord(value) && value.kind === "ui" && isRecord(value.selected) && isRecord(value.snapshot)
+  );
+}
+
+function isUiActionData(value: unknown): value is UiActionData {
+  return (
+    isRecord(value) &&
+    typeof value.action === "string" &&
+    isRecord(value.selected) &&
+    typeof value.status === "string" &&
+    typeof value.verified === "boolean" &&
+    typeof value.verification === "string"
+  );
+}
+
 function isSessionCommandData(value: unknown): value is SessionCommandData {
   if (!isRecord(value)) return false;
   if (value.action === "list") return Array.isArray(value.sessions);
@@ -142,6 +206,17 @@ function isConfigReportData(value: unknown): value is ConfigReportData {
     (value.action === "validate" || value.action === "explain") &&
     value.valid === true &&
     isRecord(value.files)
+  );
+}
+
+function isAgentSetupData(value: unknown): value is AgentSetupData {
+  return (
+    isRecord(value) &&
+    typeof value.client === "string" &&
+    typeof value.status === "string" &&
+    typeof value.path === "string" &&
+    typeof value.content === "string" &&
+    typeof value.next === "string"
   );
 }
 
@@ -288,6 +363,149 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     }
   }
 
+  if (result.command === "apps list" && isAppsData(result.data)) {
+    const data = result.data;
+    const visible = data.packages.slice(0, 50);
+    const filter = data.filter === undefined ? "" : ` · filter ${clean(data.filter)}`;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target    ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} Packages  ${String(data.packages.length)} · ${clean(data.scope)}${filter}`,
+    );
+    visible.forEach((item, index) => {
+      const branch = index === visible.length - 1 ? glyphs.end : glyphs.branch;
+      lines.push(`${style.dim(branch, capabilities)} ${clean(item.name)}`);
+    });
+    if (data.packages.length > visible.length) {
+      lines.push(
+        style.dim(
+          `  ${String(data.packages.length - visible.length)} more; use --filter or --json`,
+          capabilities,
+        ),
+      );
+    }
+  }
+
+  if (result.command.startsWith("app ") && isAppData(result.data)) {
+    const data = result.data;
+    if (data.selected !== undefined) {
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      );
+    }
+    if (data.action === "resolve") {
+      if (data.resolution.kind === "resolved") {
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} App      ${clean(data.resolution.applicationId)}`,
+          `${style.success(glyphs.success, capabilities)} Source   ${clean(data.resolution.provenance.source)}${data.resolution.provenance.location === undefined ? "" : ` · ${clean(data.resolution.provenance.location)}`}`,
+        );
+      }
+    } else if (data.action === "info") {
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} App      ${clean(data.package.applicationId)}`,
+        `${data.package.installed ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Install  ${data.package.installed ? "installed" : "not installed"}${data.package.versionName === undefined ? "" : ` · ${clean(data.package.versionName)}`}`,
+        `${style.success(glyphs.success, capabilities)} Debug    ${data.package.debuggable === true ? "debuggable" : data.package.debuggable === false ? "not debuggable" : "unknown"}`,
+      );
+      if (data.foreground !== undefined) {
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} Foreground ${clean(data.foreground.applicationId)}/${clean(data.foreground.activity)}`,
+        );
+      }
+    } else {
+      const planned = data.status === "planned";
+      const marker = planned
+        ? style.accent(glyphs.active, capabilities)
+        : data.verified
+          ? style.success(glyphs.success, capabilities)
+          : style.failure(glyphs.failure, capabilities);
+      lines.push(
+        `${marker} App      ${clean(data.applicationId)}`,
+        `${marker} Status   ${clean(data.status)} · ${planned ? "no changes made" : data.verified ? "verified" : "not verified"}`,
+      );
+      if (data.activity !== undefined) {
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} Activity ${clean(data.activity)}`,
+        );
+      }
+    }
+  }
+
+  if (result.command === "open" && isOpenData(result.data)) {
+    const planned = result.data.status === "planned";
+    const marker = planned
+      ? style.accent(glyphs.active, capabilities)
+      : result.data.verified
+        ? style.success(glyphs.success, capabilities)
+        : style.failure(glyphs.failure, capabilities);
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target  ${clean(result.data.selected.target.name)} · ${clean(result.data.selected.transport.serial)}`,
+      `${marker} URL     ${clean(result.data.url)}`,
+      `${marker} Status  ${planned ? "planned · no changes made" : result.data.verified ? "opened · verified" : "not verified"}`,
+    );
+  }
+
+  if (result.command.startsWith("capture ") && isCaptureData(result.data)) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target  ${clean(result.data.selected.target.name)} · ${clean(result.data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} File    ${clean(result.data.evidence.path)}`,
+      `${style.success(glyphs.success, capabilities)} Type    ${clean(result.data.evidence.mediaType)} · ${String(result.data.evidence.bytes)} bytes`,
+      `${style.success(glyphs.success, capabilities)} SHA-256 ${clean(result.data.evidence.sha256)}`,
+    );
+  }
+
+  if (result.command === "inspect app" && isInspectAppData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target     ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} App        ${clean(data.app.package.applicationId)}${data.app.package.versionName === undefined ? "" : ` · ${clean(data.app.package.versionName)}`}`,
+      `${style.success(glyphs.success, capabilities)} Foreground ${data.app.foreground === undefined ? "not observed" : `${clean(data.app.foreground.applicationId)}/${clean(data.app.foreground.activity)}`}`,
+      `${data.logs.available ? style.success(glyphs.success, capabilities) : style.warning(glyphs.warning, capabilities)} Logs       ${data.logs.available ? `${String(data.logs.records.length)} records · ${String(data.logs.findings.length)} findings` : clean(data.logs.reason)}`,
+      `${style.warning(glyphs.warning, capabilities)} Screenshot explicit capture required · adb-ready capture screenshot`,
+      `${style.warning(glyphs.warning, capabilities)} Privacy    sensitive device evidence`,
+    );
+  }
+
+  if (result.command === "inspect ui" && isInspectUiData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target    ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} Snapshot  ${clean(data.snapshot.digest)}`,
+      `${data.snapshot.complete ? style.success(glyphs.success, capabilities) : style.warning(glyphs.warning, capabilities)} Nodes     ${String(data.snapshot.returnedNodes)} returned · ${String(data.snapshot.totalNodes)} observed${data.snapshot.truncated ? " · truncated" : ""}`,
+      `${style.warning(glyphs.warning, capabilities)} Privacy   UI text and hierarchy are sensitive`,
+    );
+    data.snapshot.nodes.slice(0, 20).forEach((node, index) => {
+      const branch =
+        index === Math.min(data.snapshot.nodes.length, 20) - 1 ? glyphs.end : glyphs.branch;
+      const label =
+        node.resourceId ?? node.contentDescription ?? node.text ?? node.className ?? "node";
+      lines.push(`${style.dim(branch, capabilities)} ${clean(node.ref)} · ${clean(label)}`);
+    });
+  }
+
+  if (result.command.startsWith("ui ") && isUiActionData(result.data)) {
+    const data = result.data;
+    const marker =
+      data.status === "planned"
+        ? style.accent(glyphs.active, capabilities)
+        : data.verified
+          ? style.success(glyphs.success, capabilities)
+          : style.warning(glyphs.warning, capabilities);
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target       ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${marker} Action       ${clean(data.action)} · ${clean(data.status)}`,
+      `${marker} Verification ${clean(data.verification)} · ${String(data.attempts)} attempt(s)`,
+    );
+    if (data.resolved !== undefined) {
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Point        ${String(data.resolved.x)},${String(data.resolved.y)}${data.resolved.ref === undefined ? "" : ` · ${clean(data.resolved.ref)}`}`,
+      );
+    }
+    if (data.before !== undefined && data.after !== undefined) {
+      lines.push(
+        `${data.before.digest === data.after.digest ? style.warning(glyphs.warning, capabilities) : style.success(glyphs.success, capabilities)} UI digest    ${clean(data.before.digest.slice(0, 12))} → ${clean(data.after.digest.slice(0, 12))}`,
+      );
+    }
+  }
+
   if (result.command.startsWith("sessions ") && isSessionCommandData(result.data)) {
     const data = result.data;
     if (data.action === "list") {
@@ -361,6 +579,23 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
         : [
             `${style.success(glyphs.success, capabilities)} Preset   ${clean(result.data.detectedPreset)}`,
           ]),
+    );
+  }
+
+  if (result.command === "agent setup" && isAgentSetupData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Client  ${clean(data.client)}`,
+      `${style.success(glyphs.success, capabilities)} Config  ${clean(data.path)}`,
+      `${style.success(glyphs.success, capabilities)} Status  ${clean(data.status)}`,
+      "",
+      style.strong(
+        data.status === "manual" ? "Merge this configuration" : "Configuration",
+        capabilities,
+      ),
+      ...data.content.trimEnd().split("\n").map(clean),
+      "",
+      `${style.accent("Next:", capabilities)} ${clean(data.next)}`,
     );
   }
 
@@ -522,6 +757,47 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`record_${String(index)}=${clean(record.raw)}\n`);
     });
   }
+  if (isCaptureData(result.data)) {
+    sink.write(`kind=${clean(result.data.kind)}\n`);
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`path=${clean(result.data.evidence.path)}\n`);
+    sink.write(`media_type=${clean(result.data.evidence.mediaType)}\n`);
+    sink.write(`bytes=${String(result.data.evidence.bytes)}\n`);
+    sink.write(`sha256=${clean(result.data.evidence.sha256)}\n`);
+  }
+  if (isInspectAppData(result.data)) {
+    sink.write("kind=app\n");
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`package=${clean(result.data.app.package.applicationId)}\n`);
+    sink.write(`logs_available=${String(result.data.logs.available)}\n`);
+    if (result.data.logs.available) {
+      sink.write(`record_count=${String(result.data.logs.records.length)}\n`);
+      sink.write(`finding_count=${String(result.data.logs.findings.length)}\n`);
+    }
+    sink.write("sensitive=true\n");
+  }
+  if (isInspectUiData(result.data)) {
+    sink.write("kind=ui\n");
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`digest=${clean(result.data.snapshot.digest)}\n`);
+    sink.write(`node_count=${String(result.data.snapshot.returnedNodes)}\n`);
+    sink.write(`truncated=${String(result.data.snapshot.truncated)}\n`);
+    sink.write("sensitive=true\n");
+  }
+  if (isUiActionData(result.data)) {
+    sink.write(`action=${clean(result.data.action)}\n`);
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`verified=${String(result.data.verified)}\n`);
+    sink.write(`verification=${clean(result.data.verification)}\n`);
+    sink.write(`attempts=${String(result.data.attempts)}\n`);
+    if (result.data.before !== undefined) {
+      sink.write(`before_digest=${clean(result.data.before.digest)}\n`);
+    }
+    if (result.data.after !== undefined) {
+      sink.write(`after_digest=${clean(result.data.after.digest)}\n`);
+    }
+  }
   if (isSessionCommandData(result.data)) {
     sink.write(`action=${clean(result.data.action)}\n`);
     if (result.data.action === "list") {
@@ -566,6 +842,12 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     if (result.data.detectedPreset !== undefined) {
       sink.write(`detected_preset=${clean(result.data.detectedPreset)}\n`);
     }
+  }
+  if (isAgentSetupData(result.data)) {
+    sink.write(`client=${clean(result.data.client)}\n`);
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`path=${clean(result.data.path)}\n`);
+    sink.write(`scope=${clean(result.data.scope)}\n`);
   }
   if (isConfigReportData(result.data)) {
     sink.write(`action=${clean(result.data.action)}\n`);

@@ -34,6 +34,8 @@ export interface SelectOptions<T> {
   preamble?: (frame: number) => readonly string[];
   refreshIntervalMs?: number;
   help?: string;
+  escapeLabel?: string;
+  eraseOnExit?: boolean;
 }
 
 function truncate(value: string, width: number): string {
@@ -117,6 +119,7 @@ function renderMenu<T>(
   const help =
     options.help ??
     (capabilities.unicode ? "↑↓ move · 1-9 jump · enter open" : "up/down · 1-9 jump · enter open");
+  const escapeAction = options.escapeLabel ?? "close";
   const lines = [...(options.preamble?.(frame) ?? [])];
   lines.push(
     `${style.dim(top, capabilities)} ${style.strong(
@@ -153,9 +156,9 @@ function renderMenu<T>(
   });
   lines.push(`${style.dim(bottom, capabilities)} ${style.dim(help, capabilities)}`);
   if (compact) {
-    lines.push(`   ${style.dim("esc close", capabilities)}`);
+    lines.push(`   ${style.dim(`esc ${escapeAction}`, capabilities)}`);
   } else {
-    lines[lines.length - 1] += style.dim(" · esc close", capabilities);
+    lines[lines.length - 1] += style.dim(` · esc ${escapeAction}`, capabilities);
   }
 
   for (const line of lines) {
@@ -209,6 +212,9 @@ export async function selectOne<T>(options: SelectOptions<T>): Promise<SelectRes
         return;
       }
       settled = true;
+      if (options.eraseOnExit === true && lineCount > 0) {
+        attempt(() => options.sink.write(`\u001B[${String(lineCount)}F\u001B[J`));
+      }
       cleanup();
       resolve(result);
     };

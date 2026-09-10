@@ -43,6 +43,12 @@ JSON commands return this top-level shape:
 Consumers must ignore unknown additive fields and event types within the same
 schema version.
 
+The npm package includes two versioned public artifacts:
+
+- `schema/config-v1.schema.json` validates project configuration; and
+- `schema/agent-tools-v1.json` catalogs every MCP tool's generated input schema
+  and safety annotations for the matching package version.
+
 ## Event envelope
 
 NDJSON events include:

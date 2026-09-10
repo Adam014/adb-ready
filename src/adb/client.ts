@@ -51,6 +51,14 @@ export interface AdbTargetSelector {
   transportId?: string;
 }
 
+export interface AdbCommandOptions {
+  acceptExitCodes?: readonly number[];
+  maxBufferBytes?: number;
+  onStderrChunk?: (chunk: Uint8Array) => void;
+  onStdoutChunk?: (chunk: Uint8Array) => void;
+  timeoutMs?: number;
+}
+
 function targetArguments(target: string | AdbTargetSelector): string[] {
   if (typeof target === "string") {
     return ["-s", target];
@@ -198,6 +206,25 @@ export class AdbClient {
     );
   }
 
+  async targetCommand<T>(
+    target: string | AdbTargetSelector,
+    operation: string,
+    message: string,
+    args: readonly string[],
+    parse: (output: string) => T,
+    signal?: AbortSignal,
+    options: AdbCommandOptions = {},
+  ): Promise<AdbObservation<T>> {
+    return await this.#observe(
+      operation,
+      message,
+      [...targetArguments(target), ...args],
+      parse,
+      signal,
+      options,
+    );
+  }
+
   async connect(endpoint: string, signal?: AbortSignal): Promise<AdbObservation<AdbConnectResult>> {
     return await this.#observe(
       "connect",
@@ -287,6 +314,10 @@ export class AdbClient {
       stopAfterIdleMs?: number;
       timeoutMs?: number;
       acceptIdleStop?: boolean;
+      acceptExitCodes?: readonly number[];
+      maxBufferBytes?: number;
+      onStderrChunk?: (chunk: Uint8Array) => void;
+      onStdoutChunk?: (chunk: Uint8Array) => void;
     } = {},
   ): Promise<AdbObservation<T>> {
     const operationId = this.#idFactory();
@@ -323,6 +354,9 @@ export class AdbClient {
       ...(options.stopAfterIdleMs === undefined
         ? {}
         : { stopAfterIdleMs: options.stopAfterIdleMs }),
+      ...(options.maxBufferBytes === undefined ? {} : { maxBufferBytes: options.maxBufferBytes }),
+      ...(options.onStdoutChunk === undefined ? {} : { onStdoutChunk: options.onStdoutChunk }),
+      ...(options.onStderrChunk === undefined ? {} : { onStderrChunk: options.onStderrChunk }),
     };
     const result = await this.#runner(request);
     const succeeded =
@@ -330,7 +364,9 @@ export class AdbClient {
       result.streamError === undefined &&
       !result.timedOut &&
       !result.aborted &&
-      (result.exitCode === 0 || (options.acceptIdleStop === true && result.stoppedAfterIdle));
+      (result.exitCode === 0 ||
+        (result.exitCode !== null && options.acceptExitCodes?.includes(result.exitCode) === true) ||
+        (options.acceptIdleStop === true && result.stoppedAfterIdle));
 
     this.#options.bus.emit({
       type: succeeded ? "operation.completed" : "operation.failed",

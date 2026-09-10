@@ -150,7 +150,7 @@ describe("runCli", () => {
   test("keeps a bare interactive session open and returns to a compact menu", async () => {
     const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
     streams.env.ADB_READY_REDUCED_MOTION = "1";
-    streams.input.autoInputs = ["3\r", "\u001B"];
+    streams.input.autoInputs = ["4\r", "1\r", "\u001B"];
     const exitCode = await runCli([], streams, dependencies());
 
     expect(exitCode).toBe(ExitCode.Success);
@@ -158,7 +158,7 @@ describe("runCli", () => {
     expect(streams.error.value).toContain("ADB READY");
     expect(streams.error.value).toContain("· doctor");
     expect(streams.error.value).toContain("####");
-    expect(streams.error.value).toContain("ACTIONS");
+    expect(streams.error.value).toContain("WHAT DO YOU WANT TO DO?");
     expect(streams.error.value).toContain("Android sessions. Kept ready.");
     expect(streams.input.isRaw).toBe(false);
   });
@@ -306,6 +306,34 @@ describe("runCli", () => {
       ],
     });
     expect(streams.error.value).toBe("");
+  });
+
+  test("resolves a known project app without requiring ADB or a connected target", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.locateAdb = async () => {
+      throw new Error("must not locate ADB");
+    };
+    fixture.runner = async () => {
+      throw new Error("must not run ADB");
+    };
+    const exitCode = await runCli(
+      ["app", "resolve", "com.example.app", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      ok: true,
+      command: "app resolve",
+      data: {
+        resolution: {
+          kind: "resolved",
+          applicationId: "com.example.app",
+          provenance: { source: "cli" },
+        },
+      },
+    });
   });
 
   test("keeps JSON stdout to one complete result and stderr empty", async () => {
@@ -740,6 +768,185 @@ describe("runCli", () => {
     });
     expect(requests.find(({ args }) => args?.includes("logcat"))?.args).toContain("--pid=321");
     expect(streams.error.value).toBe("");
+  });
+
+  test("routes app inspection through one selected target with clean JSON", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+    );
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("list") && args.includes("packages")) {
+        return result(request, "package:/data/app/example/base.apk=com.example.app\n");
+      }
+      if (args.includes("dumpsys") && args.includes("package")) {
+        return result(
+          request,
+          "Package [com.example.app]\n codePath=/data/app/example\n versionCode=1 targetSdk=36\n versionName=1.0.0\n pkgFlags=[ DEBUGGABLE ]\n",
+        );
+      }
+      if (args.includes("activity") && args.includes("activities")) {
+        return result(
+          request,
+          "mResumedActivity: ActivityRecord{42 u0 com.example.app/.MainActivity t12}\n",
+        );
+      }
+      return result(request, "");
+    };
+    const exitCode = await runCli(
+      ["app", "info", "com.example.app", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      command: "app info",
+      ok: true,
+      data: {
+        selected: { transport: { serial: "USB-1" } },
+        package: { applicationId: "com.example.app", installed: true, versionName: "1.0.0" },
+      },
+    });
+    expect(streams.error.value).toBe("");
+  });
+
+  test("routes a safe UI action and emits structured verification", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    let snapshots = 0;
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("uiautomator")) {
+        snapshots += 1;
+        return result(
+          request,
+          snapshots === 1
+            ? '<?xml version="1.0"?><hierarchy><node text="Open" /></hierarchy>'
+            : '<?xml version="1.0"?><hierarchy><node text="Done" /></hierarchy>',
+        );
+      }
+      return result(request, "");
+    };
+    const exitCode = await runCli(
+      ["ui", "press", "back", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      ok: true,
+      command: "ui press",
+      data: {
+        action: "press",
+        status: "completed",
+        verified: true,
+        verification: "ui-changed",
+        selected: { transport: { serial: "USB-1" } },
+      },
+    });
+    expect(streams.error.value).toBe("");
+  });
+
+  test("dry-runs a destructive app command without confirmation or mutation", async () => {
+    const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+    );
+    const requests: string[][] = [];
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      requests.push([...args]);
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("list") && args.includes("packages")) {
+        return result(request, "package:/data/app/example/base.apk=com.example.app\n");
+      }
+      return result(request, "");
+    };
+
+    const exitCode = await runCli(
+      ["app", "clear-data", "com.example.app", "--dry-run", "--no-animation"],
+      streams,
+      fixture,
+    );
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(requests.some((args) => args.includes("clear"))).toBe(false);
+    expect(streams.error.value).toContain("no changes made");
+    expect(streams.error.value).not.toContain("requires confirmation");
+  });
+
+  test("routes binary screenshot capture to a verified project-local file", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-capture-"));
+    const streams = io();
+    streams.cwd = root;
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+    );
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("screencap")) {
+        request.onStdoutChunk?.(png);
+        return result(request, "");
+      }
+      return result(request, "");
+    };
+    try {
+      const exitCode = await runCli(
+        ["capture", "screenshot", "--out", "artifacts/screen.png", "--json"],
+        streams,
+        fixture,
+      );
+      expect(exitCode).toBe(ExitCode.Success);
+      expect(JSON.parse(streams.output.value)).toMatchObject({
+        ok: true,
+        command: "capture screenshot",
+        data: { evidence: { path: "artifacts/screen.png", mediaType: "image/png" } },
+      });
+      expect(new Uint8Array(await readFile(path.join(root, "artifacts/screen.png")))).toEqual(png);
+      expect(streams.error.value).toBe("");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("acquires one unambiguous wireless target before starting dev", async () => {
