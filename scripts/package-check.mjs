@@ -35,7 +35,7 @@ if (forbidden.length > 0) {
   throw new Error(`private or development files entered the package: ${forbidden.join(", ")}`);
 }
 
-for (const required of ["README.md", "dist/cli.js", "package.json"]) {
+for (const required of ["COMPATIBILITY.md", "README.md", "dist/cli.js", "package.json"]) {
   if (!files.includes(required)) {
     throw new Error(`required package file is missing: ${required}`);
   }

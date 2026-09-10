@@ -9,6 +9,7 @@
     "adbr": "dist/cli.js"
   },
   "files": [
+    "COMPATIBILITY.md",
     "dist",
     "schema",
     "README.md"

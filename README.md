@@ -156,6 +156,9 @@ deno run -A npm:adb-ready@alpha doctor
 The public platform target is macOS, Linux, and Windows. ADB commands are run as
 owned child processes with bounded timeouts and cleanup. ADB Ready never
 implicitly restarts the shared ADB server or disconnects unrelated targets.
+See [COMPATIBILITY.md](./COMPATIBILITY.md) for the tested, runtime, and
+upstream-capable support tiers, including arm64, x64, WSL, containers, musl,
+ChromeOS Linux, and BSD.
 
 ## ADB compatibility
 
