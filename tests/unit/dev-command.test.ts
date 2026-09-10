@@ -137,6 +137,10 @@ describe("runDev", () => {
       "stdout:password=[REDACTED]",
       "stderr:stderr is not failure",
     ]);
+    const logcatRequest = requests.find(({ args }) => args?.includes("logcat"));
+    const logStart = logcatRequest?.args?.indexOf("-T") ?? -1;
+    expect(logStart).toBeGreaterThan(-1);
+    expect(logcatRequest?.args?.[logStart + 1]).toBe("1");
     const serializedJournal = JSON.stringify(execution.result.data?.journal.events);
     expect(serializedJournal).not.toContain("hunter2");
     expect(serializedJournal).not.toContain("secret-value");

@@ -1814,7 +1814,7 @@ export async function runLogs(
       ...(options.tail === undefined && options.since === undefined
         ? options.dump
           ? ["-d"]
-          : []
+          : ["-T", "1"]
         : [options.dump ? "-t" : "-T", String(options.tail ?? options.since)]),
       ...(resolvedUid === undefined ? [] : [`--uid=${String(resolvedUid)}`]),
       ...(resolvedPid === undefined ? [] : [`--pid=${String(resolvedPid)}`]),
@@ -2668,6 +2668,8 @@ export async function runDev(
         "logcat",
         "-v",
         "threadtime",
+        "-T",
+        "1",
         "ReactNativeJS:V",
         "ReactNative:V",
         "AndroidRuntime:E",

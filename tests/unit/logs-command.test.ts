@@ -56,6 +56,26 @@ function dependencies(requests: ProcessRequest[], packagePid = "321\n"): Command
 }
 
 describe("runLogs", () => {
+  test("follows from now by default without replaying the device buffer", async () => {
+    const requests: ProcessRequest[] = [];
+    await runLogs({}, {}, dependencies(requests));
+
+    const logcat = requests.find(({ args }) => args?.includes("logcat"));
+    const start = logcat?.args?.indexOf("-T") ?? -1;
+    expect(start).toBeGreaterThan(-1);
+    expect(logcat?.args?.[start + 1]).toBe("1");
+    expect(logcat?.args).not.toContain("-d");
+  });
+
+  test("keeps an explicit dump as a current-buffer snapshot", async () => {
+    const requests: ProcessRequest[] = [];
+    await runLogs({ dump: true }, {}, dependencies(requests));
+
+    const logcat = requests.find(({ args }) => args?.includes("logcat"));
+    expect(logcat?.args).toContain("-d");
+    expect(logcat?.args).not.toContain("-T");
+  });
+
   test("streams bounded, parsed, redacted logs for one package and target", async () => {
     const requests: ProcessRequest[] = [];
     const streamed: string[] = [];
