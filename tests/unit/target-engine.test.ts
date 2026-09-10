@@ -165,6 +165,33 @@ describe("target selection", () => {
     });
   });
 
+  test("recovers a remembered wireless target after its port rotates", () => {
+    const targets = buildTargetInventory([
+      {
+        device: device("192.168.86.38:44191", { transportId: "9" }),
+        hardwareSerial: "PHONE-1",
+      },
+      {
+        device: device("USB-1", { transportId: "10", usb: "1-1" }),
+        hardwareSerial: "PHONE-1",
+      },
+    ]).targets;
+
+    const selection = selectTarget(targets, {
+      rememberedSerial: "192.168.86.38:33015",
+      rememberedHardwareSerial: "PHONE-1",
+      rememberedOnly: true,
+    });
+
+    expect(selection).toMatchObject({
+      kind: "selected",
+      selection: {
+        reason: "remembered-identity",
+        transport: { serial: "192.168.86.38:44191", kind: "tcp" },
+      },
+    });
+  });
+
   test("requires transport ID when one serial has duplicate ready transports", () => {
     const duplicate = buildTargetInventory([
       { device: device("USB-1", { transportId: "7" }) },

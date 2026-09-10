@@ -374,6 +374,48 @@ describe("runCli", () => {
     });
   });
 
+  test("resolves --last by verified hardware identity after a wireless port rotation", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\n192.168.1.20:44191 device model:Pixel_9 transport_id:9\n",
+    );
+    const fallbackRunner = fixture.runner;
+    if (fallbackRunner === undefined) {
+      throw new Error("fixture runner is required");
+    }
+    fixture.runner = async (request) =>
+      request.args?.includes("ro.serialno")
+        ? result(request, "PHONE-1\n")
+        : await fallbackRunner(request);
+    fixture.readTargetState = async () => ({
+      ok: true,
+      path: "/state.json",
+      document: {
+        version: 1,
+        targets: {
+          "local:5037": {
+            serial: "192.168.1.20:37123",
+            hardwareSerial: "PHONE-1",
+            updatedAt: "2026-09-09T10:00:00.000Z",
+          },
+        },
+      },
+    });
+
+    const exitCode = await runCli(
+      ["devices", "--last", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    const payload = JSON.parse(streams.output.value);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload.data.selected).toMatchObject({
+      reason: "remembered-identity",
+      transport: { serial: "192.168.1.20:44191" },
+    });
+  });
+
   test("dry-runs pairing without prompting, pairing, or storing state", async () => {
     const streams = io();
     const fixture = dependencies();

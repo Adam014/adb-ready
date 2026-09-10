@@ -41,6 +41,7 @@ export interface CommandConfig {
   targetTransportId?: string;
   targetAliases?: Readonly<Record<string, string>>;
   rememberedSerial?: string;
+  rememberedHardwareSerial?: string;
   rememberedOnly?: boolean;
   dryRun?: boolean;
   endpointWasDiscovered?: boolean;
@@ -614,6 +615,9 @@ export async function runDevices(
       ...(config.rememberedSerial === undefined
         ? {}
         : { rememberedSerial: config.rememberedSerial }),
+      ...(config.rememberedHardwareSerial === undefined
+        ? {}
+        : { rememberedHardwareSerial: config.rememberedHardwareSerial }),
       ...(config.rememberedOnly === undefined ? {} : { rememberedOnly: config.rememberedOnly }),
     });
     if (selection.kind !== "selected") {

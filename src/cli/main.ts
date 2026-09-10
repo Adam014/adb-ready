@@ -23,7 +23,12 @@ import {
   SCHEMA_VERSION,
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
-import { readTargetState, rememberedTarget, writeRememberedTarget } from "../state/target-state.js";
+import {
+  type RememberedTarget,
+  readTargetState,
+  rememberedTarget,
+  writeRememberedTarget,
+} from "../state/target-state.js";
 import type { AndroidTarget } from "../target/model.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
@@ -347,7 +352,7 @@ async function selectDevice(
   execution: CommandExecution<DevicesData>,
   io: CliIo,
   terminal: TerminalCapabilities,
-  rememberedSerial?: string,
+  remembered?: RememberedTarget,
   signal?: AbortSignal,
 ): Promise<CommandExecution<DevicesData>> {
   const data = execution.result.data;
@@ -378,7 +383,9 @@ async function selectDevice(
       description: targetDescription(target),
       disabled: !target.transports.some(({ stable, state }) => stable && state === "device"),
       recommended:
-        target.transports.some(({ serial }) => serial === rememberedSerial) ||
+        target.transports.some(({ serial }) => serial === remembered?.serial) ||
+        (remembered?.hardwareSerial !== undefined &&
+          target.hardwareSerial === remembered.hardwareSerial) ||
         (selectable.length === 1 && target.id === selectable[0]?.id),
     })),
     input: io.input,
@@ -475,7 +482,7 @@ async function runCliInternal(
   const values = loaded.config.values;
   const errorCapabilities = capabilities(options, values, io, "error", options.format);
   const outputCapabilities = capabilities(options, values, io, "output", options.format);
-  let lastSerial: string | undefined;
+  let lastTarget: RememberedTarget | undefined;
   let stateWarning: Problem | undefined;
   if (options.command === "devices" && (options.select || options.remembered)) {
     const state = await (dependencies.readTargetState ?? readTargetState)({
@@ -505,10 +512,10 @@ async function runCliInternal(
       stateWarning = problem;
     }
     if (state.ok) {
-      lastSerial = rememberedTarget(state.document, {
+      lastTarget = rememberedTarget(state.document, {
         ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
         ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
-      })?.serial;
+      });
     }
   }
   const bus = dependencies.bus ?? new EventBus(dependencies.clock);
@@ -521,7 +528,10 @@ async function runCliInternal(
     ...(options.device === undefined ? {} : { targetSelector: options.device }),
     ...(options.transportId === undefined ? {} : { targetTransportId: options.transportId }),
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
-    ...(lastSerial === undefined ? {} : { rememberedSerial: lastSerial }),
+    ...(lastTarget === undefined ? {} : { rememberedSerial: lastTarget.serial }),
+    ...(lastTarget?.hardwareSerial === undefined
+      ? {}
+      : { rememberedHardwareSerial: lastTarget.hardwareSerial }),
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
@@ -722,7 +732,7 @@ async function runCliInternal(
       execution as CommandExecution<DevicesData>,
       io,
       errorCapabilities,
-      lastSerial,
+      lastTarget,
       signal,
     );
   }

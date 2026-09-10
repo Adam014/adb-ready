@@ -1,3 +1,4 @@
+import { parseAdbNetworkEndpoint } from "../adb/parsers.js";
 import type { AndroidTarget, TargetTransport } from "./model.js";
 
 export type TargetSelectionReason =
@@ -5,6 +6,7 @@ export type TargetSelectionReason =
   | "explicit"
   | "only-ready"
   | "remembered"
+  | "remembered-identity"
   | "transport-id";
 
 export interface SelectedTarget {
@@ -25,6 +27,7 @@ export interface TargetSelectionOptions {
   selector?: string;
   transportId?: string;
   rememberedSerial?: string;
+  rememberedHardwareSerial?: string;
   aliases?: Readonly<Record<string, string>>;
   rememberedOnly?: boolean;
 }
@@ -52,6 +55,18 @@ function findBySerial(
     }
   }
   return undefined;
+}
+
+function transportMatchingRememberedKind(
+  transports: readonly TargetTransport[],
+  rememberedSerial: string | undefined,
+): TargetTransport | undefined {
+  const rememberedWasNetwork =
+    rememberedSerial !== undefined && parseAdbNetworkEndpoint(rememberedSerial) !== undefined;
+  if (rememberedWasNetwork) {
+    return transports.find(({ kind }) => kind === "tls" || kind === "tcp") ?? transports[0];
+  }
+  return transports.find(({ kind }) => kind === "usb" || kind === "emulator") ?? transports[0];
 }
 
 export function selectTarget(
@@ -117,10 +132,52 @@ export function selectTarget(
     ) {
       return selection(remembered.target, transport, "remembered");
     }
-    if (options.rememberedOnly) {
+    const identityMatches =
+      options.rememberedHardwareSerial === undefined
+        ? []
+        : targets.filter(
+            ({ hardwareSerial }) => hardwareSerial === options.rememberedHardwareSerial,
+          );
+    if (identityMatches.length > 1) {
+      return { kind: "ambiguous", candidates: identityMatches };
+    }
+    const identityTarget = identityMatches[0];
+    if (identityTarget !== undefined) {
+      const transport = transportMatchingRememberedKind(
+        readyTransports(identityTarget),
+        options.rememberedSerial,
+      );
+      if (transport !== undefined) {
+        return selection(identityTarget, transport, "remembered-identity");
+      }
+      if (options.rememberedOnly) {
+        return { kind: "unavailable", target: identityTarget };
+      }
+    } else if (options.rememberedOnly) {
       return remembered === undefined
         ? { kind: "not-found", selector: "remembered target" }
         : { kind: "unavailable", target: remembered.target };
+    }
+  } else if (options.rememberedHardwareSerial !== undefined) {
+    const identityMatches = targets.filter(
+      ({ hardwareSerial }) => hardwareSerial === options.rememberedHardwareSerial,
+    );
+    if (identityMatches.length > 1) {
+      return { kind: "ambiguous", candidates: identityMatches };
+    }
+    const identityTarget = identityMatches[0];
+    const transport =
+      identityTarget === undefined
+        ? undefined
+        : transportMatchingRememberedKind(readyTransports(identityTarget), undefined);
+    if (identityTarget !== undefined && transport !== undefined) {
+      return selection(identityTarget, transport, "remembered-identity");
+    }
+    if (options.rememberedOnly && identityTarget !== undefined) {
+      return { kind: "unavailable", target: identityTarget };
+    }
+    if (options.rememberedOnly) {
+      return { kind: "not-found", selector: "remembered target" };
     }
   } else if (options.rememberedOnly) {
     return { kind: "not-found", selector: "remembered target" };
