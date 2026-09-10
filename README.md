@@ -2,10 +2,16 @@
 
 # ADB Ready
 
-**The AI-first control plane for Android development.**
+### AI-FIRST · AGENTIC · MCP-NATIVE · LOCAL-FIRST
 
-Give developers and coding agents one safe, typed interface for Android targets,
+**Give coding agents safe eyes and hands on Android.**
+
+One typed control plane for developers and agents to operate Android targets,
 apps, UI, logs, evidence, ports, and development sessions.
+
+[![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
+[![AI agents](https://img.shields.io/badge/AI_agents-ready-1f9db5)](./docs/agent-integration.md)
+[![Local first](https://img.shields.io/badge/local-first-334155)](./docs/threat-model.md)
 
 [![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
@@ -13,8 +19,6 @@ apps, UI, logs, evidence, ports, and development sessions.
 [![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
 [![Deno](https://img.shields.io/badge/Deno_2-tested-111827?logo=deno&logoColor=white)](https://deno.com/)
 [![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
-[![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
-[![AI agents](https://img.shields.io/badge/AI_agents-ready-1f9db5)](./docs/agent-integration.md)
 
 [Quick start](#quick-start) · [AI agents](#android-tools-built-for-ai-agents) · [Why ADB Ready](#why-adb-ready) ·
 [Workflows](#find-your-workflow) · [Documentation](#documentation) ·
