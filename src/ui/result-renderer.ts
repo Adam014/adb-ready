@@ -18,6 +18,7 @@ import type {
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
+import { ProblemCode } from "../domain/problems.js";
 import type { AndroidTarget } from "../target/model.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";
@@ -179,7 +180,7 @@ function problemLines(
 ): string[] {
   const glyphs = symbols(capabilities);
   const marker =
-    problem.severity === "error"
+    problem.severity === "error" && problem.code !== ProblemCode.OperationInterrupted
       ? style.failure(glyphs.failure, capabilities)
       : style.warning(glyphs.warning, capabilities);
   const lines = [
@@ -238,6 +239,12 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
 
   if (result.command === "dev" && isDevData(result.data)) {
     const data = result.data;
+    const sessionMarker =
+      data.status === "interrupted"
+        ? style.warning(glyphs.warning, capabilities)
+        : data.status === "failed"
+          ? style.failure(glyphs.failure, capabilities)
+          : style.success(glyphs.success, capabilities);
     lines.push(
       `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
       `${style.success(glyphs.success, capabilities)} Project  ${clean(data.project.name ?? data.project.root)} · ${clean(data.preset)}`,
@@ -245,14 +252,20 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       `${style.success(glyphs.success, capabilities)} Command  ${clean(data.command.executable)} ${data.command.args.map(clean).join(" ")}`,
     );
     if (data.child !== undefined) {
+      const childMarker =
+        data.status === "interrupted"
+          ? style.warning(glyphs.warning, capabilities)
+          : data.child.exitCode === 0
+            ? style.success(glyphs.success, capabilities)
+            : style.failure(glyphs.failure, capabilities);
       lines.push(
-        `${data.child.exitCode === 0 ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Child    ${data.child.exitCode === null ? clean(data.child.signal) : `exit ${String(data.child.exitCode)}`}`,
+        `${childMarker} Child    ${data.child.exitCode === null ? clean(data.child.signal) : `exit ${String(data.child.exitCode)}`}`,
       );
     }
     lines.push(
       `${style.success(glyphs.success, capabilities)} Journal  ${String(data.journal.events.length)} events${data.journal.dropped === 0 ? "" : ` · ${String(data.journal.dropped)} dropped`}`,
       `${data.recovery.failed ? style.failure(glyphs.failure, capabilities) : style.success(glyphs.success, capabilities)} Recovery ${data.recovery.failed ? "failed" : data.recovery.recoveries === 0 ? "healthy" : `${String(data.recovery.recoveries)} verified repair(s)`}`,
-      `${style.success(glyphs.success, capabilities)} Session  ${clean(data.sessionId)} · ${clean(data.status)}`,
+      `${sessionMarker} Session  ${clean(data.sessionId)} · ${clean(data.status)}`,
     );
   }
 
@@ -445,9 +458,16 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     }
   }
 
+  const interrupted =
+    result.problems.some(({ code }) => code === ProblemCode.OperationInterrupted) &&
+    !result.problems.some(
+      ({ code, severity }) => severity === "error" && code !== ProblemCode.OperationInterrupted,
+    );
   const status = result.ok
     ? `${style.success(glyphs.success, capabilities)} Completed in ${String(result.durationMs)}ms`
-    : `${style.failure(glyphs.failure, capabilities)} Failed in ${String(result.durationMs)}ms`;
+    : interrupted
+      ? `${style.warning(glyphs.warning, capabilities)} Interrupted safely in ${String(result.durationMs)}ms`
+      : `${style.failure(glyphs.failure, capabilities)} Failed in ${String(result.durationMs)}ms`;
   lines.push("", status);
   sink.write(`${lines.join("\n")}\n`);
 }

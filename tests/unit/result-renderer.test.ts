@@ -277,4 +277,33 @@ describe("result renderer", () => {
     expect(sink.value).toContain("Pixel spoofed");
     expect(sink.value).not.toContain("\u001b");
   });
+
+  test("presents Ctrl-C as a safe interruption while retaining a failed envelope", () => {
+    const sink = new MemorySink();
+    renderResult(
+      {
+        ...result,
+        command: "logs",
+        ok: false,
+        data: null,
+        problems: [
+          {
+            code: "OPERATION_INTERRUPTED",
+            category: "process.interrupted",
+            severity: "error",
+            summary: "Log streaming was interrupted.",
+            detail: "The owned process was stopped safely.",
+            retryable: true,
+            evidence: [],
+            actions: [],
+            correlation: { commandId: "command-1" },
+          },
+        ],
+      },
+      { format: "human", capabilities, sink },
+    );
+
+    expect(sink.value).toContain("Interrupted safely in 10ms");
+    expect(sink.value).not.toContain("Failed in");
+  });
 });
