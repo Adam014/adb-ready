@@ -2,6 +2,8 @@ import { access, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { xSync } from "tinyexec";
 
+import { readNpmPackEntry } from "./lib/npm-pack-report.mjs";
+
 const root = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const publishMode = process.argv[2] === "--publish";
@@ -123,9 +125,13 @@ if (packed.exitCode !== 0) {
   errors.push(`npm pack failed: ${packed.stderr.trim()}`);
 } else {
   try {
-    /** @type {Array<{ files?: Array<{ path: string }> }>} */
     const report = JSON.parse(packed.stdout);
-    const files = report[0]?.files?.map((entry) => entry.path) ?? [];
+    const packEntry = readNpmPackEntry(report, manifest.name);
+    const files = Array.isArray(packEntry.files)
+      ? packEntry.files
+          .map((entry) => (typeof entry === "object" && entry !== null ? entry.path : undefined))
+          .filter((entry) => typeof entry === "string")
+      : [];
     for (const required of [
       "CHANGELOG.md",
       "COMPATIBILITY.md",

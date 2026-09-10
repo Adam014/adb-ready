@@ -6,6 +6,8 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { xSync } from "tinyexec";
 
+import { readNpmPackEntry } from "./lib/npm-pack-report.mjs";
+
 const root = fileURLToPath(new URL("../", import.meta.url));
 const temp = await mkdtemp(path.join(tmpdir(), "adb-ready-command-matrix-"));
 const fakeAdb = path.join(temp, process.platform === "win32" ? "fake-adb.exe" : "fake-adb");
@@ -118,7 +120,7 @@ try {
     { cwd: root },
   );
   const packReport = parseJson(packed.stdout, "npm pack");
-  const filename = packReport[0]?.filename;
+  const filename = readNpmPackEntry(packReport, manifest.name).filename;
   if (typeof filename !== "string") {
     throw new Error("npm pack did not return a package filename");
   }
