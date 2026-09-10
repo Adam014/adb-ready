@@ -56,6 +56,9 @@ jobs:
 
       - name: Set up the pinned pnpm consumer
         uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        env:
+          # This job intentionally tests pnpm as a consumer of this Bun-managed project.
+          PNPM_CONFIG_PM_ON_FAIL: ignore
         with:
           version: 12.3.4
           cache: false
