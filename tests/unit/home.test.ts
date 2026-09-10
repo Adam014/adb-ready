@@ -30,9 +30,8 @@ class AutoInput implements SelectInput {
   pause(): void {}
 
   on(_event: "data", listener: (chunk: Uint8Array | string) => void): void {
-    for (const value of this.values) {
-      queueMicrotask(() => listener(value));
-    }
+    const value = this.values.shift();
+    if (value !== undefined) queueMicrotask(() => listener(value));
   }
 
   off(): void {}
@@ -90,22 +89,37 @@ describe("home screen", () => {
     expect(sink.value).toContain("ADB READY");
     expect(sink.value).toContain("Android sessions. Kept ready.");
     expect(sink.value).toContain("RUN    one target and dev com...");
-    expect(sink.value).toContain("Inspect app logs");
-    expect(sink.value).toContain("Create AI debug context");
+    expect(sink.value).toContain("Device & app");
+    expect(sink.value).toContain("Debug & evidence");
+    expect(sink.value).toContain("Project & setup");
     expect(sink.value).toContain("WHAT DO YOU WANT TO DO?");
     expect(sink.value).toEndWith("\u001B[?25h");
     expect(input.isRaw).toBe(false);
   });
 
-  test("supports the version menu shortcut", async () => {
+  test("opens a focused section and supports its version shortcut", async () => {
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("9", "\r"),
+      input: new AutoInput("4\r", "4\r"),
       sink: new MemorySink(),
       capabilities: { ...interactive, animation: false },
     });
 
     expect(selected).toEqual({ kind: "action", action: "version" });
+  });
+
+  test("returns from a section with escape and closes only from home", async () => {
+    const sink = new MemorySink();
+    const selected = await showHomeScreen({
+      version: "0.0.0",
+      input: new AutoInput("2\r", "\u001B", "\u001B"),
+      sink,
+      capabilities: { ...interactive, animation: false },
+    });
+
+    expect(selected).toEqual({ kind: "action", action: "exit" });
+    expect(sink.value).toContain("HOME / DEVICE & APP");
+    expect(sink.value).toContain("esc back");
   });
 
   test("renders only the compact action menu after command output", async () => {
@@ -119,7 +133,7 @@ describe("home screen", () => {
     });
 
     expect(selected).toEqual({ kind: "action", action: "exit" });
-    expect(sink.value).toContain("ACTIONS");
+    expect(sink.value).toContain("WHAT DO YOU WANT TO DO?");
     expect(sink.value).toContain("####");
     expect(sink.value).toStartWith("\u001B[?25l\u001B[2K\n");
     expect(sink.value).not.toContain("\u001B[2J\u001B[H");
@@ -145,8 +159,8 @@ describe("home screen", () => {
     input.send("\u001B");
 
     await expect(selection).resolves.toEqual({ kind: "action", action: "exit" });
-    expect(sink.value.match(/ACTIONS/gu)).toHaveLength(1);
-    expect(sink.value).not.toMatch(/\[\d+F/u);
+    expect(sink.value.match(/WHAT DO YOU WANT TO DO\?/gu)).toHaveLength(1);
+    expect(sink.value.match(/\[\d+F/gu)).toHaveLength(1);
   });
 
   test("uses a compact ASCII identity on narrow terminals", async () => {
