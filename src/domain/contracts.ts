@@ -8,6 +8,7 @@ export type Severity = "debug" | "info" | "warning" | "error";
 export interface Correlation {
   commandId: string;
   operationId?: string;
+  sessionId?: string;
   targetId?: string;
 }
 
