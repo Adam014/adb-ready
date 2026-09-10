@@ -27,7 +27,8 @@ breaking changes.
   explicitly sensitive snapshots with digest-scoped UI references.
 - Give local AI agents 19 typed Android tools and saved-session context over a
   tested Node.js, Bun, and Deno MCP stdio server without exposing raw shell/ADB
-  or destructive app removal.
+  or destructive app removal. Calls within one connection are serialized to
+  preserve deterministic target and UI state.
 - Generate or safely merge project MCP setup for Codex, Claude Code, Cursor,
   and VS Code, with non-mutating snippets for Windsurf and generic clients.
 - Expose current targets, saved manifests, paginated redacted events, and

@@ -138,6 +138,10 @@ Ask the agent to follow this sequence:
 The first successful `ensure_ready` binds one target to that MCP connection.
 Later tools cannot silently switch to another target.
 
+Tool calls within one MCP connection are executed in submission order. This
+prevents parallel agent requests from interleaving target binding, UI snapshots,
+or device mutations. Separate MCP connections remain independent.
+
 ## Tool surface
 
 | Capability | MCP tools |

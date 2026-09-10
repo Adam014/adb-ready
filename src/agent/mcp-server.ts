@@ -23,6 +23,7 @@ import { runCapture } from "../evidence/capture.js";
 import { runInspectApp, runInspectUi } from "../evidence/inspect.js";
 import { runUiAction } from "../evidence/ui-actions.js";
 import { selectTarget } from "../target/selection.js";
+import { SerialTaskQueue } from "./serial-task-queue.js";
 
 interface BoundTarget {
   serial: string;
@@ -109,6 +110,7 @@ async function projectFile(root: string, requested: string): Promise<string | un
 
 export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   let bound: BoundTarget | undefined;
+  const toolQueue = new SerialTaskQueue();
   const dependencies = options.dependencies ?? {};
   const server = new McpServer(
     { name: "adb-ready", version: options.version ?? manifest.version },
@@ -137,16 +139,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         inputSchema: schema,
         annotations: { ...annotations, openWorldHint: false },
       },
-      async (input, context) => {
-        const loaded = await load();
-        if (!loaded.ok) {
-          return inputFailure(
-            "MCP_CONFIG_INVALID",
-            loaded.errors.map(({ code, message }) => `${code}: ${message}`).join("; "),
-          );
-        }
-        return await handler(input, context.mcpReq.signal, loaded.config);
-      },
+      async (input, context) =>
+        await toolQueue.run(async () => {
+          const loaded = await load();
+          if (!loaded.ok) {
+            return inputFailure(
+              "MCP_CONFIG_INVALID",
+              loaded.errors.map(({ code, message }) => `${code}: ${message}`).join("; "),
+            );
+          }
+          return await handler(input, context.mcpReq.signal, loaded.config);
+        }),
     );
   };
 
