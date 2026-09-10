@@ -1,6 +1,6 @@
 {
   "name": "adb-ready",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Make an Android target ready, then keep the development session working.",
   "private": false,
   "type": "module",
