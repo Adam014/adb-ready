@@ -742,6 +742,93 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
+  test("routes app inspection through one selected target with clean JSON", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+    );
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("list") && args.includes("packages")) {
+        return result(request, "package:/data/app/example/base.apk=com.example.app\n");
+      }
+      if (args.includes("dumpsys") && args.includes("package")) {
+        return result(
+          request,
+          "Package [com.example.app]\n codePath=/data/app/example\n versionCode=1 targetSdk=36\n versionName=1.0.0\n pkgFlags=[ DEBUGGABLE ]\n",
+        );
+      }
+      if (args.includes("activity") && args.includes("activities")) {
+        return result(
+          request,
+          "mResumedActivity: ActivityRecord{42 u0 com.example.app/.MainActivity t12}\n",
+        );
+      }
+      return result(request, "");
+    };
+    const exitCode = await runCli(
+      ["app", "info", "com.example.app", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      command: "app info",
+      ok: true,
+      data: {
+        selected: { transport: { serial: "USB-1" } },
+        package: { applicationId: "com.example.app", installed: true, versionName: "1.0.0" },
+      },
+    });
+    expect(streams.error.value).toBe("");
+  });
+
+  test("dry-runs a destructive app command without confirmation or mutation", async () => {
+    const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+    );
+    const requests: string[][] = [];
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      requests.push([...args]);
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("list") && args.includes("packages")) {
+        return result(request, "package:/data/app/example/base.apk=com.example.app\n");
+      }
+      return result(request, "");
+    };
+
+    const exitCode = await runCli(
+      ["app", "clear-data", "com.example.app", "--dry-run", "--no-animation"],
+      streams,
+      fixture,
+    );
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(requests.some((args) => args.includes("clear"))).toBe(false);
+    expect(streams.error.value).toContain("no changes made");
+    expect(streams.error.value).not.toContain("requires confirmation");
+  });
+
   test("acquires one unambiguous wireless target before starting dev", async () => {
     const streams = io();
     const fixture = dependencies();

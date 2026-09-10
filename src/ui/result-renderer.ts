@@ -1,4 +1,5 @@
 import type { AdbDevice, AdbMdnsService } from "../adb/parsers.js";
+import type { AppData, AppsData, OpenData } from "../app/app-commands.js";
 import type {
   ConnectedData,
   DevData,
@@ -98,6 +99,33 @@ function isLogsData(value: unknown): value is LogsData {
     Array.isArray(value.filters) &&
     Array.isArray(value.records) &&
     typeof value.dropped === "number"
+  );
+}
+
+function isAppsData(value: unknown): value is AppsData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    (value.scope === "all" || value.scope === "system" || value.scope === "user") &&
+    Array.isArray(value.packages)
+  );
+}
+
+function isAppData(value: unknown): value is AppData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    typeof value.action === "string" &&
+    (isRecord(value.resolution) || typeof value.applicationId === "string")
+  );
+}
+
+function isOpenData(value: unknown): value is OpenData {
+  return (
+    isRecord(value) &&
+    isRecord(value.selected) &&
+    typeof value.url === "string" &&
+    typeof value.verified === "boolean"
   );
 }
 
@@ -286,6 +314,84 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
         );
       });
     }
+  }
+
+  if (result.command === "apps list" && isAppsData(result.data)) {
+    const data = result.data;
+    const visible = data.packages.slice(0, 50);
+    const filter = data.filter === undefined ? "" : ` · filter ${clean(data.filter)}`;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target    ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} Packages  ${String(data.packages.length)} · ${clean(data.scope)}${filter}`,
+    );
+    visible.forEach((item, index) => {
+      const branch = index === visible.length - 1 ? glyphs.end : glyphs.branch;
+      lines.push(`${style.dim(branch, capabilities)} ${clean(item.name)}`);
+    });
+    if (data.packages.length > visible.length) {
+      lines.push(
+        style.dim(
+          `  ${String(data.packages.length - visible.length)} more; use --filter or --json`,
+          capabilities,
+        ),
+      );
+    }
+  }
+
+  if (result.command.startsWith("app ") && isAppData(result.data)) {
+    const data = result.data;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+    );
+    if (data.action === "resolve") {
+      if (data.resolution.kind === "resolved") {
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} App      ${clean(data.resolution.applicationId)}`,
+          `${style.success(glyphs.success, capabilities)} Source   ${clean(data.resolution.provenance.source)}${data.resolution.provenance.location === undefined ? "" : ` · ${clean(data.resolution.provenance.location)}`}`,
+        );
+      }
+    } else if (data.action === "info") {
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} App      ${clean(data.package.applicationId)}`,
+        `${data.package.installed ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Install  ${data.package.installed ? "installed" : "not installed"}${data.package.versionName === undefined ? "" : ` · ${clean(data.package.versionName)}`}`,
+        `${style.success(glyphs.success, capabilities)} Debug    ${data.package.debuggable === true ? "debuggable" : data.package.debuggable === false ? "not debuggable" : "unknown"}`,
+      );
+      if (data.foreground !== undefined) {
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} Foreground ${clean(data.foreground.applicationId)}/${clean(data.foreground.activity)}`,
+        );
+      }
+    } else {
+      const planned = data.status === "planned";
+      const marker = planned
+        ? style.accent(glyphs.active, capabilities)
+        : data.verified
+          ? style.success(glyphs.success, capabilities)
+          : style.failure(glyphs.failure, capabilities);
+      lines.push(
+        `${marker} App      ${clean(data.applicationId)}`,
+        `${marker} Status   ${clean(data.status)} · ${planned ? "no changes made" : data.verified ? "verified" : "not verified"}`,
+      );
+      if (data.activity !== undefined) {
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} Activity ${clean(data.activity)}`,
+        );
+      }
+    }
+  }
+
+  if (result.command === "open" && isOpenData(result.data)) {
+    const planned = result.data.status === "planned";
+    const marker = planned
+      ? style.accent(glyphs.active, capabilities)
+      : result.data.verified
+        ? style.success(glyphs.success, capabilities)
+        : style.failure(glyphs.failure, capabilities);
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target  ${clean(result.data.selected.target.name)} · ${clean(result.data.selected.transport.serial)}`,
+      `${marker} URL     ${clean(result.data.url)}`,
+      `${marker} Status  ${planned ? "planned · no changes made" : result.data.verified ? "opened · verified" : "not verified"}`,
+    );
   }
 
   if (result.command.startsWith("sessions ") && isSessionCommandData(result.data)) {

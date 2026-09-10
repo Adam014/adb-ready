@@ -284,6 +284,87 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses app identity, lifecycle, package listing, and deep links", () => {
+    expect(parseArguments(["app", "resolve", "com.example.app", "--last"])).toMatchObject({
+      ok: true,
+      options: {
+        command: "app",
+        appAction: "resolve",
+        appId: "com.example.app",
+        remembered: true,
+      },
+    });
+    expect(
+      parseArguments([
+        "app",
+        "install",
+        "build/app.apk",
+        "--package",
+        "com.example.app",
+        "--replace",
+        "--grant-runtime-permissions",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "app",
+        appAction: "install",
+        artifactPath: "build/app.apk",
+        appId: "com.example.app",
+        replace: true,
+        grantRuntimePermissions: true,
+      },
+    });
+    expect(parseArguments(["app", "restart", "--activity", ".MainActivity"])).toMatchObject({
+      ok: true,
+      options: { command: "app", appAction: "restart", activity: ".MainActivity" },
+    });
+    expect(
+      parseArguments([
+        "app",
+        "clear-data",
+        "com.example.app",
+        "--allow-destructive",
+        "--non-interactive",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: { command: "app", appAction: "clear-data", allowDestructive: true },
+    });
+    expect(parseArguments(["apps", "list", "--system", "--filter", "example"])).toMatchObject({
+      ok: true,
+      options: { command: "apps", packageScope: "system", packageFilter: "example" },
+    });
+    expect(
+      parseArguments(["open", "myapp://orders/42", "--package", "com.example.app"]),
+    ).toMatchObject({
+      ok: true,
+      options: { command: "open", url: "myapp://orders/42", appId: "com.example.app" },
+    });
+    expect(parseArguments(["app", "stop", "com.example.app", "--dry-run"])).toMatchObject({
+      ok: true,
+      options: { command: "app", appAction: "stop", dryRun: true },
+    });
+    expect(parseArguments(["open", "https://example.com", "--dry-run"])).toMatchObject({
+      ok: true,
+      options: { command: "open", dryRun: true },
+    });
+  });
+
+  test("rejects incomplete and mismatched app options", () => {
+    expect(parseArguments(["app"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(parseArguments(["app", "install"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(parseArguments(["app", "info", "--replace"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["apps", "list", "--user", "--system"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["open"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
+  });
+
   test("defaults AI context exports to bounded Markdown", () => {
     expect(
       parseArguments([

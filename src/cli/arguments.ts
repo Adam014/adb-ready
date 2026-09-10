@@ -1,8 +1,11 @@
+import type { AppAction, PackageScope } from "../app/app-commands.js";
 import type { PortAction } from "../app/commands.js";
 import type { DevPreset, PackageManagerName } from "../dev/project.js";
 import type { PortDirection } from "../ports/model.js";
 
 export type CommandName =
+  | "app"
+  | "apps"
   | "config"
   | "connect"
   | "context"
@@ -12,6 +15,7 @@ export type CommandName =
   | "help"
   | "init"
   | "logs"
+  | "open"
   | "pair"
   | "ports"
   | "problems"
@@ -77,6 +81,16 @@ export interface CliOptions {
   contextOnly?: ContextFilter[];
   configAction?: "explain" | "validate";
   force?: boolean;
+  appAction?: AppAction;
+  appId?: string;
+  artifactPath?: string;
+  activity?: string;
+  packageScope?: PackageScope;
+  replace?: boolean;
+  grantRuntimePermissions?: boolean;
+  allowDestructive?: boolean;
+  url?: string;
+  packageFilter?: string;
 }
 
 export interface CliParseFailure {
@@ -94,6 +108,8 @@ export interface CliParseSuccess {
 export type CliParseResult = CliParseFailure | CliParseSuccess;
 
 const COMMANDS = new Set<CommandName>([
+  "app",
+  "apps",
   "config",
   "connect",
   "context",
@@ -103,11 +119,22 @@ const COMMANDS = new Set<CommandName>([
   "help",
   "init",
   "logs",
+  "open",
   "pair",
   "ports",
   "problems",
   "sessions",
   "version",
+]);
+const APP_ACTIONS = new Set<AppAction>([
+  "clear-data",
+  "info",
+  "install",
+  "launch",
+  "resolve",
+  "restart",
+  "stop",
+  "uninstall",
 ]);
 const BOOLEAN_OPTIONS = new Set([
   "-h",
@@ -134,6 +161,12 @@ const BOOLEAN_OPTIONS = new Set([
   "--no-cleanup-ports",
   "--dump",
   "--force",
+  "--replace",
+  "--grant-runtime-permissions",
+  "--allow-destructive",
+  "--user",
+  "--system",
+  "--all",
 ]);
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
@@ -210,6 +243,18 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   const contextOnly: ContextFilter[] = [];
   let configAction: CliOptions["configAction"];
   let force = false;
+  let appAction: AppAction | undefined;
+  let appId: string | undefined;
+  let artifactPath: string | undefined;
+  let activity: string | undefined;
+  let packageScope: PackageScope | undefined;
+  let replace = false;
+  let grantRuntimePermissions = false;
+  let allowDestructive = false;
+  let url: string | undefined;
+  let packageOption: string | undefined;
+  let appsListSeen = false;
+  let packageFilter: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -241,6 +286,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (command === "help" && COMMANDS.has(argument as CommandName)) {
         const candidate = argument as CommandName;
         if (
+          candidate === "app" ||
+          candidate === "apps" ||
           candidate === "connect" ||
           candidate === "config" ||
           candidate === "context" ||
@@ -248,6 +295,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "devices" ||
           candidate === "doctor" ||
           candidate === "logs" ||
+          candidate === "open" ||
           candidate === "init" ||
           candidate === "pair" ||
           candidate === "ports" ||
@@ -260,6 +308,31 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       if ((command === "connect" || command === "pair") && endpoint === undefined) {
         endpoint = argument;
+        continue;
+      }
+      if (command === "apps" && argument === "list" && !appsListSeen) {
+        appsListSeen = true;
+        continue;
+      }
+      if (command === "app") {
+        if (appAction === undefined && APP_ACTIONS.has(argument as AppAction)) {
+          appAction = argument as AppAction;
+          continue;
+        }
+        if (appAction === "install" && artifactPath === undefined) {
+          artifactPath = argument;
+          continue;
+        }
+        if (appAction !== undefined && appAction !== "install" && appId === undefined) {
+          if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(argument)) {
+            return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
+          }
+          appId = argument;
+          continue;
+        }
+      }
+      if (command === "open" && url === undefined) {
+        url = argument;
         continue;
       }
       if (command === "sessions") {
@@ -464,7 +537,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(value)) {
         return failure("CLI_INVALID_VALUE", `Invalid Android package name: ${value}.`, option);
       }
-      logPackage = value;
+      packageOption = value;
     } else if (option === "--pid") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -560,6 +633,33 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       logDump = true;
     } else if (option === "--force") {
       force = true;
+    } else if (option === "--activity") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[A-Za-z0-9_.$]+(?:\/[A-Za-z0-9_.$]+)?$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid Android activity: ${value}.`, option);
+      }
+      activity = value;
+    } else if (option === "--filter") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() === "" || value.length > 256) {
+        return failure("CLI_INVALID_VALUE", "--filter must be 1-256 characters.", option);
+      }
+      packageFilter = value;
+    } else if (option === "--replace") {
+      replace = true;
+    } else if (option === "--grant-runtime-permissions") {
+      grantRuntimePermissions = true;
+    } else if (option === "--allow-destructive") {
+      allowDestructive = true;
+    } else if (option === "--user" || option === "--system" || option === "--all") {
+      const nextScope: PackageScope =
+        option === "--user" ? "user" : option === "--system" ? "system" : "all";
+      if (packageScope !== undefined && packageScope !== nextScope) {
+        return failure("CLI_USAGE", "Choose only one of --user, --system, or --all.");
+      }
+      packageScope = nextScope;
     } else if (option === "--max-records") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -649,11 +749,23 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
+  if (packageOption !== undefined) {
+    if (command === "logs") logPackage = packageOption;
+    else if (command === "app" || command === "open") appId = packageOption;
+    else return failure("CLI_USAGE", "--package can only be used with app, logs, or open.");
+  }
+  if (command === "apps") packageScope ??= "user";
   if (command === "config") configAction ??= "validate";
   if (command === "context" && format === "human") format = "markdown";
   if (command === "sessions") sessionAction ??= "list";
   const targetCommand =
-    command === "dev" || command === "devices" || command === "logs" || command === "ports";
+    command === "app" ||
+    command === "apps" ||
+    command === "dev" ||
+    command === "devices" ||
+    command === "logs" ||
+    command === "open" ||
+    command === "ports";
   if (select && !targetCommand) {
     return failure(
       "CLI_USAGE",
@@ -696,13 +808,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     dryRun &&
     command !== "connect" &&
     command !== "dev" &&
+    command !== "app" &&
+    command !== "open" &&
     command !== "pair" &&
     command !== "ports" &&
     command !== "init"
   ) {
     return failure(
       "CLI_USAGE",
-      "--dry-run can only be used with connect, dev, init, pair, or ports.",
+      "--dry-run can only be used with app, connect, dev, init, open, pair, or ports.",
       "--dry-run",
     );
   }
@@ -722,6 +836,43 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     if (portAction === "remove" && secondaryPort !== undefined) {
       return failure("CLI_USAGE", `ports ${portDirection} remove accepts one port.`);
     }
+  }
+  if (command === "app") {
+    if (appAction === undefined) return failure("CLI_USAGE", "app requires an action.");
+    if (appAction === "install" && artifactPath === undefined) {
+      return failure("CLI_USAGE", "app install requires an APK path.");
+    }
+    if (appAction !== "install" && artifactPath !== undefined) {
+      return failure("CLI_USAGE", `app ${appAction} does not accept an artifact path.`);
+    }
+  }
+  if (command === "open" && url === undefined) return failure("CLI_USAGE", "open requires a URL.");
+  if (packageScope !== undefined && command !== "apps") {
+    return failure("CLI_USAGE", "--user, --system, and --all can only be used with apps list.");
+  }
+  if (packageFilter !== undefined && command !== "apps") {
+    return failure("CLI_USAGE", "--filter can only be used with apps list.");
+  }
+  if (
+    (activity !== undefined || replace || grantRuntimePermissions || allowDestructive) &&
+    command !== "app"
+  ) {
+    return failure("CLI_USAGE", "App lifecycle options can only be used with the app command.");
+  }
+  if (activity !== undefined && appAction !== "launch" && appAction !== "restart") {
+    return failure("CLI_USAGE", "--activity can only be used with app launch or app restart.");
+  }
+  if ((replace || grantRuntimePermissions) && appAction !== "install") {
+    return failure(
+      "CLI_USAGE",
+      "--replace and --grant-runtime-permissions can only be used with app install.",
+    );
+  }
+  if (allowDestructive && appAction !== "clear-data" && appAction !== "uninstall") {
+    return failure(
+      "CLI_USAGE",
+      "--allow-destructive can only be used with app clear-data or app uninstall.",
+    );
   }
   if (
     command !== "dev" &&
@@ -821,6 +972,16 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(contextOnly.length === 0 ? {} : { contextOnly: [...new Set(contextOnly)] }),
       ...(configAction === undefined ? {} : { configAction }),
       ...(force ? { force: true } : {}),
+      ...(appAction === undefined ? {} : { appAction }),
+      ...(appId === undefined ? {} : { appId }),
+      ...(artifactPath === undefined ? {} : { artifactPath }),
+      ...(activity === undefined ? {} : { activity }),
+      ...(packageScope === undefined ? {} : { packageScope }),
+      ...(replace ? { replace: true } : {}),
+      ...(grantRuntimePermissions ? { grantRuntimePermissions: true } : {}),
+      ...(allowDestructive ? { allowDestructive: true } : {}),
+      ...(url === undefined ? {} : { url }),
+      ...(packageFilter === undefined ? {} : { packageFilter }),
     },
   };
 }

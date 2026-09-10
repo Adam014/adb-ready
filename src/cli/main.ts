@@ -3,6 +3,14 @@ import process from "node:process";
 import manifest from "../../package.json" with { type: "json" };
 import type { AdbMdnsService } from "../adb/parsers.js";
 import {
+  type AppData,
+  type AppsData,
+  type OpenData,
+  runApp,
+  runApps,
+  runOpen,
+} from "../app/app-commands.js";
+import {
   type CommandDependencies,
   type CommandExecution,
   type DevData,
@@ -44,6 +52,7 @@ import {
   writeRememberedTarget,
 } from "../state/target-state.js";
 import type { AndroidTarget } from "../target/model.js";
+import { confirmAction } from "../ui/confirm.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
@@ -65,6 +74,8 @@ Usage:
   adbr [command] [options]
 
 Commands:
+  app ACTION [APP_ID]   Resolve, inspect, install, or control one app
+  apps list             List packages on one Android target
   config ACTION          Validate or explain resolved configuration
   connect [HOST:PORT]    Connect and verify a wireless Android target
   context [SESSION]      Export bounded AI-ready diagnostic context
@@ -73,6 +84,7 @@ Commands:
   init                   Create a detected project configuration
   devices                List visible Android targets
   logs [OPTIONS]         Stream focused logs from one Android target
+  open URL               Open a deep link or web URL on one target
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
   sessions [ACTION]      Inspect saved development sessions
@@ -110,6 +122,24 @@ Other:
 `;
 
 const COMMAND_HELP = {
+  app: `Usage:
+  adb-ready app resolve [APP_ID] [options]
+  adb-ready app info [APP_ID] [options]
+  adb-ready app install APK [--package APP_ID] [options]
+  adb-ready app launch [APP_ID] [--activity ACTIVITY] [options]
+  adb-ready app stop [APP_ID] [options]
+  adb-ready app restart [APP_ID] [--activity ACTIVITY] [options]
+  adb-ready app clear-data [APP_ID] [--allow-destructive]
+  adb-ready app uninstall [APP_ID] [--allow-destructive]
+
+Resolves one project application with provenance and runs verified lifecycle
+operations against the same deterministic Android target.
+`,
+  apps: `Usage: adb-ready apps list [--user|--system|--all] [options]
+
+Lists packages from one deterministic Android target. User-installed packages
+are shown by default.
+`,
   config: `Usage:
   adb-ready config validate [options]
   adb-ready config explain [options]
@@ -177,6 +207,11 @@ Log options:
   --since TIMESTAMP      Start at an Android logcat timestamp
   --dump                 Read the current buffer and exit instead of following
   --max-records COUNT    Bound records retained in the final result
+`,
+  open: `Usage: adb-ready open URL [--package APP_ID] [options]
+
+Opens one absolute deep link or web URL through Android's VIEW intent on the
+selected target.
 `,
   pair: `Usage: adb-ready pair [HOST:PORT] [options]
 
@@ -685,12 +720,18 @@ async function runCliInternal(
   let lastTarget: RememberedTarget | undefined;
   let stateWarning: Problem | undefined;
   if (
-    (options.command === "dev" ||
+    (options.command === "app" ||
+      options.command === "apps" ||
+      options.command === "dev" ||
       options.command === "devices" ||
       options.command === "logs" ||
+      options.command === "open" ||
       options.command === "ports") &&
-    (options.command === "dev" ||
+    (options.command === "app" ||
+      options.command === "apps" ||
+      options.command === "dev" ||
       options.command === "logs" ||
+      options.command === "open" ||
       options.select ||
       options.remembered)
   ) {
@@ -745,9 +786,12 @@ async function runCliInternal(
     ...(options.dryRun ? { dryRun: true } : {}),
   };
   if (
-    (options.command === "ports" && options.select) ||
+    options.command === "app" ||
+    options.command === "apps" ||
     options.command === "dev" ||
-    options.command === "logs"
+    options.command === "logs" ||
+    options.command === "open" ||
+    (options.command === "ports" && options.select)
   ) {
     let inventory = await runDevices(config, commandDependencies, signal);
     let selectable =
@@ -798,7 +842,11 @@ async function runCliInternal(
     }
     const shouldPrompt =
       options.select ||
-      ((options.command === "dev" || options.command === "logs") &&
+      ((options.command === "app" ||
+        options.command === "apps" ||
+        options.command === "dev" ||
+        options.command === "logs" ||
+        options.command === "open") &&
         errorCapabilities.interactive &&
         inventory.result.data?.selected === undefined &&
         selectable.length !== 1);
@@ -973,15 +1021,97 @@ async function runCliInternal(
   const events = options.format === "ndjson" ? new NdjsonEventRenderer(bus, io.output) : undefined;
 
   let execution:
+    | CommandExecution<AppData>
+    | CommandExecution<AppsData>
     | CommandExecution<DevicesData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
     | CommandExecution<LogsData>
+    | CommandExecution<OpenData>
     | Awaited<ReturnType<typeof runPair>>
     | Awaited<ReturnType<typeof runPorts>>;
   try {
-    if (options.command === "doctor") {
+    if (options.command === "app") {
+      let destructiveApproved = options.allowDestructive === true;
+      if (
+        !destructiveApproved &&
+        !options.dryRun &&
+        (options.appAction === "clear-data" || options.appAction === "uninstall") &&
+        errorCapabilities.interactive
+      ) {
+        const confirmation = await confirmAction({
+          action: options.appAction === "clear-data" ? "Clear all app data" : "Uninstall app",
+          scope: options.appId ?? values.appPackage ?? "resolved project app",
+          risk: "destructive",
+          nonInteractiveFlag: "--allow-destructive",
+          input: io.input,
+          sink: io.error,
+          capabilities: errorCapabilities,
+          ...(signal === undefined ? {} : { signal }),
+        });
+        if (confirmation.kind === "confirmed") {
+          destructiveApproved = true;
+        } else {
+          const cancelled = failureResult(
+            `app ${options.appAction}`,
+            [
+              inputProblem(
+                ProblemCode.OperationInterrupted,
+                "The destructive app action was cancelled.",
+                "The Android target was not changed.",
+              ),
+            ],
+            dependencies,
+          );
+          renderFailure(cancelled, options.format, io);
+          return ExitCode.Interrupted;
+        }
+      }
+      execution = await runApp(
+        {
+          action: options.appAction ?? "resolve",
+          cwd: io.cwd,
+          ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+          ...(values.appPackage === undefined
+            ? {}
+            : {
+                configuredPackage: {
+                  value: values.appPackage,
+                  ...(loaded.config.provenance.appPackage?.location === undefined
+                    ? {}
+                    : { location: loaded.config.provenance.appPackage.location }),
+                },
+              }),
+          ...(options.artifactPath === undefined ? {} : { artifactPath: options.artifactPath }),
+          ...(options.activity === undefined ? {} : { activity: options.activity }),
+          ...(options.replace === undefined ? {} : { replace: options.replace }),
+          ...(options.grantRuntimePermissions === undefined
+            ? {}
+            : { grantRuntimePermissions: options.grantRuntimePermissions }),
+          ...(destructiveApproved ? { destructiveApproved: true } : {}),
+        },
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "apps") {
+      execution = await runApps(
+        options.packageScope ?? "user",
+        options.packageFilter,
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "open") {
+      execution = await runOpen(
+        options.url ?? "",
+        options.appId ?? values.appPackage,
+        config,
+        commandDependencies,
+        signal,
+      );
+    } else if (options.command === "doctor") {
       execution = await runDoctor(config, commandDependencies, signal);
     } else if (options.command === "logs") {
       execution = await runLogs(
@@ -1212,6 +1342,20 @@ async function runCliInternal(
     } else if (options.command === "ports") {
       const data = execution.result.data as PortsData | null;
       if (data !== null) {
+        selectedTarget = {
+          serial: data.selected.transport.serial,
+          ...(data.selected.target.hardwareSerial === undefined
+            ? {}
+            : { hardwareSerial: data.selected.target.hardwareSerial }),
+        };
+      }
+    } else if (
+      options.command === "app" ||
+      options.command === "apps" ||
+      options.command === "open"
+    ) {
+      const data = execution.result.data as AppData | AppsData | OpenData | null;
+      if (data !== null && "selected" in data) {
         selectedTarget = {
           serial: data.selected.transport.serial,
           ...(data.selected.target.hardwareSerial === undefined
