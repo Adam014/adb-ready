@@ -109,7 +109,10 @@ describe("target leases", () => {
       expect(lease.ok).toBeTrue();
       if (!lease.ok) return;
       const acquiredAt = lease.lease.owner.updatedAt;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      const deadline = Date.now() + 1_000;
+      while (lease.lease.owner.updatedAt === acquiredAt && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
       expect(Date.parse(lease.lease.owner.updatedAt)).toBeGreaterThan(Date.parse(acquiredAt));
       expect(await lease.lease.release()).toBeTrue();
       expect(await lease.lease.release()).toBeTrue();

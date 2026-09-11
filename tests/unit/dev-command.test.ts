@@ -686,7 +686,7 @@ describe("runDev", () => {
       packageManager: { name: "bun", source: "package-json" },
       ports: { requested: [{ device: "tcp:8081", host: "tcp:3000" }] },
       command: {
-        cwd: "/Users/adam/private-app/mobile",
+        cwd: path.resolve("/Users/adam/private-app", "mobile"),
         envKeys: ["ANDROID_SERIAL", "API_TOKEN", "PUBLIC_MODE"],
       },
     });
