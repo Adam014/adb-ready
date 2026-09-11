@@ -15,6 +15,8 @@ breaking changes.
   repository history and published package metadata.
 - Reorganize the public README around six user outcomes and explicit entry
   paths for coding agents, terminal users, and CI automation.
+- Replace the simulated terminal snippet with an optimized product walkthrough
+  showing development startup, UI verification, and agent-driven recovery.
 
 ## [0.3.0] - 2026-09-11
 

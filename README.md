@@ -21,6 +21,8 @@ verified evidence—for developers, agents, and CI.
 [AI agents](#with-a-coding-agent) · [CI](#in-ci-and-automation) ·
 [Documentation](#documentation)
 
+<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-demo.gif" alt="ADB Ready prepares an Android development session, verifies the app UI, and lets a coding agent recover lost localhost access." width="1120" />
+
 </div>
 
 ## Quick start
@@ -59,19 +61,6 @@ bunx adb-ready dev
 ```
 
 </details>
-
-```text
-$ adb-ready dev
-
-✓ Target ready
-  Pixel 9 · wireless
-✓ Port ready
-  8081 → 8081
-✓ Project started
-  npx expo start --android
-● Session healthy
-  watching target · ports · logs
-```
 
 ADB Ready handles the state around ADB that a person, script, or coding agent
 should not guess: which device belongs to the run, whether the app is ready,
