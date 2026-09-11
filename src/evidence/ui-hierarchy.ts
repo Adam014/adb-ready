@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 
+export const DEFAULT_UI_SNAPSHOT_TIMEOUT_MS = 15_000;
+
+export type UiHierarchyFailureReason = "not-idle" | "unavailable";
+
+export function classifyUiHierarchyFailure(output: string): UiHierarchyFailureReason {
+  return /ERROR:\s*could not get idle state\.?/iu.test(output) ? "not-idle" : "unavailable";
+}
+
 export interface UiBounds {
   left: number;
   top: number;
@@ -18,9 +26,12 @@ export interface UiNode {
   bounds?: UiBounds;
   clickable: boolean;
   checkable: boolean;
+  checked: boolean;
   enabled: boolean;
   focusable: boolean;
+  focused: boolean;
   longClickable: boolean;
+  password: boolean;
   scrollable: boolean;
   selected: boolean;
 }
@@ -132,9 +143,12 @@ export function parseUiHierarchy(
       ...(parsedBounds === undefined ? {} : { bounds: parsedBounds }),
       clickable: boolean(values.clickable),
       checkable: boolean(values.checkable),
+      checked: boolean(values.checked),
       enabled: boolean(values.enabled, true),
       focusable: boolean(values.focusable),
+      focused: boolean(values.focused),
       longClickable: boolean(values["long-clickable"]),
+      password: boolean(values.password),
       scrollable: boolean(values.scrollable),
       selected: boolean(values.selected),
     };

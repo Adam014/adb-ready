@@ -35,7 +35,7 @@ describe("session history commands", () => {
         const recorder = await SessionRecorder.create(
           bus,
           { sessionId: `session-${String(index)}`, command: "dev", startedAt: timestamp },
-          { directory, maxAgeDays: 3650 },
+          { directory, maxAgeDays: 3650, projectRoot: "/workspace/current" },
         );
         bus.emit({
           type: "session.started",
@@ -55,29 +55,66 @@ describe("session history commands", () => {
         idFactory: () => "result-1",
         clock: () => new Date("2026-09-10T11:00:00.000Z"),
       };
-      const listed = await runSessionCommand("list", undefined, { directory }, dependencies);
+      const store = { directory, projectRoot: "/workspace/current" };
+      const listed = await runSessionCommand("list", undefined, store, dependencies);
       expect(listed.result.data).toMatchObject({
         action: "list",
         sessions: [{ sessionId: "session-1" }, { sessionId: "session-0" }],
       });
-      const shown = await runSessionCommand("show", undefined, { directory }, dependencies);
+      const filtered = await runSessionCommand("list", undefined, store, dependencies, {
+        status: "failed",
+        sinceMs: 3_600_000,
+        limit: 1,
+      });
+      expect(filtered.result.data).toMatchObject({
+        sessions: [{ sessionId: "session-1", status: "failed" }],
+      });
+      const firstPage = await runSessionCommand("list", undefined, store, dependencies, {
+        limit: 1,
+      });
+      expect(firstPage.result.data).toMatchObject({
+        action: "list",
+        total: 2,
+        nextCursor: "session-1",
+        sessions: [{ sessionId: "session-1" }],
+      });
+      const secondPage = await runSessionCommand("list", undefined, store, dependencies, {
+        limit: 1,
+        cursor: "session-1",
+      });
+      expect(secondPage.result.data).toEqual(
+        expect.objectContaining({
+          action: "list",
+          total: 2,
+          sessions: [expect.objectContaining({ sessionId: "session-0" })],
+        }),
+      );
+      expect(secondPage.result.data).not.toHaveProperty("nextCursor");
+      const expiredPage = await runSessionCommand("list", undefined, store, dependencies, {
+        cursor: "missing-session",
+      });
+      expect(expiredPage.result).toMatchObject({
+        ok: false,
+        problems: [{ code: "SESSION_CURSOR_INVALID" }],
+      });
+      const shown = await runSessionCommand("show", undefined, store, dependencies);
       expect(shown.result.data).toMatchObject({
         action: "show",
         session: { sessionId: "session-1", status: "failed" },
       });
-      const events = await runSessionCommand("events", "session-0", { directory }, dependencies);
+      const events = await runSessionCommand("events", "session-0", store, dependencies);
       expect(events.result.data).toMatchObject({
         action: "events",
         session: { sessionId: "session-0" },
         events: [{ type: "session.started" }],
       });
-      const problems = await runProblemsCommand(undefined, { directory }, dependencies);
+      const problems = await runProblemsCommand(undefined, store, dependencies);
       expect(problems.result.data).toMatchObject({
         sessionId: "session-1",
         status: "failed",
         problems: [{ code: "TARGET_OFFLINE", retryable: true }],
       });
-      const context = await runContextCommand(undefined, 2_000, { directory }, dependencies);
+      const context = await runContextCommand(undefined, 2_000, store, dependencies);
       expect(context.result.data).toMatchObject({
         sessionId: "session-1",
         status: "failed",

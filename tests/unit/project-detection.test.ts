@@ -135,6 +135,35 @@ describe("project detection", () => {
     ).toBe("gradle");
     expect((await detectProject({ cwd: unknownRoot, ...fixture({}) })).preset).toBeUndefined();
   });
+
+  test("detects Flutter and Capacitor before their generated Android Gradle projects", async () => {
+    const flutterRoot = path.resolve("/workspace/flutter");
+    const capacitorRoot = path.resolve("/workspace/capacitor");
+    expect(
+      (
+        await detectProject({
+          cwd: path.join(flutterRoot, "android"),
+          ...fixture({
+            [path.join(flutterRoot, "pubspec.yaml")]: "name: example",
+            [path.join(flutterRoot, "android", "build.gradle")]: "",
+          }),
+        })
+      ).preset,
+    ).toBe("flutter");
+    expect(
+      (
+        await detectProject({
+          cwd: capacitorRoot,
+          ...fixture({
+            [path.join(capacitorRoot, "package.json")]: JSON.stringify({
+              dependencies: { "@capacitor/android": "latest" },
+            }),
+            [path.join(capacitorRoot, "android", "build.gradle")]: "",
+          }),
+        })
+      ).preset,
+    ).toBe("capacitor");
+  });
 });
 
 describe("package script commands", () => {

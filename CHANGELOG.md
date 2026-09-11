@@ -9,6 +9,101 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-11
+
+### Added
+
+- Scope saved sessions, latest-problem lookup, AI context, and MCP session
+  resources to the canonical current project by default, with an explicit
+  `--all-projects` escape hatch for cross-project audits.
+- Add privacy-safe cross-process Android target leases with heartbeats, bounded
+  expiry, stale-owner recovery, and ownership-checked cleanup for app, UI,
+  port, recording, and development-session mutations.
+- Let `dev --dry-run` resolve and validate the project, command, ports, and
+  lifecycle hooks without requiring ADB or allocating an Android target. An
+  explicit target selector still produces the target-resolved plan.
+- Add composable readiness contracts for boot, unlock, process, foreground
+  activity, exact UI selectors, host ports, HTTP responses, and bounded log
+  presence or absence. Expo and React Native sessions now verify Android boot
+  and Metro reachability before reporting ready.
+- Add `adb-ready run -- COMMAND` as a finite automation entrypoint: start the
+  configured development service, satisfy readiness, execute one timeout-bound
+  verification command, preserve its exit code, and clean owned resources.
+- Produce an atomic, redacted evidence bundle for every executed `run` with a
+  versioned manifest, structured result, NDJSON timeline, problems, logcat,
+  bounded AI context, JUnit XML, and GitHub step-summary Markdown.
+- Advertise and validate a versioned result-envelope output schema for every
+  MCP tool, return screenshot pixels as MCP image content, and issue stable
+  connection-scoped target handles that reject stale or cross-connection use.
+- Let MCP `ensure_ready` reconnect an explicitly addressed endpoint or the only
+  unambiguous paired wireless service before binding it.
+- Exercise the complete MCP contract on Node.js, Bun, and Deno across both the
+  legacy 2025-11-25 and modern 2026-07-28 protocol eras.
+- Add semantic UI find, assert, digest comparison, and selector-driven tap or
+  long-press workflows. Structured selectors support exact, prefix, and
+  contains matching plus enabled/actionable qualifiers; ambiguous mutations
+  fail instead of guessing.
+- Add project-scoped `start_dev_session`, `get_dev_session`, and
+  `stop_dev_session` MCP tools backed by opaque durable handles. Managed
+  sessions continue outside one tool call, survive client reconnects, report
+  heartbeats and terminal exit state, and stop only their verified owned
+  process group.
+- Add status, recency, preset, and count filters to project-scoped session
+  history.
+- Install a single APK or a complete split APK set through verified `install`
+  and `install-multiple` workflows in both CLI and MCP.
+- Detect and run Flutter and Capacitor Android projects on the exact selected
+  target, with boot readiness and no invented default port mappings.
+- Add intent-level UI read, field fill/clear, and container-scoped scroll
+  workflows for CLI and MCP. Field replacement is capability-gated before
+  mutation and verifies observable values instead of inferring success from
+  input exit codes.
+- Add a project-scoped MCP session index with status, preset, recency, limit,
+  and stable cursor pagination so agents can locate relevant saved evidence
+  without scanning unrelated history.
+- Add a bounded CLI/MCP screen audit that identifies enabled actionable nodes
+  without human-readable labels and controls without stable resource IDs,
+  returning concrete nodes instead of a subjective score.
+- Bind finite verification commands to the leased target through
+  `ANDROID_SERIAL`, `ADB_READY_TARGET_SERIAL`, and an explicit
+  `{target.serial}` argument placeholder for tools such as Maestro that require
+  their own device flag.
+- Report measured acquisition time alongside every before/after UI snapshot so
+  agents and CI can identify slow accessibility inspection without guessing.
+
+### Changed
+
+- Compact repeated successful health checks in bounded AI context while
+  preserving the complete redacted NDJSON timeline as source evidence.
+- Reorganize the interactive home around development, test automation, device,
+  debugging, and project tasks; preserve root presentation flags and use copy
+  that remains meaningful in narrow terminals.
+- Add the screen agent-readiness audit to the task-oriented Debug & evidence
+  menu without expanding the root menu.
+- Lead the public README with the agent outcome, immediate setup, and a concrete
+  first task before the implementation details.
+
+### Fixed
+
+- Return a structured capability overview for bare machine-mode invocation and
+  suggest high-confidence corrections for mistyped commands or options.
+- Apply retention limits per project before the global safety cap so one noisy
+  project cannot evict another project's recent diagnostic history.
+- Keep packaged command-matrix development sessions inside an isolated
+  temporary state directory instead of polluting the user's session store.
+- Correct the public installation guide so its compatibility note no longer
+  contradicts the documented split APK support.
+- Give accessibility hierarchy acquisition its own 15-second default deadline
+  in inspect and UI workflows while preserving an explicit global timeout.
+  This prevents ordinary slower OEM UI Automator dumps from failing at the
+  generic five-second ADB boundary.
+- Classify Android's successful-exit `could not get idle state` response as a
+  distinct `UI_NOT_IDLE` problem with a safe recovery instruction instead of
+  misreporting an inaccessible hierarchy.
+- Finalize an explicitly stopped managed development task as interrupted even
+  when Windows terminates the owned child before its signal handler can write
+  the terminal record.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added
@@ -81,7 +176,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Adam014/adb-ready/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Adam014/adb-ready/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Adam014/adb-ready/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Adam014/adb-ready/compare/v0.1.0...v0.1.1

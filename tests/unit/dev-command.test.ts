@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { type CommandDependencies, runDev } from "../../src/app/commands.js";
+import { type CommandDependencies, runDev, runDevOfflinePlan } from "../../src/app/commands.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import { ProblemCode } from "../../src/domain/problems.js";
 import type {
@@ -64,6 +64,42 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
 }
 
 describe("runDev", () => {
+  test("builds an offline project plan without resolving ADB or a target", async () => {
+    let processCalled = false;
+    const deps = dependencies(async (request) => {
+      processCalled = true;
+      return result(request);
+    });
+    deps.locateAdb = async () => {
+      throw new Error("ADB must not be resolved for an offline plan");
+    };
+    const execution = await runDevOfflinePlan(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "node", args: ["server.mjs"] },
+        reversePorts: [{ device: 8081 }],
+      },
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(processCalled).toBeFalse();
+    expect(execution.result.data).toMatchObject({
+      status: "planned",
+      planScope: "offline",
+      plan: {
+        dryRun: true,
+        steps: [
+          { id: "acquire-target" },
+          { id: "reverse-1" },
+          { id: "start-child", executable: "node", args: ["server.mjs"] },
+        ],
+      },
+    });
+    expect(execution.result.data).not.toHaveProperty("selected");
+  });
+
   test("owns one target, streams a redacted journal, and cleans only its reverse mapping", async () => {
     const requests: ProcessRequest[] = [];
     const lines: string[] = [];
@@ -160,6 +196,134 @@ describe("runDev", () => {
     ]);
     expect(execution.result.problems).toContainEqual(
       expect.objectContaining({ code: "REACT_NATIVE_FATAL", severity: "warning" }),
+    );
+  });
+
+  test("does not mark a session ready until every configured readiness assertion passes", async () => {
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-server", args: [] },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+        readiness: { all: [{ kind: "boot" }], timeoutMs: 500 },
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.args?.includes("sys.boot_completed")) {
+          return result(request, { stdout: "1\n" });
+        }
+        if (request.executable === "dev-server") {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.readiness).toMatchObject({
+      ready: true,
+      assertions: [{ assertion: { kind: "boot" }, status: "passed" }],
+    });
+    const events = execution.result.data?.journal.events.map(({ type }) => type) ?? [];
+    expect(events.indexOf("readiness.passed")).toBeLessThan(events.indexOf("child.exited"));
+  });
+
+  test("runs one bounded verification command and intentionally stops the development service", async () => {
+    let verificationRequest: ProcessRequest | undefined;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: ["start"] },
+        verification: {
+          command: {
+            executable: "smoke-test",
+            args: ["--device={target.serial}", "--ci"],
+          },
+          timeoutMs: 30_000,
+        },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.executable === "dev-service") {
+          return await new Promise<ProcessResult>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+              { once: true },
+            );
+          });
+        }
+        if (request.executable === "smoke-test") {
+          verificationRequest = request;
+          return result(request);
+        }
+        return result(request);
+      }),
+    );
+
+    expect(execution.result.command).toBe("run");
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.problems).toEqual([]);
+    expect(execution.result.data).toMatchObject({
+      status: "completed",
+      verification: {
+        passed: true,
+        exitCode: 0,
+        command: { executable: "smoke-test", args: ["--device=USB-1", "--ci"] },
+      },
+    });
+    expect(verificationRequest).toMatchObject({
+      args: ["--device=USB-1", "--ci"],
+      env: { ADB_READY_TARGET_SERIAL: "USB-1", ANDROID_SERIAL: "USB-1" },
+    });
+  });
+
+  test("preserves a failed bounded verification command exit code", async () => {
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: [] },
+        verification: { command: { executable: "smoke-test", args: [] } },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.executable === "dev-service") {
+          return await new Promise<ProcessResult>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+              { once: true },
+            );
+          });
+        }
+        if (request.executable === "smoke-test") return result(request, { exitCode: 9 });
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(9);
+    expect(execution.result.data?.verification).toMatchObject({ passed: false, exitCode: 9 });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.VerificationFailed }),
     );
   });
 
@@ -351,6 +515,56 @@ describe("runDev", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test("binds Flutter and Capacitor commands to the selected Android target", async () => {
+    const flutterDeps = dependencies(async (request) => targetProbe(request) ?? result(request));
+    flutterDeps.detectProject = async () => ({
+      root: "/workspace/flutter",
+      preset: "flutter",
+      presetEvidence: ["Flutter pubspec.yaml"],
+      packageManager: { conflicts: [] },
+    });
+    flutterDeps.locateExecutable = async (name) =>
+      name === "flutter" ? "/sdk/flutter/bin/flutter" : undefined;
+    const flutter = await runDev({ cwd: "/workspace/flutter" }, { dryRun: true }, flutterDeps);
+    expect(flutter.result.data).toMatchObject({
+      preset: "flutter",
+      ports: { requested: [] },
+      command: {
+        executable: "/sdk/flutter/bin/flutter",
+        args: ["run", "-d", "USB-1"],
+      },
+    });
+    expect(flutter.result.data?.plan?.steps).toContainEqual(
+      expect.objectContaining({ id: "ready-1", title: "Verify boot readiness" }),
+    );
+
+    const capacitorDeps = dependencies(async (request) => targetProbe(request) ?? result(request));
+    capacitorDeps.detectProject = async () => ({
+      root: "/workspace/capacitor",
+      preset: "capacitor",
+      presetEvidence: ["package.json dependency: Capacitor"],
+      packageManager: {
+        name: "pnpm",
+        executable: "/bin/pnpm",
+        source: "package-json",
+        conflicts: [],
+      },
+    });
+    const capacitor = await runDev(
+      { cwd: "/workspace/capacitor" },
+      { dryRun: true },
+      capacitorDeps,
+    );
+    expect(capacitor.result.data).toMatchObject({
+      preset: "capacitor",
+      ports: { requested: [] },
+      command: {
+        executable: "/bin/pnpm",
+        args: ["exec", "cap", "run", "android", "--target", "USB-1"],
+      },
+    });
   });
 
   test("runs lifecycle hooks in session order with direct arguments and reports warnings", async () => {

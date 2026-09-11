@@ -12,6 +12,8 @@ adb-ready dev --dry-run
 - [`expo/adb-ready.config.json`](./expo/adb-ready.config.json)
 - [`react-native/adb-ready.config.json`](./react-native/adb-ready.config.json)
 - [`gradle/adb-ready.config.json`](./gradle/adb-ready.config.json)
+- [`flutter/adb-ready.config.json`](./flutter/adb-ready.config.json)
+- [`capacitor/adb-ready.config.json`](./capacitor/adb-ready.config.json)
 - [`custom/adb-ready.config.json`](./custom/adb-ready.config.json)
 
 Prefer `adb-ready init` when starting from an existing detected project. Add

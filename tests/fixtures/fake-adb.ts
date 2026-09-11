@@ -13,6 +13,7 @@ const command = [
   "pair",
   "forward",
   "reverse",
+  "screencap",
   "uiautomator",
   "wm",
   "input",
@@ -44,6 +45,13 @@ if (scenario === "failure") {
   process.stdout.write("List of discovered mdns services\n");
 } else if (command === "ro.serialno") {
   process.stdout.write("fixture-hardware-serial\n");
+} else if (command === "screencap") {
+  process.stdout.write(
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
 } else if (command === "uiautomator") {
   process.stdout.write(
     '<?xml version="1.0"?><hierarchy><node package="com.example.app" bounds="[0,0][1080,2400]"><node text="Open" resource-id="com.example.app:id/open" clickable="true" enabled="true" bounds="[20,100][220,200]" /></node></hierarchy>\n',

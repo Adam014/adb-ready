@@ -57,6 +57,18 @@ adb-ready sessions events SESSION_ID --format ndjson
 adb-ready problems SESSION_ID
 ```
 
+Find the useful run without scanning a long global list:
+
+```bash
+adb-ready sessions list --status failed --since 24h --limit 5
+adb-ready sessions list --preset expo
+adb-ready sessions list --all-projects
+```
+
+History is scoped to the current project by default. Status, time, preset, and
+count filters apply before output; `--all-projects` is an explicit escape hatch
+for a machine-wide audit.
+
 When the ID is omitted, the latest saved session is selected. Default retention
 keeps at most 30 finalized sessions, 14 days, and 20 MiB. Active sessions are
 not pruned as finalized history.
@@ -88,6 +100,9 @@ Available filters are `problems`, `recovery`, `logs`, `child`, `state`, `target`
 and `ports`. The compiler prioritizes structured problems, failures, warnings,
 recovery, and nearby diagnostic output within the requested character budget.
 It reports how many events were filtered or omitted.
+Repeated successful health checks are represented once with their count and
+final timestamp. The stored NDJSON remains complete, so compact AI context does
+not discard diagnostic evidence.
 
 Use JSON when another local tool should consume the result envelope:
 

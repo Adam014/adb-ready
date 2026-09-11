@@ -129,14 +129,21 @@ Ask the agent to follow this sequence:
 1. Call `doctor` when host or ADB health is unknown.
 2. Call `ensure_ready`; provide an exact device serial, configured alias, or
    transport ID when more than one ready target exists.
-3. Resolve the project app with `resolve_app`.
-4. Use `inspect_app` or `inspect_ui` for bounded current evidence.
-5. Perform one typed action, then inspect again instead of assuming success.
-6. Use `get_session_problems` or `compile_debug_context` for an existing
+3. Start the configured stack with `start_dev_session` when it is not already
+   running; retain its task handle and poll `get_dev_session` without holding a
+   tool call open.
+4. Resolve the project app with `resolve_app`.
+5. Use `inspect_app` or `inspect_ui` for bounded current evidence.
+6. Perform one typed action, then inspect again instead of assuming success.
+7. Use `get_session_problems` or `compile_debug_context` for an existing
    development session.
 
-The first successful `ensure_ready` binds one target to that MCP connection.
-Later tools cannot silently switch to another target.
+The first successful `ensure_ready` binds one target to that MCP connection and
+returns a `targetHandle`. Pass that handle to later target-bound calls when the
+client supports workflow state. A stale or cross-connection handle is rejected,
+and later tools cannot silently switch targets. When no ready target exists,
+`ensure_ready` may reconnect an explicit network endpoint or the single
+unambiguous paired service; it never guesses among multiple devices.
 
 Tool calls within one MCP connection are executed in submission order. This
 prevents parallel agent requests from interleaving target binding, UI snapshots,
@@ -147,10 +154,11 @@ or device mutations. Separate MCP connections remain independent.
 | Capability | MCP tools |
 | --- | --- |
 | Host and target readiness | `doctor`, `list_targets`, `ensure_ready` |
+| Durable development lifecycle | `start_dev_session`, `get_dev_session`, `stop_dev_session` |
 | App identity and lifecycle | `resolve_app`, `install_app`, `launch_app`, `restart_app`, `open_url` |
 | Current evidence | `inspect_app`, `inspect_ui`, `capture_screenshot` |
-| Safe UI actions | `tap_ui`, `long_press_ui`, `swipe_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui` |
-| Saved diagnostics | `get_session_problems`, `compile_debug_context` |
+| Safe UI queries and actions | `audit_ui`, `get_ui`, `find_ui`, `assert_ui`, `compare_ui`, `tap_ui`, `long_press_ui`, `scroll_ui`, `swipe_ui`, `fill_ui`, `clear_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui` |
+| Saved diagnostics | `list_sessions`, `get_session_problems`, `compile_debug_context` |
 
 MCP resources keep larger read-only context outside tool calls:
 
@@ -162,12 +170,20 @@ MCP resources keep larger read-only context outside tool calls:
 | `adb-ready://sessions/{sessionId}/events/{offset}/{limit}` | a page of up to 200 redacted events |
 | `adb-ready://sessions/{sessionId}/context` | a bounded redacted Markdown context document |
 
-Tool results contain the same structured success, problem, evidence, and
-verification data used by CLI JSON output.
+Every tool advertises an output schema and returns the same versioned result
+envelope used by CLI JSON output. Screenshot capture additionally returns MCP
+`image` content so a vision-capable agent can inspect the pixels directly; the
+verified project-local PNG remains the evidence source of record.
 
 The npm package also ships `schema/agent-tools-v1.json`, generated from the
 server's real `tools/list` response during every build. Integrations can inspect
-version-matched input schemas and safety annotations without starting ADB.
+version-matched input and output schemas plus safety annotations without
+starting ADB.
+
+`list_sessions` is project-scoped by default and supports status, preset,
+recency, and result-count filters. When more matches remain, pass its opaque
+`nextCursor` back as `cursor`; an expired cursor fails explicitly instead of
+silently restarting the list.
 
 ## Safety boundary
 
@@ -181,6 +197,8 @@ version-matched input schemas and safety annotations without starting ADB.
 - Data clearing and uninstall are intentionally absent from the agent surface.
 - Tool annotations help clients request approval, but ADB Ready enforces its
   own target, path, and destructive-action rules.
+- Durable development handles are random, project-scoped, heartbeat-checked,
+  and can signal only the owned managed process recorded for that handle.
 - Nothing is uploaded by ADB Ready. The selected AI client controls what tool
   results it sends to its model provider.
 
@@ -191,8 +209,8 @@ the complete trust model.
 ## Runtime alternatives
 
 The published bundle is smoke-tested as an MCP stdio server under Node.js, Bun,
-and Deno. Replace the command and arguments when Node.js is not your chosen
-runtime:
+and Deno against the legacy 2025-11-25 and modern 2026-07-28 protocol eras.
+Replace the command and arguments when Node.js is not your chosen runtime:
 
 ```text
 Bun:  bun  ./node_modules/adb-ready/dist/cli.js mcp

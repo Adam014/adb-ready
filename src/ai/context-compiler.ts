@@ -8,6 +8,7 @@ export interface CompiledContext {
   includedEvents: number;
   omittedEvents: number;
   filteredEvents: number;
+  compactedEvents: number;
 }
 
 export type ContextEventFilter =
@@ -53,7 +54,15 @@ function matchesFilter(event: AdbReadyEvent, filter: ContextEventFilter): boolea
   return false;
 }
 
-function eventLine(event: AdbReadyEvent): string {
+interface ContextEventCandidate {
+  event: AdbReadyEvent;
+  repeatedCount: number;
+  lastSequence?: number;
+  lastTimestamp?: string;
+}
+
+function eventLine(candidate: ContextEventCandidate): string {
+  const { event } = candidate;
   return JSON.stringify({
     sequence: event.sequence,
     timestamp: event.timestamp,
@@ -61,7 +70,37 @@ function eventLine(event: AdbReadyEvent): string {
     source: event.source,
     type: event.type,
     message: event.message,
+    ...(candidate.repeatedCount > 1
+      ? {
+          repeatedCount: candidate.repeatedCount,
+          lastSequence: candidate.lastSequence,
+          lastTimestamp: candidate.lastTimestamp,
+        }
+      : {}),
   });
+}
+
+function compactRoutineEvents(events: readonly AdbReadyEvent[]): ContextEventCandidate[] {
+  const compacted: ContextEventCandidate[] = [];
+  const routine = new Map<string, ContextEventCandidate>();
+  for (const event of events) {
+    if (eventPriority(event) > 10) {
+      compacted.push({ event, repeatedCount: 1 });
+      continue;
+    }
+    const key = JSON.stringify([event.severity, event.source, event.type, event.message]);
+    const existing = routine.get(key);
+    if (existing === undefined) {
+      const candidate = { event, repeatedCount: 1 };
+      routine.set(key, candidate);
+      compacted.push(candidate);
+    } else {
+      existing.repeatedCount += 1;
+      existing.lastSequence = event.sequence;
+      existing.lastTimestamp = event.timestamp;
+    }
+  }
+  return compacted;
 }
 
 function fenceFor(content: string): string {
@@ -100,6 +139,8 @@ export function compileSessionContext(
       : options.only.some((filter) => matchesFilter(event, filter));
   });
   const filteredEvents = events.length - eligibleEvents.length;
+  const candidates = compactRoutineEvents(eligibleEvents);
+  const compactedEvents = eligibleEvents.length - candidates.length;
   const candidateProblemLines = manifest.problems.map(
     (problem) =>
       `- **${compact(problem.code, 80)}** (${compact(problem.category, 80)}, ${problem.severity}, retryable=${String(problem.retryable)}): ${compact(problem.summary)} ${compact(problem.detail)}`,
@@ -148,8 +189,12 @@ export function compileSessionContext(
   ].join("\n");
   const footerReserve = 180;
   const available = Math.max(0, characterBudget - heading.length - footerReserve);
-  const ranked = eligibleEvents
-    .map((event) => ({ event, line: eventLine(event), priority: eventPriority(event) }))
+  const ranked = candidates
+    .map((candidate) => ({
+      event: candidate.event,
+      line: eventLine(candidate),
+      priority: eventPriority(candidate.event),
+    }))
     .sort(
       (left, right) => right.priority - left.priority || right.event.sequence - left.event.sequence,
     );
@@ -163,13 +208,14 @@ export function compileSessionContext(
   selected.sort((left, right) => left.event.sequence - right.event.sequence);
   const timeline = selected.map(({ line }) => line).join("\n");
   const fence = fenceFor(timeline);
+  const omittedByBudget = candidates.length - selected.length;
   const omittedEvents = events.length - selected.length;
   const footer = [
     fence,
     timeline,
     fence,
     "",
-    `Included ${String(selected.length)} of ${String(events.length)} events; ${String(filteredEvents)} filtered and ${String(eligibleEvents.length - selected.length)} omitted by the context budget.`,
+    `Included ${String(selected.length)} timeline entries from ${String(events.length)} events; ${String(filteredEvents)} filtered, ${String(compactedEvents)} repetitive routine events compacted, and ${String(omittedByBudget)} entries omitted by the context budget.`,
     "",
   ].join("\n");
   const markdown = `${heading}${footer}`;
@@ -180,5 +226,6 @@ export function compileSessionContext(
     includedEvents: selected.length,
     omittedEvents,
     filteredEvents,
+    compactedEvents,
   };
 }

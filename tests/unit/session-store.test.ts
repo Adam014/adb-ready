@@ -43,6 +43,7 @@ describe("SessionRecorder", () => {
           sessionId: "session-1",
           command: "dev",
           startedAt: "2026-09-10T10:00:00.000Z",
+          projectRoot: "/workspace/sample-app",
         },
         { directory, redaction: { additionalLiterals: ["private-marker"] } },
       );
@@ -69,7 +70,6 @@ describe("SessionRecorder", () => {
         status: "completed",
         finishedAt: "2026-09-10T10:02:00.000Z",
         targetIdentity: "PHONE-SECRET",
-        projectName: "sample-app",
         preset: "expo",
       });
 
@@ -140,6 +140,44 @@ describe("SessionRecorder", () => {
       expect(sessions).toMatchObject({
         ok: true,
         value: [{ sessionId: "retained-1" }],
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("scopes listing and direct reads to the canonical project", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-sessions-"));
+    try {
+      for (const projectRoot of ["/workspace/alpha", "/workspace/beta"]) {
+        const recorder = await SessionRecorder.create(
+          new EventBus(),
+          {
+            sessionId: path.basename(projectRoot),
+            command: "dev",
+            startedAt: "2026-09-10T10:00:00.000Z",
+            projectRoot,
+          },
+          { directory },
+        );
+        await recorder.finish({
+          status: "completed",
+          finishedAt: "2026-09-10T10:01:00.000Z",
+        });
+      }
+      expect(await listSessions({ directory, projectRoot: "/workspace/alpha" })).toMatchObject({
+        ok: true,
+        value: [{ sessionId: "alpha" }],
+      });
+      expect(
+        await readSession("beta", { directory, projectRoot: "/workspace/alpha" }),
+      ).toMatchObject({
+        ok: false,
+        code: "SESSION_UNREADABLE",
+      });
+      expect(await listSessions({ directory, allProjects: true })).toMatchObject({
+        ok: true,
+        value: [{ sessionId: "alpha" }, { sessionId: "beta" }],
       });
     } finally {
       await rm(directory, { recursive: true, force: true });

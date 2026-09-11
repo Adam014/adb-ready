@@ -18,11 +18,13 @@ import {
   type CommandExecution,
   type DevData,
   type DevicesData,
+  type DevOptions,
   type LogsData,
   type PortsData,
   runConnect,
   runDev,
   runDevices,
+  runDevOfflinePlan,
   runDoctor,
   runLogs,
   runPair,
@@ -35,6 +37,7 @@ import {
   runProblemsCommand,
   runSessionCommand,
 } from "../app/session-commands.js";
+import { type AutomationRunData, writeEvidenceBundle } from "../automation/evidence-bundle.js";
 import { loadConfig } from "../config/loader.js";
 import type { ConfigError, ConfigValues } from "../config/types.js";
 import { EventBus } from "../core/event-bus.js";
@@ -57,12 +60,18 @@ import { runUiAction, type UiActionData } from "../evidence/ui-actions.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
 import {
+  acquireTargetLease,
+  type TargetLeaseHandle,
+  type TargetLeaseOptions,
+} from "../state/target-lease.js";
+import {
   type RememberedTarget,
   readTargetState,
   rememberedTarget,
   writeRememberedTarget,
 } from "../state/target-state.js";
 import type { AndroidTarget } from "../target/model.js";
+import type { SelectedTarget } from "../target/selection.js";
 import { confirmAction } from "../ui/confirm.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
@@ -93,6 +102,7 @@ Commands:
   connect [HOST:PORT]    Connect and verify a wireless Android target
   context [SESSION]      Export bounded AI-ready diagnostic context
   dev [OPTIONS] [-- CMD] Prepare one target and run a development session
+  run [OPTIONS] -- CMD   Run one bounded verification job with evidence
   doctor                 Inspect the local ADB environment
   init                   Create a detected project configuration
   inspect ACTION         Build a bounded app or UI evidence snapshot
@@ -153,7 +163,7 @@ snippet because their configuration is user-scoped or client-defined.
   app: `Usage:
   adb-ready app resolve [APP_ID] [options]
   adb-ready app info [APP_ID] [options]
-  adb-ready app install APK [--package APP_ID] [options]
+  adb-ready app install APK [SPLIT_APK...] [--package APP_ID] [options]
   adb-ready app launch [APP_ID] [--activity ACTIVITY] [options]
   adb-ready app stop [APP_ID] [options]
   adb-ready app restart [APP_ID] [--activity ACTIVITY] [options]
@@ -196,6 +206,7 @@ Context options:
   --budget CHARACTERS    Maximum Markdown size (default: 12000, minimum: 1000)
   --since DURATION       Keep only the final window, such as 30s or 5m
   --only FILTERS         Keep comma-separated problems,recovery,logs,child,state,target,ports
+  --all-projects         Allow an explicit cross-project session lookup
   --format FORMAT        markdown (default), json, plain, or ndjson
 `,
   dev: `Usage: adb-ready dev [options] [-- EXECUTABLE ARG...]
@@ -206,12 +217,26 @@ child output with targeted logcat. Ctrl-C stops owned processes and removes
 only mappings created by this session.
 
 Development options:
-  --preset NAME          expo, react-native, gradle, or custom
+  --preset NAME          expo, react-native, flutter, capacitor, gradle, or custom
   --package-manager PM   npm, pnpm, yarn, or bun
   --port PORT            Add a reverse TCP port; repeat for more ports
   --[no-]logs            Enable or disable targeted logcat
   --[no-]cleanup-ports   Keep or remove session-created mappings on exit
   -- EXECUTABLE ARG...   Run a direct custom command without a shell
+`,
+  run: `Usage: adb-ready run [options] -- EXECUTABLE ARG...
+
+Starts the configured development service on one exclusively leased target,
+waits for every readiness assertion, runs one bounded verification command,
+then cleans owned resources. The verification exit code is preserved.
+
+Run options:
+  --run-timeout DURATION Bound the verification command (default: 15m)
+  --dry-run              Build an offline plan unless a target is explicit
+  -- EXECUTABLE ARG...   Verification command, passed directly without a shell
+
+The literal placeholder {target.serial} is resolved inside arguments after target selection.
+Verification processes also receive ANDROID_SERIAL and ADB_READY_TARGET_SERIAL.
 `,
   doctor: `Usage: adb-ready doctor [options]
 
@@ -232,16 +257,28 @@ context implicitly.
 `,
   ui: `Usage:
   adb-ready ui tap REF|X Y [--dry-run]
+  adb-ready ui tap SELECTOR [--dry-run]
   adb-ready ui long-press REF|X Y [--dry-run]
+  adb-ready ui audit
+  adb-ready ui find SELECTOR
+  adb-ready ui get SELECTOR
+  adb-ready ui assert SELECTOR [--state visible|gone]
+  adb-ready ui compare DIGEST
+  adb-ready ui scroll up|down|left|right [SELECTOR] [--dry-run]
   adb-ready ui swipe up|down|left|right [--dry-run]
   adb-ready ui swipe X1 Y1 X2 Y2 [--dry-run]
+  adb-ready ui fill SELECTOR TEXT [--submit] [--dry-run]
+  adb-ready ui clear SELECTOR [--dry-run]
   adb-ready ui type TEXT [--submit] [--dry-run]
   adb-ready ui press back|home|enter|menu|volume-up|volume-down [--dry-run]
   adb-ready ui wait SELECTOR [--state visible|gone] [--timeout 5s]
 
 Uses fresh UI evidence before every mutation. A ui:* reference is accepted only
-while its snapshot digest still matches. Selectors are exact id=, text=, desc=,
-or package= values. Typed text uses a conservative shell-safe character set.
+while its snapshot digest still matches. Compact selectors use exact class=,
+id=, text=, desc=, or package= values; MCP additionally supports structured
+contains and prefix matching with state qualifiers. Typed text uses a
+conservative shell-safe character set. fill and clear require Android's safe
+key-combination capability and verify the observable field value afterward.
 `,
   devices: `Usage: adb-ready devices [options]
 
@@ -294,7 +331,8 @@ an existing mapping. Use --dry-run to inspect the exact ADB plan.
   problems: `Usage: adb-ready problems [SESSION] [options]
 
 Shows structured problems from a saved session. The latest session is used
-when no ID is provided.
+when no ID is provided. History is scoped to the current project unless
+--all-projects is explicit.
 `,
   sessions: `Usage:
   adb-ready sessions list [options]
@@ -302,7 +340,14 @@ when no ID is provided.
   adb-ready sessions events [SESSION] [options]
 
 Inspects private, redacted development history. Show and events use the latest
-session when no ID is provided.
+session from the current project when no ID is provided. Use --all-projects for
+an explicit cross-project audit.
+
+List filters:
+  --status STATUS        running, completed, failed, or interrupted
+  --since DURATION       Keep sessions updated in the final window
+  --preset NAME          Keep sessions using one development preset
+  --limit COUNT          Return at most 1-100 sessions
 `,
 } as const;
 
@@ -328,6 +373,20 @@ export interface CliDependencies extends CommandDependencies {
   readTargetState?: typeof readTargetState;
   writeRememberedTarget?: typeof writeRememberedTarget;
   sessionStore?: false | SessionStoreOptions;
+  targetLease?: false | TargetLeaseOptions;
+}
+
+function requiresTargetLease(options: CliOptions): boolean {
+  if (options.dryRun) return false;
+  if (options.command === "dev" || options.command === "run" || options.command === "open") {
+    return true;
+  }
+  if (options.command === "app") {
+    return options.appAction !== "info" && options.appAction !== "resolve";
+  }
+  if (options.command === "ports") return options.portAction !== "list";
+  if (options.command === "ui") return options.uiRequest?.action !== "wait";
+  return options.command === "capture" && options.captureKind === "screen-record";
 }
 
 function inferredFormat(argv: readonly string[]): OutputFormat {
@@ -362,6 +421,33 @@ function inferredFormat(argv: readonly string[]): OutputFormat {
     }
   }
   return format;
+}
+
+function rootInvocation(argv: readonly string[]): boolean {
+  const valueOptions = new Set(["--format"]);
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === undefined) continue;
+    if (argument.startsWith("--format=")) continue;
+    if (valueOptions.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (
+      argument !== "--json" &&
+      argument !== "--quiet" &&
+      argument !== "--verbose" &&
+      argument !== "--color" &&
+      argument !== "--no-color" &&
+      argument !== "--unicode" &&
+      argument !== "--no-unicode" &&
+      argument !== "--animation" &&
+      argument !== "--no-animation"
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function capabilities(
@@ -475,7 +561,9 @@ function cliConfig(options: CliOptions): ConfigValues {
       : { devReversePorts: options.reversePorts.map((device) => ({ device: Number(device) })) }),
     ...(options.logs === undefined ? {} : { devLogs: options.logs }),
     ...(options.cleanupPorts === undefined ? {} : { devCleanupPorts: options.cleanupPorts }),
-    ...(options.customCommand === undefined ? {} : { devCommand: options.customCommand }),
+    ...(options.command !== "dev" || options.customCommand === undefined
+      ? {}
+      : { devCommand: options.customCommand }),
   };
 }
 
@@ -552,14 +640,17 @@ async function runInteractiveSession(
       connect: ["connect"],
       context: ["context"],
       dev: ["dev"],
+      "dev-plan": ["dev", "--dry-run"],
       devices: ["devices"],
       doctor: ["doctor"],
       help: ["help"],
       init: ["init"],
       "inspect-app": ["inspect", "app"],
       "inspect-ui": ["inspect", "ui", "--interactive-only"],
+      "ui-audit": ["ui", "audit"],
       logs: ["logs"],
       pair: ["pair"],
+      "run-help": ["help", "run"],
       sessions: ["sessions"],
       version: ["version"],
     };
@@ -672,17 +763,7 @@ async function runCliInternal(
   signal?: AbortSignal,
 ): Promise<number> {
   const fallbackFormat = inferredFormat(argv);
-  let effectiveArgv = argv;
-  if (argv.length === 0) {
-    const homeCapabilities = capabilities(undefined, {}, io, "error", "human");
-    if (homeCapabilities.interactive) {
-      return await runInteractiveSession(io, dependencies, homeCapabilities, signal);
-    } else {
-      effectiveArgv = ["help"];
-    }
-  }
-
-  const parsed = parseArguments(effectiveArgv);
+  const parsed = parseArguments(argv);
   if (!parsed.ok) {
     const failure = failureResult(
       "cli",
@@ -694,6 +775,33 @@ async function runCliInternal(
   }
 
   const options = parsed.options;
+  if (rootInvocation(argv)) {
+    const homeCapabilities = capabilities(options, cliConfig(options), io, "error", options.format);
+    if (options.format === "human" && homeCapabilities.interactive) {
+      return await runInteractiveSession(io, dependencies, homeCapabilities, signal);
+    }
+    if (options.format !== "human") {
+      const overview = failureResult("overview", [], dependencies);
+      const result = {
+        ...overview,
+        ok: true,
+        data: {
+          name: "ADB Ready",
+          version: VERSION,
+          purpose: "Prepare and operate one Android development target for humans, agents, and CI.",
+          entrypoints: ["dev", "run", "agent setup", "mcp"],
+          mcp: { transport: "stdio", toolSchema: "schema/agent-tools-v1.json" },
+        },
+      };
+      renderResult(result, {
+        format: options.format,
+        capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+        sink: io.output,
+        verbose: options.verbose,
+      });
+      return ExitCode.Success;
+    }
+  }
   if (options.command === "help") {
     io.output.write(options.helpTarget === undefined ? HELP : COMMAND_HELP[options.helpTarget]);
     return ExitCode.Success;
@@ -764,8 +872,12 @@ async function runCliInternal(
   ) {
     const storeOptions =
       dependencies.sessionStore === false
-        ? { env: io.env }
-        : (dependencies.sessionStore ?? { env: io.env });
+        ? { env: io.env, projectRoot: io.cwd, allProjects: options.allProjects }
+        : {
+            ...(dependencies.sessionStore ?? { env: io.env }),
+            projectRoot: dependencies.sessionStore?.projectRoot ?? io.cwd,
+            allProjects: options.allProjects,
+          };
     const execution =
       options.command === "context"
         ? await runContextCommand(
@@ -784,6 +896,14 @@ async function runCliInternal(
               options.sessionId,
               storeOptions,
               dependencies,
+              {
+                ...(options.sessionStatus === undefined ? {} : { status: options.sessionStatus }),
+                ...(options.sessionSinceMs === undefined
+                  ? {}
+                  : { sinceMs: options.sessionSinceMs }),
+                ...(options.preset === undefined ? {} : { preset: options.preset }),
+                ...(options.sessionLimit === undefined ? {} : { limit: options.sessionLimit }),
+              },
             )
           : await runProblemsCommand(options.sessionId, storeOptions, dependencies);
     renderResult(execution.result, {
@@ -834,6 +954,7 @@ async function runCliInternal(
       options.command === "apps" ||
       options.command === "capture" ||
       options.command === "dev" ||
+      options.command === "run" ||
       options.command === "devices" ||
       options.command === "inspect" ||
       options.command === "logs" ||
@@ -844,6 +965,7 @@ async function runCliInternal(
       options.command === "apps" ||
       options.command === "capture" ||
       options.command === "dev" ||
+      options.command === "run" ||
       options.command === "inspect" ||
       options.command === "logs" ||
       options.command === "open" ||
@@ -891,6 +1013,8 @@ async function runCliInternal(
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
     ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
     timeoutMs: values.timeoutMs,
+    uiTimeoutMs:
+      loaded.config.provenance.timeoutMs?.source === "default" ? 15_000 : values.timeoutMs,
     ...(options.device === undefined ? {} : { targetSelector: options.device }),
     ...(options.transportId === undefined ? {} : { targetTransportId: options.transportId }),
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
@@ -901,23 +1025,35 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
+  const offlineDevPlan =
+    (options.command === "dev" || options.command === "run") &&
+    options.dryRun &&
+    !options.select &&
+    options.device === undefined &&
+    options.transportId === undefined &&
+    !options.remembered;
+  let preparedSelection: SelectedTarget | undefined;
   if (
     (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||
     options.command === "apps" ||
     options.command === "capture" ||
-    options.command === "dev" ||
+    ((options.command === "dev" || options.command === "run") && !offlineDevPlan) ||
     options.command === "inspect" ||
     options.command === "logs" ||
     options.command === "open" ||
     options.command === "ui" ||
-    (options.command === "ports" && options.select)
+    options.command === "ports"
   ) {
     let inventory = await runDevices(config, commandDependencies, signal);
     let selectable =
       inventory.result.data?.targets.filter((target) =>
         target.transports.some(({ stable, state }) => stable && state === "device"),
       ) ?? [];
-    if (options.command === "dev" && selectable.length === 0 && !options.dryRun) {
+    if (
+      (options.command === "dev" || options.command === "run") &&
+      selectable.length === 0 &&
+      !options.dryRun
+    ) {
       const acquisition = planTargetAcquisition({
         ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
         ...(values.targetAliases === undefined ? {} : { aliases: values.targetAliases }),
@@ -940,7 +1076,7 @@ async function runCliInternal(
         const connectedData = connected.result.data;
         if (!connected.result.ok || connectedData === null || !("serial" in connectedData)) {
           renderResult(
-            { ...connected.result, command: "dev" },
+            { ...connected.result, command: options.command },
             {
               format: options.format,
               capabilities: errorCapabilities,
@@ -965,6 +1101,7 @@ async function runCliInternal(
         options.command === "apps" ||
         options.command === "capture" ||
         options.command === "dev" ||
+        options.command === "run" ||
         options.command === "inspect" ||
         options.command === "logs" ||
         options.command === "open" ||
@@ -989,7 +1126,8 @@ async function runCliInternal(
         return selected.exitCode;
       }
     } else {
-      const transport = selected.result.data.selected.transport;
+      preparedSelection = selected.result.data.selected;
+      const transport = preparedSelection.transport;
       if (transport.transportId === undefined) {
         config.targetSelector = transport.serial;
       } else {
@@ -1131,6 +1269,68 @@ async function runCliInternal(
     }
     pairingCode = input.value;
   }
+  let targetLease: TargetLeaseHandle | undefined;
+  if (
+    requiresTargetLease(options) &&
+    preparedSelection !== undefined &&
+    dependencies.targetLease !== false
+  ) {
+    const acquired = await acquireTargetLease(
+      {
+        targetIdentity:
+          preparedSelection.target.hardwareSerial ??
+          preparedSelection.target.id ??
+          preparedSelection.transport.serial,
+        projectRoot: io.cwd,
+        purpose:
+          options.command === "app" ? `app ${options.appAction ?? "mutation"}` : options.command,
+      },
+      { env: io.env, ...(dependencies.targetLease ?? {}) },
+    );
+    if (!acquired.ok) {
+      const failure = failureResult(
+        options.command,
+        [
+          {
+            code:
+              acquired.code === "TARGET_BUSY"
+                ? ProblemCode.TargetBusy
+                : ProblemCode.TargetLeaseUnavailable,
+            category: "target.lease",
+            severity: "error",
+            summary: acquired.message,
+            detail:
+              acquired.code === "TARGET_BUSY"
+                ? "Wait for the owning workflow to finish, or select another Android target. Expired leases are recovered automatically."
+                : "Check the per-user state directory permissions, then retry.",
+            retryable: true,
+            evidence:
+              acquired.owner === undefined
+                ? []
+                : [
+                    { source: "target.lease", field: "purpose", value: acquired.owner.purpose },
+                    {
+                      source: "target.lease",
+                      field: "projectFingerprint",
+                      value: acquired.owner.projectFingerprint,
+                    },
+                    {
+                      source: "target.lease",
+                      field: "expiresAt",
+                      value: acquired.owner.expiresAt,
+                    },
+                  ],
+            actions: [],
+            correlation: { commandId: "target-lease", targetId: preparedSelection.target.id },
+          },
+        ],
+        dependencies,
+      );
+      renderFailure(failure, options.format, io);
+      return ExitCode.Target;
+    }
+    targetLease = acquired.lease;
+  }
   const progress =
     options.format === "human" && !options.quiet && options.command !== "logs"
       ? new ProgressRenderer({
@@ -1150,6 +1350,7 @@ async function runCliInternal(
     | CommandExecution<InspectAppData>
     | CommandExecution<InspectUiData>
     | CommandExecution<UiActionData>
+    | CommandExecution<AutomationRunData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
@@ -1209,7 +1410,7 @@ async function runCliInternal(
                     : { location: loaded.config.provenance.appPackage.location }),
                 },
               }),
-          ...(options.artifactPath === undefined ? {} : { artifactPath: options.artifactPath }),
+          ...(options.artifactPaths === undefined ? {} : { artifactPaths: options.artifactPaths }),
           ...(options.activity === undefined ? {} : { activity: options.activity }),
           ...(options.replace === undefined ? {} : { replace: options.replace }),
           ...(options.grantRuntimePermissions === undefined
@@ -1316,80 +1517,99 @@ async function runCliInternal(
         commandDependencies,
         signal,
       );
-    } else if (options.command === "dev") {
-      execution = await runDev(
-        {
-          cwd: io.cwd,
-          ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
-          ...(values.packageManager === undefined ? {} : { packageManager: values.packageManager }),
-          ...(values.devCommand === undefined ? {} : { command: values.devCommand }),
-          ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
-          ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
-          ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
-          ...(values.devWatch === undefined ? {} : { watch: values.devWatch }),
-          recovery: {
-            ...(values.recoveryMaxAttempts === undefined
-              ? {}
-              : { maxAttempts: values.recoveryMaxAttempts }),
-            ...(values.recoveryInitialDelayMs === undefined
-              ? {}
-              : { initialDelayMs: values.recoveryInitialDelayMs }),
-            ...(values.recoveryMaxDelayMs === undefined
-              ? {}
-              : { maxDelayMs: values.recoveryMaxDelayMs }),
-            ...(values.recoveryTotalTimeoutMs === undefined
-              ? {}
-              : { totalTimeoutMs: values.recoveryTotalTimeoutMs }),
-          },
-          ...(values.devHooks === undefined ? {} : { hooks: values.devHooks }),
-          journal: {
-            ...(values.journalMaxEntries === undefined
-              ? {}
-              : { maxEntries: values.journalMaxEntries }),
-            ...(values.journalMaxBytes === undefined ? {} : { maxBytes: values.journalMaxBytes }),
-            ...(values.journalSources === undefined ? {} : { sources: values.journalSources }),
-            ...(values.journalMinimumSeverity === undefined
-              ? {}
-              : { minimumSeverity: values.journalMinimumSeverity }),
-            ...(values.journalRedactEnvironment === undefined
-              ? {}
-              : {
-                  redaction: {
-                    additionalLiterals: values.journalRedactEnvironment.flatMap((name) => {
-                      const value = io.env[name];
-                      return value === undefined || value === "" ? [] : [value];
-                    }),
-                  },
-                }),
-          },
-          childStdin: errorCapabilities.interactive ? "inherit" : "ignore",
-          sessionStore:
-            values.sessionPersist === false || dependencies.sessionStore === false
-              ? false
-              : (dependencies.sessionStore ?? {
-                  env: io.env,
-                  ...(values.sessionMaxSessions === undefined
-                    ? {}
-                    : { maxSessions: values.sessionMaxSessions }),
-                  ...(values.sessionMaxAgeDays === undefined
-                    ? {}
-                    : { maxAgeDays: values.sessionMaxAgeDays }),
-                  ...(values.sessionMaxBytes === undefined
-                    ? {}
-                    : { maxBytes: values.sessionMaxBytes }),
-                }),
-          ...(options.format === "human" && !options.quiet
-            ? {
-                onChildLine: (stream: "stderr" | "stdout", line: string) => {
-                  io.error.write(`${renderChildStreamLine(stream, line, errorCapabilities)}\n`);
-                },
-              }
-            : {}),
+    } else if (options.command === "dev" || options.command === "run") {
+      const devOptions = {
+        cwd: io.cwd,
+        ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
+        ...(values.packageManager === undefined ? {} : { packageManager: values.packageManager }),
+        ...(values.devCommand === undefined ? {} : { command: values.devCommand }),
+        ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
+        ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
+        ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
+        ...(values.devWatch === undefined ? {} : { watch: values.devWatch }),
+        ...(values.devReadiness === undefined ? {} : { readiness: values.devReadiness }),
+        ...(options.command === "run"
+          ? {
+              mode: "run" as const,
+              verification: {
+                command: options.runCommand ?? { executable: "", args: [] },
+                timeoutMs: options.runTimeoutMs ?? 15 * 60_000,
+              },
+            }
+          : {}),
+        recovery: {
+          ...(values.recoveryMaxAttempts === undefined
+            ? {}
+            : { maxAttempts: values.recoveryMaxAttempts }),
+          ...(values.recoveryInitialDelayMs === undefined
+            ? {}
+            : { initialDelayMs: values.recoveryInitialDelayMs }),
+          ...(values.recoveryMaxDelayMs === undefined
+            ? {}
+            : { maxDelayMs: values.recoveryMaxDelayMs }),
+          ...(values.recoveryTotalTimeoutMs === undefined
+            ? {}
+            : { totalTimeoutMs: values.recoveryTotalTimeoutMs }),
         },
-        config,
-        commandDependencies,
-        signal,
-      );
+        ...(values.devHooks === undefined ? {} : { hooks: values.devHooks }),
+        journal: {
+          ...(values.journalMaxEntries === undefined
+            ? {}
+            : { maxEntries: values.journalMaxEntries }),
+          ...(values.journalMaxBytes === undefined ? {} : { maxBytes: values.journalMaxBytes }),
+          ...(values.journalSources === undefined ? {} : { sources: values.journalSources }),
+          ...(values.journalMinimumSeverity === undefined
+            ? {}
+            : { minimumSeverity: values.journalMinimumSeverity }),
+          ...(values.journalRedactEnvironment === undefined
+            ? {}
+            : {
+                redaction: {
+                  additionalLiterals: values.journalRedactEnvironment.flatMap((name) => {
+                    const value = io.env[name];
+                    return value === undefined || value === "" ? [] : [value];
+                  }),
+                },
+              }),
+        },
+        childStdin: errorCapabilities.interactive ? ("inherit" as const) : ("ignore" as const),
+        sessionStore:
+          values.sessionPersist === false || dependencies.sessionStore === false
+            ? false
+            : (dependencies.sessionStore ?? {
+                env: io.env,
+                ...(values.sessionMaxSessions === undefined
+                  ? {}
+                  : { maxSessions: values.sessionMaxSessions }),
+                ...(values.sessionMaxAgeDays === undefined
+                  ? {}
+                  : { maxAgeDays: values.sessionMaxAgeDays }),
+                ...(values.sessionMaxBytes === undefined
+                  ? {}
+                  : { maxBytes: values.sessionMaxBytes }),
+              }),
+        ...(options.format === "human" && !options.quiet
+          ? {
+              onChildLine: (stream: "stderr" | "stdout", line: string) => {
+                io.error.write(`${renderChildStreamLine(stream, line, errorCapabilities)}\n`);
+              },
+            }
+          : {}),
+      } satisfies DevOptions;
+      const devExecution = offlineDevPlan
+        ? await runDevOfflinePlan(devOptions, commandDependencies)
+        : await runDev(devOptions, config, commandDependencies, signal);
+      execution =
+        options.command === "run" && !options.dryRun
+          ? (
+              await writeEvidenceBundle(devExecution, {
+                cwd: io.cwd,
+                ...(io.env.GITHUB_STEP_SUMMARY === undefined
+                  ? {}
+                  : { githubStepSummaryPath: io.env.GITHUB_STEP_SUMMARY }),
+              })
+            ).execution
+          : devExecution;
     } else if (options.command === "devices") {
       execution = await runDevices(config, commandDependencies, signal);
     } else if (options.command === "connect") {
@@ -1453,6 +1673,7 @@ async function runCliInternal(
   } finally {
     progress?.dispose();
     events?.dispose();
+    await targetLease?.release();
   }
 
   if (options.command === "devices" && options.select) {
@@ -1488,9 +1709,10 @@ async function runCliInternal(
           ...(data.hardwareSerial === undefined ? {} : { hardwareSerial: data.hardwareSerial }),
         };
       }
-    } else if (options.command === "dev") {
-      const data = execution.result.data as DevData | null;
-      if (data !== null) {
+    } else if (options.command === "dev" || options.command === "run") {
+      const raw = execution.result.data as DevData | AutomationRunData | null;
+      const data = raw !== null && "session" in raw ? raw.session : raw;
+      if (data?.selected !== undefined) {
         selectedTarget = {
           serial: data.selected.transport.serial,
           ...(data.selected.target.hardwareSerial === undefined

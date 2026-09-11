@@ -35,6 +35,7 @@ describe("parseArguments", () => {
         pairingCodeStdin: false,
         remembered: false,
         dryRun: false,
+        allProjects: false,
       },
     });
   });
@@ -195,6 +196,39 @@ describe("parseArguments", () => {
     });
   });
 
+  test("requires and preserves one bounded run command", () => {
+    expect(
+      parseArguments([
+        "run",
+        "--preset",
+        "expo",
+        "--run-timeout",
+        "10m",
+        "--dry-run",
+        "--",
+        "maestro",
+        "test",
+        ".maestro/smoke.yaml",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "run",
+        preset: "expo",
+        runTimeoutMs: 600_000,
+        dryRun: true,
+        runCommand: {
+          executable: "maestro",
+          args: ["test", ".maestro/smoke.yaml"],
+        },
+      },
+    });
+    expect(parseArguments(["run"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("parses local session history and problem inspection", () => {
     expect(parseArguments(["sessions"])).toMatchObject({
       ok: true,
@@ -218,6 +252,47 @@ describe("parseArguments", () => {
       options: { command: "problems", sessionId: "session-42", format: "plain" },
     });
     expect(parseArguments(["sessions", "unknown"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
+  test("requires an explicit session command for cross-project history", () => {
+    expect(parseArguments(["sessions", "list", "--all-projects", "--json"])).toMatchObject({
+      ok: true,
+      options: { command: "sessions", allProjects: true },
+    });
+    expect(parseArguments(["devices", "--all-projects"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+      option: "--all-projects",
+    });
+  });
+
+  test("parses bounded session history filters", () => {
+    expect(
+      parseArguments([
+        "sessions",
+        "list",
+        "--status",
+        "failed",
+        "--since",
+        "2h",
+        "--preset",
+        "expo",
+        "--limit",
+        "5",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        sessionStatus: "failed",
+        sessionSinceMs: 7_200_000,
+        preset: "expo",
+        sessionLimit: 5,
+      },
+    });
+    expect(parseArguments(["sessions", "show", "--limit", "5"])).toMatchObject({
       ok: false,
       code: "CLI_USAGE",
     });
@@ -299,6 +374,7 @@ describe("parseArguments", () => {
         "app",
         "install",
         "build/app.apk",
+        "build/config.arm64_v8a.apk",
         "--package",
         "com.example.app",
         "--replace",
@@ -310,6 +386,7 @@ describe("parseArguments", () => {
         command: "app",
         appAction: "install",
         artifactPath: "build/app.apk",
+        artifactPaths: ["build/app.apk", "build/config.arm64_v8a.apk"],
         appId: "com.example.app",
         replace: true,
         grantRuntimePermissions: true,
@@ -451,6 +528,10 @@ describe("parseArguments", () => {
   });
 
   test("parses bounded UI actions and rejects ambiguous input", () => {
+    expect(parseArguments(["ui", "audit"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "audit" } },
+    });
     expect(parseArguments(["ui", "tap", "ui:012345abcdef:4", "--dry-run"])).toMatchObject({
       ok: true,
       options: {
@@ -463,6 +544,28 @@ describe("parseArguments", () => {
       ok: true,
       options: { uiRequest: { action: "long-press", x: 120, y: 340 } },
     });
+    expect(parseArguments(["ui", "tap", "text=Continue"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "tap", selector: "text=Continue" } },
+    });
+    expect(parseArguments(["ui", "find", "class=android.widget.Button"])).toMatchObject({
+      ok: true,
+      options: {
+        uiRequest: { action: "find", selector: "class=android.widget.Button" },
+      },
+    });
+    expect(parseArguments(["ui", "get", "id=com.example:id/email"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "get", selector: "id=com.example:id/email" } },
+    });
+    expect(parseArguments(["ui", "assert", "text=Done", "--state", "gone"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "assert", selector: "text=Done", state: "gone" } },
+    });
+    expect(parseArguments(["ui", "compare", "a".repeat(64)])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "compare", digest: "a".repeat(64) } },
+    });
     expect(parseArguments(["ui", "swipe", "up", "--device", "pixel"])).toMatchObject({
       ok: true,
       options: { device: "pixel", uiRequest: { action: "swipe", direction: "up" } },
@@ -470,6 +573,33 @@ describe("parseArguments", () => {
     expect(parseArguments(["ui", "swipe", "10", "20", "30", "40"])).toMatchObject({
       ok: true,
       options: { uiRequest: { action: "swipe", x1: 10, y1: 20, x2: 30, y2: 40 } },
+    });
+    expect(parseArguments(["ui", "scroll", "up", "id=com.example:id/list"])).toMatchObject({
+      ok: true,
+      options: {
+        uiRequest: {
+          action: "scroll",
+          direction: "up",
+          selector: "id=com.example:id/list",
+        },
+      },
+    });
+    expect(
+      parseArguments(["ui", "fill", "id=com.example:id/email", "person@example.com", "--submit"]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        uiRequest: {
+          action: "fill",
+          selector: "id=com.example:id/email",
+          text: "person@example.com",
+          submit: true,
+        },
+      },
+    });
+    expect(parseArguments(["ui", "clear", "id=com.example:id/email"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "clear", selector: "id=com.example:id/email" } },
     });
     expect(parseArguments(["ui", "type", "hello world", "--submit"])).toMatchObject({
       ok: true,
@@ -611,7 +741,7 @@ describe("parseArguments", () => {
   });
 
   test("rejects invalid or misplaced development options", () => {
-    expect(parseArguments(["dev", "--preset", "flutter"])).toMatchObject({
+    expect(parseArguments(["dev", "--preset", "native-script"])).toMatchObject({
       ok: false,
       code: "CLI_INVALID_VALUE",
     });
@@ -657,6 +787,17 @@ describe("parseArguments", () => {
       ok: false,
       code: "CLI_INVALID_OPTION",
       option: "--json",
+    });
+  });
+
+  test("suggests high-confidence command and option corrections", () => {
+    expect(parseArguments(["deev"])).toMatchObject({
+      ok: false,
+      message: "Unknown command: deev. Did you mean dev?",
+    });
+    expect(parseArguments(["devices", "--jsn"])).toMatchObject({
+      ok: false,
+      message: "Unknown option: --jsn. Did you mean --json?",
     });
   });
 

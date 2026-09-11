@@ -119,8 +119,11 @@ try {
     const planPayload = JSON.parse(plan.stdout);
     if (
       planPayload.data?.status !== "planned" ||
-      planPayload.data?.plan?.steps?.[0]?.args?.join(" ") !==
-        "-t 1 reverse --no-rebind tcp:8081 tcp:8081" ||
+      planPayload.data?.planScope !== "offline" ||
+      planPayload.data?.plan?.steps
+        ?.map(/** @param {{ id?: string }} step */ (step) => step.id)
+        .join(",") !== "acquire-target,reverse-1,start-child" ||
+      planPayload.data?.selected !== undefined ||
       planPayload.data?.child !== undefined
     ) {
       throw new Error(`${runtime.name} dev returned an invalid dry-run plan`);

@@ -9,6 +9,8 @@ const cases = [
   ["expo", "expo"],
   ["react-native", "react-native"],
   ["gradle", "gradle"],
+  ["flutter", "flutter"],
+  ["capacitor", "capacitor"],
   ["custom", "custom"],
 ] as const;
 

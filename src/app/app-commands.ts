@@ -54,6 +54,7 @@ export interface AppCommandRequest {
   applicationId?: string;
   configuredPackage?: { value: string; location?: string };
   artifactPath?: string;
+  artifactPaths?: string[];
   activity?: string;
   replace?: boolean;
   grantRuntimePermissions?: boolean;
@@ -89,6 +90,7 @@ export interface AppMutationData {
   applicationId: string;
   activity?: string;
   artifactPath?: string;
+  artifactPaths?: string[];
   verified: boolean;
   status:
     | "cleared"
@@ -148,7 +150,7 @@ function mutationPlanData(
   ready: ReadyTarget,
   applicationId: string,
   steps: OperationPlan["steps"],
-  extras: Pick<AppMutationData, "activity" | "artifactPath"> = {},
+  extras: Pick<AppMutationData, "activity" | "artifactPath" | "artifactPaths"> = {},
 ): AppMutationData {
   return {
     action,
@@ -676,25 +678,37 @@ export async function runApp(
   if (ready === undefined) return finish<AppData>(current, null, problems);
 
   if (request.action === "install") {
-    const artifact =
-      request.artifactPath === undefined
-        ? undefined
-        : path.resolve(request.cwd, request.artifactPath);
-    if (artifact === undefined || path.extname(artifact).toLowerCase() !== ".apk") {
+    const requestedArtifacts =
+      request.artifactPaths ?? (request.artifactPath === undefined ? [] : [request.artifactPath]);
+    const artifacts = [
+      ...new Set(requestedArtifacts.map((item) => path.resolve(request.cwd, item))),
+    ];
+    if (
+      artifacts.length === 0 ||
+      artifacts.some((artifact) => path.extname(artifact).toLowerCase() !== ".apk")
+    ) {
       problems.push(
         problem(
           "APP_ARTIFACT_INVALID",
           "input.app.artifact",
-          "Install requires one local .apk file.",
-          "Pass the path to an ordinary APK. Split APK sets and app bundles are not accepted by this command.",
+          "Install requires one or more local .apk files.",
+          "Pass one APK or every APK in one split set. AAB and .apks archives must be converted to device-specific APKs first.",
           current.commandId,
         ),
       );
       return finish<AppData>(current, null, problems);
     }
-    try {
-      if (!(await stat(artifact)).isFile()) throw new Error("not a file");
-    } catch {
+    const unreadable = (
+      await Promise.all(
+        artifacts.map(async (artifact) => ({
+          artifact,
+          valid: await stat(artifact)
+            .then((value) => value.isFile())
+            .catch(() => false),
+        })),
+      )
+    ).find(({ valid }) => !valid)?.artifact;
+    if (unreadable !== undefined) {
       problems.push(
         problem(
           "APP_ARTIFACT_NOT_FOUND",
@@ -702,11 +716,12 @@ export async function runApp(
           "The APK file could not be read.",
           "Check the path and permissions, then retry.",
           current.commandId,
-          [{ source: "input", field: "path", value: redactText(artifact).value }],
+          [{ source: "input", field: "path", value: redactText(unreadable).value }],
         ),
       );
       return finish<AppData>(current, null, problems);
     }
+    const artifact = artifacts[0] as string;
     const before = await packages(ready, "user", signal);
     if (!succeeded(before.process)) {
       problems.push(operationProblem("packages-list", before, current.commandId));
@@ -725,10 +740,10 @@ export async function runApp(
         return finish<AppData>(current, null, problems);
       }
       const installArgs = [
-        "install",
+        artifacts.length === 1 ? "install" : "install-multiple",
         ...(request.replace === true ? ["-r"] : []),
         ...(request.grantRuntimePermissions === true ? ["-g"] : []),
-        artifact,
+        ...artifacts,
       ];
       return finish(
         current,
@@ -738,8 +753,11 @@ export async function runApp(
           expectedBefore.applicationId,
           [
             planStep(ready, config, {
-              id: "install-apk",
-              title: `Install ${path.basename(artifact)}`,
+              id: artifacts.length === 1 ? "install-apk" : "install-split-apks",
+              title:
+                artifacts.length === 1
+                  ? `Install ${path.basename(artifact)}`
+                  : `Install ${String(artifacts.length)} split APKs`,
               risk: "device-reversible",
               args: installArgs,
             }),
@@ -750,7 +768,10 @@ export async function runApp(
               args: ["shell", "dumpsys", "package", expectedBefore.applicationId],
             }),
           ],
-          { artifactPath: redactText(artifact).value },
+          {
+            artifactPath: redactText(artifact).value,
+            artifactPaths: artifacts.map((item) => redactText(item).value),
+          },
         ),
         problems,
       );
@@ -764,10 +785,10 @@ export async function runApp(
       "app-install",
       `Installing ${path.basename(artifact)}`,
       [
-        "install",
+        artifacts.length === 1 ? "install" : "install-multiple",
         ...(request.replace === true ? ["-r"] : []),
         ...(request.grantRuntimePermissions === true ? ["-g"] : []),
-        artifact,
+        ...artifacts,
       ],
       (output) => output.trim(),
       signal,
@@ -826,6 +847,7 @@ export async function runApp(
         selected: ready.selected,
         applicationId: resolved.applicationId,
         artifactPath: redactText(artifact).value,
+        artifactPaths: artifacts.map((item) => redactText(item).value),
         verified,
         status: verified ? "installed" : "unverified",
       },

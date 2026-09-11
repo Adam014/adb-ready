@@ -6,5 +6,6 @@
 /coverage/
 /dist/
 /node_modules/
+/.adb-ready/
 .DS_Store
 *.log

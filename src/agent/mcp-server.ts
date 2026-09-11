@@ -1,5 +1,7 @@
-import { realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { type CallToolResult, McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
@@ -8,6 +10,7 @@ import { runApp, runOpen } from "../app/app-commands.js";
 import {
   type CommandConfig,
   type CommandDependencies,
+  runConnect,
   runDevices,
   runDoctor,
 } from "../app/commands.js";
@@ -22,11 +25,16 @@ import type { ResultEnvelope } from "../domain/contracts.js";
 import { runCapture } from "../evidence/capture.js";
 import { runInspectApp, runInspectUi } from "../evidence/inspect.js";
 import { runUiAction } from "../evidence/ui-actions.js";
+import { planTargetAcquisition } from "../session/target-acquisition.js";
+import { acquireTargetLease, type TargetLeaseOptions } from "../state/target-lease.js";
 import { selectTarget } from "../target/selection.js";
+import { getAgentDevTask, startAgentDevTask, stopAgentDevTask } from "./dev-task.js";
 import { SerialTaskQueue } from "./serial-task-queue.js";
 
 interface BoundTarget {
+  handle: string;
   serial: string;
+  identity: string;
   transportId?: string;
 }
 
@@ -34,7 +42,9 @@ export interface McpServerOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   dependencies?: CommandDependencies;
+  targetLease?: false | TargetLeaseOptions;
   version?: string;
+  cliPath?: string;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -51,13 +61,63 @@ function toolResult(result: ResultEnvelope<unknown>): CallToolResult {
 }
 
 function inputFailure(code: string, message: string): CallToolResult {
-  const structuredContent = { ok: false, problems: [{ code, message }] };
-  return {
-    content: [{ type: "text", text: JSON.stringify(structuredContent) }],
-    structuredContent,
-    isError: true,
-  };
+  const timestamp = new Date().toISOString();
+  const commandId = randomUUID();
+  return toolResult({
+    schemaVersion: 1,
+    command: "mcp",
+    commandId,
+    ok: false,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    durationMs: 0,
+    data: null,
+    problems: [
+      {
+        code,
+        category: "input.mcp",
+        severity: "error",
+        summary: message,
+        detail: message,
+        retryable: false,
+        evidence: [],
+        actions: [],
+        correlation: { commandId },
+      },
+    ],
+  });
 }
+
+function successResult(command: string, data: Record<string, unknown>): CallToolResult {
+  const timestamp = new Date().toISOString();
+  return toolResult({
+    schemaVersion: 1,
+    command,
+    commandId: randomUUID(),
+    ok: true,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    durationMs: 0,
+    data,
+    problems: [],
+  });
+}
+
+const resultEnvelopeSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    command: z.string(),
+    commandId: z.string(),
+    ok: z.boolean(),
+    startedAt: z.string(),
+    finishedAt: z.string(),
+    durationMs: z.number().nonnegative(),
+    data: z.unknown().nullable(),
+    problems: z.array(z.object({ code: z.string() }).passthrough()),
+  })
+  .passthrough();
+
+const targetHandleShape = { targetHandle: z.uuid().optional() };
 
 function commandConfig(
   loaded: LoadedConfig,
@@ -71,6 +131,7 @@ function commandConfig(
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
     ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
     timeoutMs: values.timeoutMs,
+    uiTimeoutMs: loaded.provenance.timeoutMs?.source === "default" ? 15_000 : values.timeoutMs,
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
     ...(bound?.transportId !== undefined
       ? { targetTransportId: bound.transportId }
@@ -81,20 +142,6 @@ function commandConfig(
           : selector === undefined
             ? {}
             : { targetSelector: selector }),
-  };
-}
-
-function selectedTarget(data: unknown): BoundTarget | undefined {
-  if (typeof data !== "object" || data === null || !("selected" in data)) return undefined;
-  const selected = (
-    data as { selected?: { transport?: { serial?: unknown; transportId?: unknown } } }
-  ).selected;
-  if (typeof selected?.transport?.serial !== "string") return undefined;
-  return {
-    serial: selected.transport.serial,
-    ...(typeof selected.transport.transportId === "string"
-      ? { transportId: selected.transport.transportId }
-      : {}),
   };
 }
 
@@ -120,12 +167,18 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     },
   );
   const load = async () => await loadConfig({ cwd: options.cwd, env: options.env });
-  const sessionStore = { env: options.env };
+  const sessionStore = { env: options.env, projectRoot: options.cwd };
   const register = <Shape extends z.ZodRawShape>(
     name: string,
     description: string,
     schema: z.ZodObject<Shape>,
-    annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean },
+    annotations: {
+      readOnlyHint: boolean;
+      destructiveHint: boolean;
+      idempotentHint: boolean;
+      targetBound?: boolean;
+      leaseTarget?: boolean;
+    },
     handler: (
       input: z.infer<z.ZodObject<Shape>>,
       signal: AbortSignal,
@@ -137,7 +190,13 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       {
         description,
         inputSchema: schema,
-        annotations: { ...annotations, openWorldHint: false },
+        outputSchema: resultEnvelopeSchema,
+        annotations: {
+          readOnlyHint: annotations.readOnlyHint,
+          destructiveHint: annotations.destructiveHint,
+          idempotentHint: annotations.idempotentHint,
+          openWorldHint: false,
+        },
       },
       async (input, context) =>
         await toolQueue.run(async () => {
@@ -148,7 +207,41 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
               loaded.errors.map(({ code, message }) => `${code}: ${message}`).join("; "),
             );
           }
-          return await handler(input, context.mcpReq.signal, loaded.config);
+          const requestedHandle = (input as Record<string, unknown>).targetHandle;
+          if ((annotations.targetBound === true || annotations.leaseTarget === true) && !bound) {
+            return inputFailure(
+              "MCP_TARGET_NOT_BOUND",
+              "Call ensure_ready before a target-bound tool.",
+            );
+          }
+          if (
+            requestedHandle !== undefined &&
+            (bound === undefined || requestedHandle !== bound.handle)
+          ) {
+            return inputFailure(
+              "MCP_TARGET_HANDLE_INVALID",
+              "The target handle is stale or belongs to another MCP connection. Call ensure_ready again.",
+            );
+          }
+          const shouldLease = annotations.leaseTarget ?? !annotations.readOnlyHint;
+          if (!shouldLease || options.targetLease === false) {
+            return await handler(input, context.mcpReq.signal, loaded.config);
+          }
+          if (bound === undefined) throw new Error("Target lease requested without a bound target");
+          const acquired = await acquireTargetLease(
+            {
+              targetIdentity: bound.identity,
+              projectRoot: options.cwd,
+              purpose: `mcp:${name}`,
+            },
+            { env: options.env, ...(options.targetLease ?? {}) },
+          );
+          if (!acquired.ok) return inputFailure(acquired.code, acquired.message);
+          try {
+            return await handler(input, context.mcpReq.signal, loaded.config);
+          } finally {
+            await acquired.lease.release();
+          }
         }),
     );
   };
@@ -171,12 +264,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "ensure_ready",
-    "Select exactly one ready Android target and bind it for this MCP connection.",
+    "Select exactly one ready Android target, safely reconnect one unambiguous paired wireless target when needed, and bind it for this MCP connection.",
     z.object({
       device: z.string().min(1).optional(),
       transportId: z.string().min(1).optional(),
     }),
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      leaseTarget: false,
+    },
     async ({ device, transportId }, signal, loaded) => {
       if (device !== undefined && transportId !== undefined) {
         return inputFailure(
@@ -194,19 +292,65 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
           `This connection is bound to ${bound.serial}.`,
         );
       }
-      const execution = await runDevices(
+      let execution = await runDevices(
         commandConfig(loaded, bound, device, transportId),
         dependencies,
         signal,
       );
-      if (!execution.result.ok || execution.result.data === null) {
+      if (execution.result.data === null) {
         return toolResult(execution.result);
       }
-      const data = execution.result.data;
-      const selection =
+      let data = execution.result.data;
+      let selection =
         data.selected === undefined
           ? selectTarget(data.targets)
           : { kind: "selected" as const, selection: data.selected };
+      if (selection.kind !== "selected" && transportId === undefined) {
+        const acquisition = planTargetAcquisition({
+          ...(device === undefined ? {} : { selector: device }),
+          ...(loaded.values.targetAliases === undefined
+            ? {}
+            : { aliases: loaded.values.targetAliases }),
+          services: data.discovery.mdns.services,
+        });
+        if (
+          acquisition.kind === "connect" &&
+          (device === undefined || acquisition.reason === "explicit-endpoint")
+        ) {
+          const connected = await runConnect(
+            acquisition.endpoint,
+            {
+              ...commandConfig(loaded),
+              ...(acquisition.discovered
+                ? {
+                    endpointWasDiscovered: true,
+                    discoveredEndpointCandidates: acquisition.candidates,
+                  }
+                : {}),
+            },
+            dependencies,
+            signal,
+          );
+          if (
+            !connected.result.ok ||
+            connected.result.data === null ||
+            !("serial" in connected.result.data)
+          ) {
+            return toolResult(connected.result);
+          }
+          execution = await runDevices(
+            commandConfig(loaded, undefined, connected.result.data.serial),
+            dependencies,
+            signal,
+          );
+          if (execution.result.data === null) return toolResult(execution.result);
+          data = execution.result.data;
+          selection =
+            data.selected === undefined
+              ? selectTarget(data.targets)
+              : { kind: "selected" as const, selection: data.selected };
+        }
+      }
       if (selection.kind !== "selected") {
         return inputFailure(
           "MCP_TARGET_SELECTION_REQUIRED",
@@ -214,19 +358,99 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         );
       }
       bound = {
+        handle: bound?.handle ?? randomUUID(),
         serial: selection.selection.transport.serial,
+        identity:
+          selection.selection.target.hardwareSerial ??
+          selection.selection.target.id ??
+          selection.selection.transport.serial,
         ...(selection.selection.transport.transportId === undefined
           ? {}
           : { transportId: selection.selection.transport.transportId }),
       };
       return toolResult({
         ...execution.result,
-        data: { ...data, selected: selection.selection },
+        data: { ...data, selected: selection.selection, targetHandle: bound.handle },
       });
     },
   );
 
+  register(
+    "start_dev_session",
+    "Start the configured development session as a durable local process and return an opaque handle immediately.",
+    z.object({ ...targetHandleShape }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+      leaseTarget: false,
+    },
+    async () => {
+      if (bound === undefined) {
+        return inputFailure(
+          "MCP_TARGET_NOT_BOUND",
+          "Call ensure_ready before starting development.",
+        );
+      }
+      try {
+        const task = await startAgentDevTask({
+          cwd: options.cwd,
+          env: options.env,
+          cliPath: options.cliPath ?? fileURLToPath(import.meta.url),
+          serial: bound.serial,
+          targetIdentity: bound.identity,
+        });
+        return successResult("mcp start_dev_session", { task });
+      } catch {
+        return inputFailure(
+          "MCP_DEV_START_FAILED",
+          "ADB Ready could not start the managed development process.",
+        );
+      }
+    },
+  );
+  register(
+    "get_dev_session",
+    "Read the durable status of a project-scoped development-session handle after reconnects.",
+    z.object({ taskHandle: z.uuid() }),
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ taskHandle }) => {
+      const task = await getAgentDevTask(taskHandle, { cwd: options.cwd, env: options.env });
+      return task === undefined
+        ? inputFailure(
+            "MCP_DEV_TASK_NOT_FOUND",
+            "No development task with this handle exists in the current project.",
+          )
+        : successResult("mcp get_dev_session", { task });
+    },
+  );
+  register(
+    "stop_dev_session",
+    "Stop only the durable project-scoped development process owned by an opaque handle.",
+    z.object({ taskHandle: z.uuid() }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      leaseTarget: false,
+    },
+    async ({ taskHandle }) => {
+      const task = await stopAgentDevTask(taskHandle, { cwd: options.cwd, env: options.env });
+      return task === undefined
+        ? inputFailure(
+            "MCP_DEV_TASK_NOT_FOUND",
+            "No development task with this handle exists in the current project.",
+          )
+        : successResult("mcp stop_dev_session", { task });
+    },
+  );
+
   const appSchema = z.object({ applicationId: z.string().min(3).optional() });
+  const boundAppSchema = z.object({
+    ...targetHandleShape,
+    applicationId: z.string().min(3).optional(),
+  });
   register(
     "resolve_app",
     "Resolve the Android project application ID with provenance.",
@@ -246,7 +470,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -255,10 +478,16 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       `${action}_app`,
       `${action === "launch" ? "Launch" : "Restart"} the resolved app and verify it is foreground.`,
       z.object({
+        ...targetHandleShape,
         applicationId: z.string().min(3).optional(),
         activity: z.string().min(1).optional(),
       }),
-      { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        targetBound: true,
+      },
       async ({ applicationId, activity }, signal, loaded) => {
         const execution = await runApp(
           {
@@ -274,38 +503,52 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
           dependencies,
           signal,
         );
-        bound ??= selectedTarget(execution.result.data);
         return toolResult(execution.result);
       },
     );
   }
   register(
     "install_app",
-    "Install one project-local APK and verify its package. Downloads and split APKs are rejected.",
+    "Install one project-local APK or a complete split APK set and verify its package.",
     z.object({
-      path: z.string().min(1),
+      ...targetHandleShape,
+      path: z.string().min(1).optional(),
+      paths: z.array(z.string().min(1)).min(1).max(64).optional(),
       applicationId: z.string().min(3).optional(),
       replace: z.boolean().optional(),
       grantRuntimePermissions: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async (
-      { path: requested, applicationId, replace, grantRuntimePermissions },
+      { path: requested, paths: requestedSet, applicationId, replace, grantRuntimePermissions },
       signal,
       loaded,
     ) => {
-      const artifactPath = await projectFile(options.cwd, requested).catch(() => undefined);
-      if (artifactPath === undefined) {
+      if ((requested === undefined) === (requestedSet === undefined)) {
+        return inputFailure("MCP_INVALID_INPUT", "Provide exactly one of path or paths.");
+      }
+      const requestedPaths = requestedSet ?? [requested as string];
+      const artifactPaths = await Promise.all(
+        requestedPaths.map(
+          async (item) => await projectFile(options.cwd, item).catch(() => undefined),
+        ),
+      );
+      if (artifactPaths.some((item) => item === undefined)) {
         return inputFailure(
           "MCP_PATH_OUTSIDE_PROJECT",
-          "APK path must resolve inside the project.",
+          "Every APK path must resolve inside the project.",
         );
       }
       const execution = await runApp(
         {
           action: "install",
           cwd: options.cwd,
-          artifactPath,
+          artifactPaths: artifactPaths as string[],
           ...(applicationId === undefined ? {} : { applicationId }),
           ...(loaded.values.appPackage === undefined
             ? {}
@@ -317,15 +560,23 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
   register(
     "open_url",
     "Open an absolute URL and verify an explicit app handler when provided.",
-    z.object({ url: z.url(), applicationId: z.string().min(3).optional() }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    z.object({
+      ...targetHandleShape,
+      url: z.url(),
+      applicationId: z.string().min(3).optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ url, applicationId }, signal, loaded) => {
       const execution = await runOpen(
         url,
@@ -334,15 +585,19 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
   register(
     "inspect_app",
     "Return bounded sensitive app, foreground, and classified-log evidence without a screenshot.",
-    appSchema,
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    boundAppSchema,
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
     async ({ applicationId }, signal, loaded) => {
       const execution = await runInspectApp(
         {
@@ -356,7 +611,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -364,10 +618,16 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "inspect_ui",
     "Return a bounded sensitive accessibility snapshot with digest-scoped references.",
     z.object({
+      ...targetHandleShape,
       interactiveOnly: z.boolean().optional(),
       maxDepth: z.number().int().min(1).max(100).optional(),
     }),
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
     async ({ interactiveOnly, maxDepth }, signal, loaded) => {
       const execution = await runInspectUi(
         {
@@ -378,20 +638,158 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
+  const uiSelectorSchema = z.union([
+    z.string().regex(/^(?:class|desc|id|package|text)=.{1,256}$/u),
+    z.object({
+      field: z.enum(["class", "desc", "id", "package", "text"]),
+      value: z.string().min(1).max(256),
+      match: z.enum(["contains", "exact", "starts-with"]).optional(),
+      enabled: z.boolean().optional(),
+      actionable: z.boolean().optional(),
+    }),
+  ]);
+  register(
+    "audit_ui",
+    "Audit the current screen for enabled actionable nodes without human-readable labels or stable automation IDs.",
+    z.object({ ...targetHandleShape }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async (_input, signal, loaded) =>
+      toolResult(
+        (await runUiAction({ action: "audit" }, commandConfig(loaded, bound), dependencies, signal))
+          .result,
+      ),
+  );
+  register(
+    "find_ui",
+    "Find bounded UI nodes by semantic id, text, description, class, or package selectors without changing device state.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      limit: z.number().int().min(1).max(100).optional(),
+    }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ selector, limit }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "find", selector, ...(limit === undefined ? {} : { limit }) },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "get_ui",
+    "Read one unambiguous UI node with its current semantic, state, and bounds properties.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+    }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ selector, occurrence }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "get", selector, ...(occurrence === undefined ? {} : { occurrence }) },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "assert_ui",
+    "Assert that a semantic UI selector is visible or gone in the current hierarchy.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      state: z.enum(["gone", "visible"]).optional(),
+    }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ selector, state }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "assert", selector, ...(state === undefined ? {} : { state }) },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "compare_ui",
+    "Compare the current UI with a complete digest returned by an earlier inspection or action.",
+    z.object({ ...targetHandleShape, digest: z.string().regex(/^[a-f0-9]{64}$/u) }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ digest }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "compare", digest },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
   const pointSchema = z.union([
     z.object({ ref: z.string().regex(/^ui:[a-f0-9]{12}:\d+$/u) }),
+    z.object({
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+    }),
     z.object({ x: z.number().int().min(0).max(100_000), y: z.number().int().min(0).max(100_000) }),
   ]);
   for (const action of ["tap", "long-press"] as const) {
     register(
       `${action === "tap" ? "tap" : "long_press"}_ui`,
-      `${action === "tap" ? "Tap" : "Long-press"} a current digest-scoped UI ref or explicit display coordinate, then compare UI state.`,
-      z.object({ target: pointSchema, dryRun: z.boolean().optional() }),
-      { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      `${action === "tap" ? "Tap" : "Long-press"} a unique semantic selector, current digest-scoped UI ref, or explicit display coordinate, then compare UI state.`,
+      z.object({
+        ...targetHandleShape,
+        target: pointSchema,
+        dryRun: z.boolean().optional(),
+      }),
+      {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        targetBound: true,
+      },
       async ({ target, dryRun }, signal, loaded) => {
         const request =
           action === "tap"
@@ -401,31 +799,44 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
                   ref: target.ref,
                   ...(dryRun === undefined ? {} : { dryRun }),
                 }
-              : {
-                  action: "tap" as const,
-                  x: target.x,
-                  y: target.y,
-                  ...(dryRun === undefined ? {} : { dryRun }),
-                }
+              : "selector" in target
+                ? {
+                    action: "tap" as const,
+                    selector: target.selector,
+                    ...(target.occurrence === undefined ? {} : { occurrence: target.occurrence }),
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  }
+                : {
+                    action: "tap" as const,
+                    x: target.x,
+                    y: target.y,
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  }
             : "ref" in target
               ? {
                   action: "long-press" as const,
                   ref: target.ref,
                   ...(dryRun === undefined ? {} : { dryRun }),
                 }
-              : {
-                  action: "long-press" as const,
-                  x: target.x,
-                  y: target.y,
-                  ...(dryRun === undefined ? {} : { dryRun }),
-                };
+              : "selector" in target
+                ? {
+                    action: "long-press" as const,
+                    selector: target.selector,
+                    ...(target.occurrence === undefined ? {} : { occurrence: target.occurrence }),
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  }
+                : {
+                    action: "long-press" as const,
+                    x: target.x,
+                    y: target.y,
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  };
         const execution = await runUiAction(
           request,
           commandConfig(loaded, bound),
           dependencies,
           signal,
         );
-        bound ??= selectedTarget(execution.result.data);
         return toolResult(execution.result);
       },
     );
@@ -434,6 +845,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "swipe_ui",
     "Swipe in a screen-relative direction or between explicit display coordinates, then compare UI state.",
     z.object({
+      ...targetHandleShape,
       direction: z.enum(["down", "left", "right", "up"]).optional(),
       x1: z.number().int().min(0).max(100_000).optional(),
       y1: z.number().int().min(0).max(100_000).optional(),
@@ -441,7 +853,12 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       y2: z.number().int().min(0).max(100_000).optional(),
       dryRun: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ direction, x1, y1, x2, y2, dryRun }, signal, loaded) => {
       const coordinateCount = [x1, y1, x2, y2].filter((value) => value !== undefined).length;
       if (
@@ -470,19 +887,58 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
+  );
+  register(
+    "scroll_ui",
+    "Scroll the screen or one unique semantic scroll container in a display-relative direction, then compare UI state.",
+    z.object({
+      ...targetHandleShape,
+      direction: z.enum(["down", "left", "right", "up"]),
+      selector: uiSelectorSchema.optional(),
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
+    async ({ direction, selector, occurrence, dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "scroll",
+              direction,
+              ...(selector === undefined ? {} : { selector }),
+              ...(occurrence === undefined ? {} : { occurrence }),
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
   );
   register(
     "type_text_ui",
     "Type conservative shell-safe text into the focused Android field and optionally press enter.",
     z.object({
+      ...targetHandleShape,
       text: z.string().min(1).max(256),
       submit: z.boolean().optional(),
       dryRun: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ text, submit, dryRun }, signal, loaded) => {
       const execution = await runUiAction(
         {
@@ -495,18 +951,91 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
+  );
+  register(
+    "fill_ui",
+    "Focus one semantic editable field, replace its value with conservative shell-safe text, and verify the observable value.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+      text: z.string().min(1).max(256),
+      submit: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
+    async ({ selector, occurrence, text, submit, dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "fill",
+              selector,
+              text,
+              ...(occurrence === undefined ? {} : { occurrence }),
+              ...(submit === undefined ? {} : { submit }),
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "clear_ui",
+    "Focus one semantic editable field, clear its value, and verify the observable value.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
+    async ({ selector, occurrence, dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "clear",
+              selector,
+              ...(occurrence === undefined ? {} : { occurrence }),
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
   );
   register(
     "press_key_ui",
     "Press one allowlisted Android navigation or volume key, then compare UI state.",
     z.object({
+      ...targetHandleShape,
       key: z.enum(["back", "enter", "home", "menu", "volume-down", "volume-up"]),
       dryRun: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ key, dryRun }, signal, loaded) => {
       const execution = await runUiAction(
         { action: "press", key, ...(dryRun === undefined ? {} : { dryRun }) },
@@ -514,7 +1043,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -522,11 +1050,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "wait_for_ui",
     "Wait a bounded time for an exact id=, text=, desc=, or package= selector to be visible or gone.",
     z.object({
-      selector: z.string().min(3).max(264),
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
       state: z.enum(["gone", "visible"]).optional(),
       timeoutMs: z.number().int().min(100).max(120_000).optional(),
     }),
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
     async ({ selector, state, timeoutMs }, signal, loaded) => {
       const execution = await runUiAction(
         {
@@ -539,15 +1073,19 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
   register(
     "capture_screenshot",
-    "Capture a verified PNG inside the project without overwriting an existing file.",
-    z.object({ out: z.string().min(1).optional() }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    "Capture a verified PNG inside the project and return its image pixels to the client without overwriting an existing file.",
+    z.object({ ...targetHandleShape, out: z.string().min(1).optional() }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ out }, signal, loaded) => {
       const execution = await runCapture(
         { kind: "screenshot", cwd: options.cwd, ...(out === undefined ? {} : { out }) },
@@ -555,9 +1093,53 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
-      return toolResult(execution.result);
+      const result = toolResult(execution.result);
+      const evidence = execution.result.data?.evidence;
+      if (execution.result.ok && evidence?.mediaType === "image/png") {
+        const pixels = await readFile(path.resolve(options.cwd, evidence.path));
+        result.content.push({
+          type: "image",
+          data: pixels.toString("base64"),
+          mimeType: "image/png",
+        });
+      }
+      return result;
     },
+  );
+  register(
+    "list_sessions",
+    "List project-scoped saved sessions with status, preset, recency, and stable cursor pagination filters.",
+    z.object({
+      status: z.enum(["completed", "failed", "interrupted", "running"]).optional(),
+      preset: z.string().min(1).max(64).optional(),
+      sinceMs: z
+        .number()
+        .int()
+        .min(1)
+        .max(365 * 24 * 60 * 60 * 1_000)
+        .optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      cursor: z.string().min(1).max(128).optional(),
+    }),
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ status, preset, sinceMs, limit, cursor }) =>
+      toolResult(
+        (
+          await runSessionCommand(
+            "list",
+            undefined,
+            sessionStore,
+            {},
+            {
+              ...(status === undefined ? {} : { status }),
+              ...(preset === undefined ? {} : { preset }),
+              ...(sinceMs === undefined ? {} : { sinceMs }),
+              limit: limit ?? 25,
+              ...(cursor === undefined ? {} : { cursor }),
+            },
+          )
+        ).result,
+      ),
   );
   register(
     "get_session_problems",

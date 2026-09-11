@@ -48,14 +48,21 @@ User packages are the default. Enumeration and machine output are bounded.
 
 ```bash
 adb-ready app install ./android/app/build/outputs/apk/debug/app-debug.apk --replace
+adb-ready app install ./splits/base.apk ./splits/config.arm64_v8a.apk ./splits/config.en.apk
 adb-ready app launch
 adb-ready app restart
 adb-ready app stop
 adb-ready open 'myapp://orders/42' --package com.example.app
 ```
 
-- Installation currently accepts one ordinary APK. Split APK sets, `.apks`,
-  `.aab`, and implicit downloads are not accepted.
+Pass all files from one split APK set together; ADB Ready uses Android's
+`install-multiple` operation and verifies the installed package afterward.
+Android App Bundles (`.aab`) and APK Set archives (`.apks`) are not directly
+installable. Generate device-specific APKs with the Android build tool that
+created them, then pass those `.apk` files explicitly.
+
+- Installation accepts one ordinary APK or an explicit complete split APK set.
+  `.apks`, `.aab`, and implicit downloads are not accepted yet.
 - Install, launch, stop, restart, and explicit deep-link handlers are checked
   after ADB accepts the request.
 - `restart` is a verified stop followed by a verified launch.

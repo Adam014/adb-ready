@@ -19,6 +19,14 @@ adb-ready logs --format ndjson --non-interactive
 | `ndjson` | one versioned event per line, followed by the command result where applicable; saved timelines end with an event-count summary instead of duplicating the full event array |
 | `markdown` | bounded diagnostic context; only valid for `context` |
 
+Calling the root with `--json` returns a small product/capability overview. It
+does not probe ADB or load project configuration, which makes it safe for an
+agent or integration to identify the installed CLI first:
+
+```bash
+adb-ready --json
+```
+
 Machine data is written to `stdout`. Human progress and diagnostics are written
 to `stderr`. `--quiet` hides successful human output without hiding failures.
 
@@ -46,8 +54,8 @@ schema version.
 The npm package includes two versioned public artifacts:
 
 - `schema/config-v1.schema.json` validates project configuration; and
-- `schema/agent-tools-v1.json` catalogs every MCP tool's generated input schema
-  and safety annotations for the matching package version.
+- `schema/agent-tools-v1.json` catalogs every MCP tool's generated input and
+  output schemas plus safety annotations for the matching package version.
 
 ## Event envelope
 
@@ -116,6 +124,39 @@ adb-ready dev --port 8081 --dry-run --json
 
 Plan steps declare their risk. A dry run performs no pairing, connection,
 mapping, hook, or child-process mutation.
+
+## Run one bounded verification
+
+Use `run` when CI or an agent must prove a workflow and then exit instead of
+leaving a development server open:
+
+```bash
+adb-ready run --preset expo --run-timeout 10m -- \
+  maestro '--device={target.serial}' test .maestro/smoke.yaml
+```
+
+ADB Ready selects and exclusively leases one target, prepares the configured
+ports and development command, waits for every readiness assertion, runs the
+exact command after `--`, and cleans only the resources it created. It never
+retries a failed product assertion as if it were an infrastructure failure.
+
+The literal `{target.serial}` inside a verification argument is replaced only
+after ADB Ready selects and leases the target. The child also receives the
+same value as `ANDROID_SERIAL` and `ADB_READY_TARGET_SERIAL`. This keeps tools
+such as Maestro pinned explicitly without invoking a shell; tools that already
+honor `ANDROID_SERIAL`, including common Gradle/ADB workflows, need no placeholder.
+
+Every executed run prints the path to a project-local evidence directory under
+`.adb-ready/artifacts/`. Its manifest references the structured result,
+timeline, problems, focused logcat, bounded AI context, JUnit XML, and a concise
+GitHub Actions summary. The evidence remains available when readiness or the
+verification command fails.
+
+Preview the complete project plan before a device is allocated:
+
+```bash
+adb-ready run --preset expo --dry-run --json -- npm run test:e2e
+```
 
 ## CI example
 

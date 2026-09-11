@@ -18,7 +18,12 @@ import {
 export type SessionCommandAction = "events" | "list" | "show";
 
 export type SessionCommandData =
-  | { action: "list"; sessions: SessionManifest[] }
+  | {
+      action: "list";
+      sessions: SessionManifest[];
+      total: number;
+      nextCursor?: string;
+    }
   | { action: "show"; session: SessionManifest }
   | { action: "events"; session: SessionManifest; events: AdbReadyEvent[] };
 
@@ -36,6 +41,14 @@ export interface ContextCommandData extends CompiledContext {
 export interface SessionCommandDependencies {
   clock?: () => Date;
   idFactory?: () => string;
+}
+
+export interface SessionListFilter {
+  status?: SessionManifest["status"];
+  preset?: string;
+  sinceMs?: number;
+  limit?: number;
+  cursor?: string;
 }
 
 export interface SessionCommandExecution<T> {
@@ -124,12 +137,54 @@ export async function runSessionCommand(
   sessionId: string | undefined,
   options: SessionStoreOptions = {},
   dependencies: SessionCommandDependencies = {},
+  filter: SessionListFilter = {},
 ): Promise<SessionCommandExecution<SessionCommandData>> {
   const command = `sessions ${action}`;
   if (action === "list") {
     const listed = await listSessions(options);
+    const now = (dependencies.clock ?? (() => new Date()))().getTime();
+    const cutoff = filter.sinceMs === undefined ? undefined : now - filter.sinceMs;
+    const matching = listed.ok
+      ? listed.value
+          .filter((session) => filter.status === undefined || session.status === filter.status)
+          .filter((session) => filter.preset === undefined || session.preset === filter.preset)
+          .filter((session) => cutoff === undefined || Date.parse(session.updatedAt) >= cutoff)
+      : [];
+    const cursorIndex =
+      filter.cursor === undefined
+        ? -1
+        : matching.findIndex(({ sessionId }) => sessionId === filter.cursor);
+    if (listed.ok && filter.cursor !== undefined && cursorIndex === -1) {
+      return execution<SessionCommandData>(
+        command,
+        null,
+        [
+          storageProblem(
+            "SESSION_CURSOR_INVALID",
+            "The session page cursor is no longer available.",
+            "Start a new listing without a cursor.",
+            "session-history",
+          ),
+        ],
+        dependencies,
+      );
+    }
+    const remaining = matching.slice(cursorIndex + 1);
+    const sessions = filter.limit === undefined ? remaining : remaining.slice(0, filter.limit);
+    const hasMore = sessions.length < remaining.length;
+    const nextCursor = hasMore ? sessions.at(-1)?.sessionId : undefined;
     return listed.ok
-      ? execution(command, { action, sessions: listed.value }, [], dependencies)
+      ? execution(
+          command,
+          {
+            action,
+            sessions,
+            total: matching.length,
+            ...(nextCursor === undefined ? {} : { nextCursor }),
+          },
+          [],
+          dependencies,
+        )
       : execution<SessionCommandData>(
           command,
           null,

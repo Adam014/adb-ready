@@ -96,7 +96,8 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
           adbPath: undefined,
           adbHost: undefined,
           adbPort: undefined,
-          timeoutMs: { source: "default" },
+          timeoutMs:
+            options?.cli?.timeoutMs === undefined ? { source: "default" } : { source: "cli" },
           color: undefined,
           unicode: undefined,
           animation: undefined,
@@ -118,6 +119,7 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
     }),
     writeRememberedTarget: async () => ({ ok: true, path: "/state.json" }),
     sessionStore: false,
+    targetLease: false,
     runner: async (request) => {
       const args = request.args ?? [];
       if (args.includes("version")) {
@@ -147,10 +149,37 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
+  test("applies root presentation flags to the interactive home", async () => {
+    const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
+    streams.input.autoInput = "\u001B";
+    const exitCode = await runCli(["--no-animation", "--no-color"], streams, dependencies());
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.error.value).toContain("WHAT DO YOU WANT TO DO?");
+    expect(streams.error.value).not.toContain("\u001B[36m");
+  });
+
+  test("returns a structured product overview for a bare machine invocation", async () => {
+    const streams = io();
+    const exitCode = await runCli(["--json"], streams, {
+      loadConfig: async () => {
+        throw new Error("overview must not load configuration");
+      },
+    });
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      command: "overview",
+      ok: true,
+      data: { name: "ADB Ready", mcp: { transport: "stdio" } },
+    });
+    expect(streams.error.value).toBe("");
+  });
+
   test("keeps a bare interactive session open and returns to a compact menu", async () => {
     const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
     streams.env.ADB_READY_REDUCED_MOTION = "1";
-    streams.input.autoInputs = ["4\r", "1\r", "\u001B"];
+    streams.input.autoInputs = ["5\r", "1\r", "\u001B"];
     const exitCode = await runCli([], streams, dependencies());
 
     expect(exitCode).toBe(ExitCode.Success);
@@ -186,6 +215,7 @@ describe("runCli", () => {
           sessionId: "session-cli-1",
           command: "dev",
           startedAt: "2026-09-10T10:00:00.000Z",
+          projectRoot: "/project",
         },
         { directory, maxAgeDays: 3650 },
       );
@@ -819,6 +849,38 @@ describe("runCli", () => {
       },
     });
     expect(streams.error.value).toBe("");
+  });
+
+  test("gives UI acquisition a tolerant default while respecting an explicit timeout", async () => {
+    async function uiTimeout(args: string[]): Promise<number | undefined> {
+      const streams = io();
+      const fixture = dependencies(
+        "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+      );
+      let timeoutMs: number | undefined;
+      const baseRunner = fixture.runner;
+      fixture.runner = async (request) => {
+        if (request.args?.includes("uiautomator")) {
+          timeoutMs = request.timeoutMs;
+          return result(
+            request,
+            '<?xml version="1.0"?><hierarchy><node text="Open" bounds="[1,2][30,40]" /></hierarchy>',
+          );
+        }
+        return baseRunner?.(request) ?? result(request, "");
+      };
+
+      const exitCode = await runCli(
+        ["inspect", "ui", "--json", "--non-interactive", ...args],
+        streams,
+        fixture,
+      );
+      expect(exitCode).toBe(ExitCode.Success);
+      return timeoutMs;
+    }
+
+    expect(await uiTimeout([])).toBe(15_000);
+    expect(await uiTimeout(["--timeout", "2s"])).toBe(2_000);
   });
 
   test("routes a safe UI action and emits structured verification", async () => {

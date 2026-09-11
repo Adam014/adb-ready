@@ -31,6 +31,7 @@ export type CommandName =
   | "pair"
   | "ports"
   | "problems"
+  | "run"
   | "sessions"
   | "ui"
   | "version";
@@ -67,6 +68,7 @@ export interface CliOptions {
   pairingCodeStdin: boolean;
   remembered: boolean;
   dryRun: boolean;
+  allProjects: boolean;
   portDirection?: PortDirection;
   portAction?: PortAction;
   primaryPort?: string;
@@ -77,8 +79,13 @@ export interface CliOptions {
   logs?: boolean;
   cleanupPorts?: boolean;
   customCommand?: { executable: string; args: string[] };
+  runCommand?: { executable: string; args: string[] };
+  runTimeoutMs?: number;
   sessionAction?: "events" | "list" | "show";
   sessionId?: string;
+  sessionStatus?: "completed" | "failed" | "interrupted" | "running";
+  sessionSinceMs?: number;
+  sessionLimit?: number;
   logPackage?: string;
   logPid?: number;
   logTags?: string[];
@@ -97,6 +104,7 @@ export interface CliOptions {
   appAction?: AppAction;
   appId?: string;
   artifactPath?: string;
+  artifactPaths?: string[];
   activity?: string;
   packageScope?: PackageScope;
   replace?: boolean;
@@ -148,11 +156,27 @@ const COMMANDS = new Set<CommandName>([
   "pair",
   "ports",
   "problems",
+  "run",
   "sessions",
   "ui",
   "version",
 ]);
-const UI_ACTIONS = new Set<UiAction>(["long-press", "press", "swipe", "tap", "type", "wait"]);
+const UI_ACTIONS = new Set<UiAction>([
+  "assert",
+  "audit",
+  "clear",
+  "compare",
+  "fill",
+  "find",
+  "get",
+  "long-press",
+  "press",
+  "scroll",
+  "swipe",
+  "tap",
+  "type",
+  "wait",
+]);
 const APP_ACTIONS = new Set<AppAction>([
   "clear-data",
   "info",
@@ -202,9 +226,38 @@ const BOOLEAN_OPTIONS = new Set([
   "--user",
   "--system",
   "--all",
+  "--all-projects",
   "--interactive-only",
   "--submit",
 ]);
+
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length] ?? Math.max(left.length, right.length);
+}
+
+function suggestion(value: string, candidates: Iterable<string>): string {
+  const ranked = [...candidates]
+    .map((candidate) => ({ candidate, distance: editDistance(value, candidate) }))
+    .sort(
+      (left, right) =>
+        left.distance - right.distance || left.candidate.localeCompare(right.candidate),
+    );
+  const best = ranked[0];
+  const threshold = value.length <= 4 ? 1 : 2;
+  return best !== undefined && best.distance <= threshold ? `Did you mean ${best.candidate}?` : "";
+}
 
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
   return { ok: false, code, message, ...(option === undefined ? {} : { option }) };
@@ -253,6 +306,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let pairingCodeStdin = false;
   let remembered = false;
   let dryRun = false;
+  let allProjects = false;
   let portDirection: PortDirection | undefined;
   let portAction: PortAction | undefined;
   let primaryPort: string | undefined;
@@ -263,8 +317,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logs: boolean | undefined;
   let cleanupPorts: boolean | undefined;
   let customCommand: CliOptions["customCommand"];
+  let runCommand: CliOptions["runCommand"];
+  let runTimeoutMs: number | undefined;
   let sessionAction: CliOptions["sessionAction"];
   let sessionId: string | undefined;
+  let sessionStatus: CliOptions["sessionStatus"];
+  let sessionSinceMs: number | undefined;
+  let sessionLimit: number | undefined;
   let logPackage: string | undefined;
   let logPid: number | undefined;
   const logTags: string[] = [];
@@ -282,7 +341,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let force = false;
   let appAction: AppAction | undefined;
   let appId: string | undefined;
-  let artifactPath: string | undefined;
+  const artifactPaths: string[] = [];
   let activity: string | undefined;
   let packageScope: PackageScope | undefined;
   let replace = false;
@@ -312,21 +371,27 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     }
 
     if (argument === "--") {
-      if (command !== "dev") {
-        return failure("CLI_USAGE", "-- command passthrough can only be used with dev.");
+      if (command !== "dev" && command !== "run") {
+        return failure("CLI_USAGE", "-- command passthrough can only be used with dev or run.");
       }
       const executable = argv[index + 1];
       if (executable === undefined || executable.trim() === "") {
-        return failure("CLI_USAGE", "dev -- requires an executable.");
+        return failure("CLI_USAGE", `${command} -- requires an executable.`);
       }
-      customCommand = { executable, args: argv.slice(index + 2) };
+      const passthrough = { executable, args: argv.slice(index + 2) };
+      if (command === "run") runCommand = passthrough;
+      else customCommand = passthrough;
       break;
     }
 
     if (!argument.startsWith("-")) {
       if (command === undefined) {
         if (!COMMANDS.has(argument as CommandName)) {
-          return failure("CLI_USAGE", `Unknown command: ${argument}`);
+          const hint = suggestion(argument, COMMANDS);
+          return failure(
+            "CLI_USAGE",
+            `Unknown command: ${argument}${hint === "" ? "" : `. ${hint}`}`,
+          );
         }
         const candidate = argument as CommandName;
         command = candidate;
@@ -353,6 +418,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "pair" ||
           candidate === "ports" ||
           candidate === "problems" ||
+          candidate === "run" ||
           candidate === "sessions" ||
           candidate === "ui"
         ) {
@@ -387,11 +453,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           appAction = argument as AppAction;
           continue;
         }
-        if (appAction === "install" && artifactPath === undefined) {
-          artifactPath = argument;
+        if (appAction === "install") {
+          artifactPaths.push(argument);
           continue;
         }
-        if (appAction !== undefined && appAction !== "install" && appId === undefined) {
+        if (appAction !== undefined && appId === undefined) {
           if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(argument)) {
             return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
           }
@@ -431,7 +497,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           if (!UI_ACTIONS.has(argument as UiAction)) {
             return failure(
               "CLI_INVALID_VALUE",
-              `Invalid UI action: ${argument}. Expected tap, long-press, swipe, type, press, or wait.`,
+              `Invalid UI action: ${argument}. Expected audit, find, get, assert, compare, tap, long-press, scroll, swipe, fill, clear, type, press, or wait.`,
             );
           }
           uiAction = argument as UiAction;
@@ -592,15 +658,24 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       remembered = true;
     } else if (option === "--dry-run") {
       dryRun = true;
+    } else if (option === "--all-projects") {
+      allProjects = true;
     } else if (option === "--preset") {
       const value = readValue();
       if (typeof value !== "string") return value;
       if (
-        !new Set<DevPreset>(["custom", "expo", "gradle", "react-native"]).has(value as DevPreset)
+        !new Set<DevPreset>([
+          "capacitor",
+          "custom",
+          "expo",
+          "flutter",
+          "gradle",
+          "react-native",
+        ]).has(value as DevPreset)
       ) {
         return failure(
           "CLI_INVALID_VALUE",
-          `Invalid preset: ${value}. Expected custom, expo, gradle, or react-native.`,
+          `Invalid preset: ${value}. Expected capacitor, custom, expo, flutter, gradle, or react-native.`,
           option,
         );
       }
@@ -679,15 +754,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     } else if (option === "--since") {
       const value = readValue();
       if (typeof value !== "string") return value;
-      if (command === "context") {
-        contextSinceMs = parseDuration(value);
-        if (contextSinceMs === undefined) {
+      if (command === "context" || command === "sessions") {
+        const parsed = parseDuration(value);
+        if (parsed === undefined) {
           return failure(
             "CLI_INVALID_VALUE",
-            `Invalid context duration: ${value}. Use a value such as 30s, 5m, or 1h.`,
+            `Invalid duration: ${value}. Use a value such as 30s, 5m, or 1h.`,
             option,
           );
         }
+        if (command === "context") contextSinceMs = parsed;
+        else sessionSinceMs = parsed;
       } else if (!/^[0-9][0-9 .:-]{0,63}$/u.test(value)) {
         return failure(
           "CLI_INVALID_VALUE",
@@ -697,6 +774,38 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       } else {
         logSince = value;
       }
+    } else if (option === "--status") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (
+        command !== "sessions" ||
+        !new Set(["completed", "failed", "interrupted", "running"]).has(value)
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid session status: ${value}. Expected running, completed, failed, or interrupted.`,
+          option,
+        );
+      }
+      sessionStatus = value as NonNullable<CliOptions["sessionStatus"]>;
+    } else if (option === "--limit") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (
+        command !== "sessions" ||
+        !/^\d+$/u.test(value) ||
+        !Number.isSafeInteger(parsed) ||
+        parsed < 1 ||
+        parsed > 100
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid session limit: ${value}. Expected an integer from 1 to 100.`,
+          option,
+        );
+      }
+      sessionLimit = parsed;
     } else if (option === "--only") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -841,6 +950,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           option,
         );
       }
+    } else if (option === "--run-timeout") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      runTimeoutMs = parseDuration(value);
+      if (runTimeoutMs === undefined) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid run timeout: ${value}. Use a positive duration such as 30s or 10m.`,
+          option,
+        );
+      }
     } else if (option === "--adb") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -888,7 +1008,48 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       profileName = value;
     } else {
-      return failure("CLI_INVALID_OPTION", `Unknown option: ${option}`, option);
+      const knownOptions = new Set([
+        ...BOOLEAN_OPTIONS,
+        "--format",
+        "--timeout",
+        "--adb",
+        "--adb-host",
+        "--adb-port",
+        "--config",
+        "--profile",
+        "--device",
+        "--serial",
+        "--transport-id",
+        "--preset",
+        "--package-manager",
+        "--port",
+        "--package",
+        "--pid",
+        "--tag",
+        "--exclude-tag",
+        "--buffer",
+        "--since",
+        "--only",
+        "--status",
+        "--limit",
+        "--tail",
+        "--level",
+        "--out",
+        "--duration",
+        "--state",
+        "--max-depth",
+        "--activity",
+        "--filter",
+        "--max-records",
+        "--budget",
+        "--run-timeout",
+      ]);
+      const hint = suggestion(option, knownOptions);
+      return failure(
+        "CLI_INVALID_OPTION",
+        `Unknown option: ${option}${hint === "" ? "" : `. ${hint}`}`,
+        option,
+      );
     }
   }
 
@@ -897,6 +1058,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
+  if (allProjects && command !== "sessions" && command !== "problems" && command !== "context") {
+    return failure(
+      "CLI_USAGE",
+      "--all-projects can only be used with sessions, problems, or context.",
+      "--all-projects",
+    );
+  }
   if (packageOption !== undefined) {
     if (command === "logs") logPackage = packageOption;
     else if (
@@ -915,6 +1083,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (command === "config") configAction ??= "validate";
   if (command === "context" && format === "human") format = "markdown";
   if (command === "sessions") sessionAction ??= "list";
+  if (
+    command === "sessions" &&
+    sessionAction !== "list" &&
+    (sessionStatus !== undefined || sessionSinceMs !== undefined || sessionLimit !== undefined)
+  ) {
+    return failure("CLI_USAGE", "--status, --since, and --limit apply only to sessions list.");
+  }
   const targetCommand =
     command === "app" ||
     command === "apps" ||
@@ -925,6 +1100,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command === "logs" ||
     command === "open" ||
     command === "ports" ||
+    command === "run" ||
     command === "ui";
   if (select && !targetCommand) {
     return failure(
@@ -968,6 +1144,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     dryRun &&
     command !== "connect" &&
     command !== "dev" &&
+    command !== "run" &&
     command !== "app" &&
     command !== "open" &&
     command !== "pair" &&
@@ -978,7 +1155,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   ) {
     return failure(
       "CLI_USAGE",
-      "--dry-run can only be used with app, connect, dev, init, open, pair, or ports.",
+      "--dry-run can only be used with app, connect, dev, run, init, open, pair, or ports.",
       "--dry-run",
     );
   }
@@ -1001,10 +1178,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (command === "app") {
     if (appAction === undefined) return failure("CLI_USAGE", "app requires an action.");
-    if (appAction === "install" && artifactPath === undefined) {
-      return failure("CLI_USAGE", "app install requires an APK path.");
+    if (appAction === "install" && artifactPaths.length === 0) {
+      return failure("CLI_USAGE", "app install requires one or more APK paths.");
     }
-    if (appAction !== "install" && artifactPath !== undefined) {
+    if (appAction !== "install" && artifactPaths.length > 0) {
       return failure("CLI_USAGE", `app ${appAction} does not accept an artifact path.`);
     }
   }
@@ -1023,7 +1200,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       const parsed = Number(value);
       return Number.isSafeInteger(parsed) && parsed <= 100_000 ? parsed : undefined;
     };
-    if (uiAction === "tap" || uiAction === "long-press") {
+    const selector = (value: string | undefined): string | undefined =>
+      value !== undefined && /^(?:class|desc|id|package|text)=.{1,256}$/u.test(value)
+        ? value
+        : undefined;
+    if (uiAction === "audit") {
+      if (uiOperands.length !== 0) return failure("CLI_USAGE", "ui audit accepts no operands.");
+      uiRequest = { action: "audit" };
+    } else if (uiAction === "tap" || uiAction === "long-press") {
       const [first, second] = uiOperands;
       const x = coordinate(first);
       const y = coordinate(second);
@@ -1034,20 +1218,39 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
             : { action: "long-press", ref: first ?? "" };
       else if (uiOperands.length === 2 && x !== undefined && y !== undefined)
         uiRequest = uiAction === "tap" ? { action: "tap", x, y } : { action: "long-press", x, y };
+      else if (uiOperands.length === 1 && selector(first) !== undefined)
+        uiRequest =
+          uiAction === "tap"
+            ? { action: "tap", selector: first ?? "" }
+            : { action: "long-press", selector: first ?? "" };
       else
         return failure(
           "CLI_USAGE",
-          `ui ${uiAction} requires one current UI ref or two integer coordinates.`,
+          `ui ${uiAction} requires one selector, current UI ref, or two integer coordinates.`,
         );
-    } else if (uiAction === "swipe") {
+    } else if (uiAction === "swipe" || uiAction === "scroll") {
       const direction = uiOperands[0] as UiDirection | undefined;
       if (
-        uiOperands.length === 1 &&
+        (uiOperands.length === 1 || (uiAction === "scroll" && uiOperands.length === 2)) &&
         direction !== undefined &&
         new Set<UiDirection>(["down", "left", "right", "up"]).has(direction)
       ) {
-        uiRequest = { action: "swipe", direction };
-      } else if (uiOperands.length === 4) {
+        const selected = selector(uiOperands[1]);
+        if (uiAction === "scroll" && uiOperands.length === 2 && selected === undefined) {
+          return failure(
+            "CLI_USAGE",
+            "ui scroll accepts an optional valid selector after direction.",
+          );
+        }
+        uiRequest =
+          uiAction === "scroll"
+            ? {
+                action: "scroll",
+                direction,
+                ...(selected === undefined ? {} : { selector: selected }),
+              }
+            : { action: "swipe", direction };
+      } else if (uiAction === "swipe" && uiOperands.length === 4) {
         const values = uiOperands.map(coordinate);
         if (values.some((value) => value === undefined)) {
           return failure("CLI_INVALID_VALUE", "UI swipe coordinates must be bounded integers.");
@@ -1062,16 +1265,32 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       } else {
         return failure(
           "CLI_USAGE",
-          "ui swipe requires up, down, left, right, or four integer coordinates.",
+          uiAction === "scroll"
+            ? "ui scroll requires up, down, left, or right, optionally followed by a selector."
+            : "ui swipe requires up, down, left, right, or four integer coordinates.",
         );
       }
-    } else if (uiAction === "type") {
-      if (uiOperands.length !== 1) return failure("CLI_USAGE", "ui type requires one text value.");
-      uiRequest = {
-        action: "type",
-        text: uiOperands[0] ?? "",
-        ...(uiSubmit ? { submit: true } : {}),
-      };
+    } else if (uiAction === "type" || uiAction === "fill") {
+      if (uiAction === "fill") {
+        const selected = selector(uiOperands[0]);
+        if (uiOperands.length !== 2 || selected === undefined) {
+          return failure("CLI_USAGE", "ui fill requires one valid selector and one text value.");
+        }
+        uiRequest = {
+          action: "fill",
+          selector: selected,
+          text: uiOperands[1] ?? "",
+          ...(uiSubmit ? { submit: true } : {}),
+        };
+      } else {
+        if (uiOperands.length !== 1)
+          return failure("CLI_USAGE", "ui type requires one text value.");
+        uiRequest = {
+          action: "type",
+          text: uiOperands[0] ?? "",
+          ...(uiSubmit ? { submit: true } : {}),
+        };
+      }
     } else if (uiAction === "press") {
       const key = uiOperands[0] as UiKey | undefined;
       if (
@@ -1085,6 +1304,34 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         );
       }
       uiRequest = { action: "press", key };
+    } else if (
+      uiAction === "find" ||
+      uiAction === "get" ||
+      uiAction === "assert" ||
+      uiAction === "clear"
+    ) {
+      const selected = selector(uiOperands[0]);
+      if (uiOperands.length !== 1 || selected === undefined) {
+        return failure("CLI_USAGE", `ui ${uiAction} requires one valid selector.`);
+      }
+      uiRequest =
+        uiAction === "find"
+          ? { action: "find", selector: selected }
+          : uiAction === "get"
+            ? { action: "get", selector: selected }
+            : uiAction === "clear"
+              ? { action: "clear", selector: selected }
+              : {
+                  action: "assert",
+                  selector: selected,
+                  ...(uiWaitState === undefined ? {} : { state: uiWaitState }),
+                };
+    } else if (uiAction === "compare") {
+      const digest = uiOperands[0];
+      if (uiOperands.length !== 1 || digest === undefined || !/^[a-f0-9]{64}$/u.test(digest)) {
+        return failure("CLI_USAGE", "ui compare requires one complete lowercase UI digest.");
+      }
+      uiRequest = { action: "compare", digest };
     } else {
       if (uiOperands.length !== 1) {
         return failure("CLI_USAGE", "ui wait requires one exact selector.");
@@ -1106,14 +1353,29 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (maxDepth !== undefined && (command !== "inspect" || inspectKind !== "ui")) {
     return failure("CLI_USAGE", "--max-depth can only be used with inspect ui.");
   }
-  if (uiSubmit && (command !== "ui" || uiAction !== "type")) {
-    return failure("CLI_USAGE", "--submit can only be used with ui type.");
+  if (uiSubmit && (command !== "ui" || (uiAction !== "type" && uiAction !== "fill"))) {
+    return failure("CLI_USAGE", "--submit can only be used with ui type or ui fill.");
   }
-  if (uiWaitState !== undefined && (command !== "ui" || uiAction !== "wait")) {
-    return failure("CLI_USAGE", "--state can only be used with ui wait.");
+  if (
+    uiWaitState !== undefined &&
+    (command !== "ui" || (uiAction !== "wait" && uiAction !== "assert"))
+  ) {
+    return failure("CLI_USAGE", "--state can only be used with ui wait or ui assert.");
   }
-  if (dryRun && command === "ui" && uiAction === "wait") {
-    return failure("CLI_USAGE", "--dry-run is not meaningful for the read-only ui wait action.");
+  if (
+    dryRun &&
+    command === "ui" &&
+    (uiAction === "audit" ||
+      uiAction === "wait" ||
+      uiAction === "find" ||
+      uiAction === "get" ||
+      uiAction === "assert" ||
+      uiAction === "compare")
+  ) {
+    return failure(
+      "CLI_USAGE",
+      `--dry-run is not meaningful for the read-only ui ${uiAction} action.`,
+    );
   }
   if (outputPath !== undefined && command !== "capture") {
     return failure("CLI_USAGE", "--out can only be used with capture.");
@@ -1150,15 +1412,22 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (
     command !== "dev" &&
+    command !== "run" &&
     command !== "init" &&
-    (preset !== undefined ||
+    ((preset !== undefined && command !== "sessions") ||
       packageManager !== undefined ||
       reversePorts.length > 0 ||
       logs !== undefined ||
       cleanupPorts !== undefined ||
       customCommand !== undefined)
   ) {
-    return failure("CLI_USAGE", "Development options can only be used with the dev command.");
+    return failure("CLI_USAGE", "Development options can only be used with dev or run.");
+  }
+  if (command === "run" && runCommand === undefined) {
+    return failure("CLI_USAGE", "run requires a bounded command after --.");
+  }
+  if (runTimeoutMs !== undefined && command !== "run") {
+    return failure("CLI_USAGE", "--run-timeout can only be used with run.", "--run-timeout");
   }
   if (
     command !== "logs" &&
@@ -1225,6 +1494,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       pairingCodeStdin,
       remembered,
       dryRun,
+      allProjects,
       ...(portDirection === undefined ? {} : { portDirection }),
       ...(portAction === undefined ? {} : { portAction }),
       ...(primaryPort === undefined ? {} : { primaryPort }),
@@ -1235,8 +1505,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logs === undefined ? {} : { logs }),
       ...(cleanupPorts === undefined ? {} : { cleanupPorts }),
       ...(customCommand === undefined ? {} : { customCommand }),
+      ...(runCommand === undefined ? {} : { runCommand }),
+      ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
       ...(sessionAction === undefined ? {} : { sessionAction }),
       ...(sessionId === undefined ? {} : { sessionId }),
+      ...(sessionStatus === undefined ? {} : { sessionStatus }),
+      ...(sessionSinceMs === undefined ? {} : { sessionSinceMs }),
+      ...(sessionLimit === undefined ? {} : { sessionLimit }),
       ...(logPackage === undefined ? {} : { logPackage }),
       ...(logPid === undefined ? {} : { logPid }),
       ...(logTags.length === 0 ? {} : { logTags }),
@@ -1254,7 +1529,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(force ? { force: true } : {}),
       ...(appAction === undefined ? {} : { appAction }),
       ...(appId === undefined ? {} : { appId }),
-      ...(artifactPath === undefined ? {} : { artifactPath }),
+      ...(artifactPaths.length === 0 ? {} : { artifactPath: artifactPaths[0], artifactPaths }),
       ...(activity === undefined ? {} : { activity }),
       ...(packageScope === undefined ? {} : { packageScope }),
       ...(replace ? { replace: true } : {}),
@@ -1273,7 +1548,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         ? {}
         : {
             uiRequest:
-              dryRun && uiRequest.action !== "wait" ? { ...uiRequest, dryRun: true } : uiRequest,
+              dryRun &&
+              (uiRequest.action === "tap" ||
+                uiRequest.action === "long-press" ||
+                uiRequest.action === "swipe" ||
+                uiRequest.action === "type" ||
+                uiRequest.action === "press")
+                ? { ...uiRequest, dryRun: true }
+                : uiRequest,
           }),
     },
   };
