@@ -104,6 +104,7 @@ export interface CliOptions {
   appAction?: AppAction;
   appId?: string;
   artifactPath?: string;
+  artifactPaths?: string[];
   activity?: string;
   packageScope?: PackageScope;
   replace?: boolean;
@@ -335,7 +336,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let force = false;
   let appAction: AppAction | undefined;
   let appId: string | undefined;
-  let artifactPath: string | undefined;
+  const artifactPaths: string[] = [];
   let activity: string | undefined;
   let packageScope: PackageScope | undefined;
   let replace = false;
@@ -447,11 +448,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           appAction = argument as AppAction;
           continue;
         }
-        if (appAction === "install" && artifactPath === undefined) {
-          artifactPath = argument;
+        if (appAction === "install") {
+          artifactPaths.push(argument);
           continue;
         }
-        if (appAction !== undefined && appAction !== "install" && appId === undefined) {
+        if (appAction !== undefined && appId === undefined) {
           if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(argument)) {
             return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
           }
@@ -1165,10 +1166,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (command === "app") {
     if (appAction === undefined) return failure("CLI_USAGE", "app requires an action.");
-    if (appAction === "install" && artifactPath === undefined) {
-      return failure("CLI_USAGE", "app install requires an APK path.");
+    if (appAction === "install" && artifactPaths.length === 0) {
+      return failure("CLI_USAGE", "app install requires one or more APK paths.");
     }
-    if (appAction !== "install" && artifactPath !== undefined) {
+    if (appAction !== "install" && artifactPaths.length > 0) {
       return failure("CLI_USAGE", `app ${appAction} does not accept an artifact path.`);
     }
   }
@@ -1469,7 +1470,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(force ? { force: true } : {}),
       ...(appAction === undefined ? {} : { appAction }),
       ...(appId === undefined ? {} : { appId }),
-      ...(artifactPath === undefined ? {} : { artifactPath }),
+      ...(artifactPaths.length === 0 ? {} : { artifactPath: artifactPaths[0], artifactPaths }),
       ...(activity === undefined ? {} : { activity }),
       ...(packageScope === undefined ? {} : { packageScope }),
       ...(replace ? { replace: true } : {}),

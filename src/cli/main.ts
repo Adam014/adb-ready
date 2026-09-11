@@ -163,7 +163,7 @@ snippet because their configuration is user-scoped or client-defined.
   app: `Usage:
   adb-ready app resolve [APP_ID] [options]
   adb-ready app info [APP_ID] [options]
-  adb-ready app install APK [--package APP_ID] [options]
+  adb-ready app install APK [SPLIT_APK...] [--package APP_ID] [options]
   adb-ready app launch [APP_ID] [--activity ACTIVITY] [options]
   adb-ready app stop [APP_ID] [options]
   adb-ready app restart [APP_ID] [--activity ACTIVITY] [options]
@@ -1398,7 +1398,7 @@ async function runCliInternal(
                     : { location: loaded.config.provenance.appPackage.location }),
                 },
               }),
-          ...(options.artifactPath === undefined ? {} : { artifactPath: options.artifactPath }),
+          ...(options.artifactPaths === undefined ? {} : { artifactPaths: options.artifactPaths }),
           ...(options.activity === undefined ? {} : { activity: options.activity }),
           ...(options.replace === undefined ? {} : { replace: options.replace }),
           ...(options.grantRuntimePermissions === undefined

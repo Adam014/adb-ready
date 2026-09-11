@@ -310,6 +310,58 @@ describe("app commands", () => {
     }
   });
 
+  test("installs one complete split APK set with one verified operation", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-splits-"));
+    const base = path.join(directory, "base.apk");
+    const architecture = path.join(directory, "config.arm64_v8a.apk");
+    await Promise.all([writeFile(base, "base"), writeFile(architecture, "split")]);
+    const requests: string[][] = [];
+    let installed = false;
+    try {
+      const execution = await runApp(
+        {
+          action: "install",
+          cwd: directory,
+          artifactPaths: [base, architecture],
+          applicationId: "com.example.app",
+          replace: true,
+        },
+        {},
+        fixture((request) => {
+          const args = [...(request.args ?? [])];
+          requests.push(args);
+          if (args.includes("install-multiple")) {
+            installed = true;
+            return result(request, "Success\n");
+          }
+          if (installed && args.includes("dumpsys") && args.includes("package")) {
+            return result(
+              request,
+              "Package [com.example.app]\n codePath=/data/app/new\n versionCode=8\n versionName=1.1.0\n lastUpdateTime=2026-09-10 10:01:00\n",
+            );
+          }
+          return undefined;
+        }),
+      );
+
+      expect(execution.result).toMatchObject({
+        ok: true,
+        data: {
+          status: "installed",
+          artifactPaths: [expect.stringContaining("base.apk"), expect.stringContaining("arm64")],
+        },
+      });
+      expect(
+        requests.some(
+          (args) =>
+            args.includes("install-multiple") && args.includes(base) && args.includes(architecture),
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("clears and uninstalls only with approval and verified postconditions", async () => {
     let removed = false;
     const dependencies = fixture((request) => {

@@ -48,6 +48,8 @@ breaking changes.
   process group.
 - Add status, recency, preset, and count filters to project-scoped session
   history.
+- Install a single APK or a complete split APK set through verified `install`
+  and `install-multiple` workflows in both CLI and MCP.
 
 ### Changed
 

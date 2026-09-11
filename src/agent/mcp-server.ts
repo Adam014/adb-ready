@@ -508,10 +508,11 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   }
   register(
     "install_app",
-    "Install one project-local APK and verify its package. Downloads and split APKs are rejected.",
+    "Install one project-local APK or a complete split APK set and verify its package.",
     z.object({
       ...targetHandleShape,
-      path: z.string().min(1),
+      path: z.string().min(1).optional(),
+      paths: z.array(z.string().min(1)).min(1).max(64).optional(),
       applicationId: z.string().min(3).optional(),
       replace: z.boolean().optional(),
       grantRuntimePermissions: z.boolean().optional(),
@@ -523,22 +524,30 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       targetBound: true,
     },
     async (
-      { path: requested, applicationId, replace, grantRuntimePermissions },
+      { path: requested, paths: requestedSet, applicationId, replace, grantRuntimePermissions },
       signal,
       loaded,
     ) => {
-      const artifactPath = await projectFile(options.cwd, requested).catch(() => undefined);
-      if (artifactPath === undefined) {
+      if ((requested === undefined) === (requestedSet === undefined)) {
+        return inputFailure("MCP_INVALID_INPUT", "Provide exactly one of path or paths.");
+      }
+      const requestedPaths = requestedSet ?? [requested as string];
+      const artifactPaths = await Promise.all(
+        requestedPaths.map(
+          async (item) => await projectFile(options.cwd, item).catch(() => undefined),
+        ),
+      );
+      if (artifactPaths.some((item) => item === undefined)) {
         return inputFailure(
           "MCP_PATH_OUTSIDE_PROJECT",
-          "APK path must resolve inside the project.",
+          "Every APK path must resolve inside the project.",
         );
       }
       const execution = await runApp(
         {
           action: "install",
           cwd: options.cwd,
-          artifactPath,
+          artifactPaths: artifactPaths as string[],
           ...(applicationId === undefined ? {} : { applicationId }),
           ...(loaded.values.appPackage === undefined
             ? {}
