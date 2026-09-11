@@ -37,6 +37,7 @@ import {
   runProblemsCommand,
   runSessionCommand,
 } from "../app/session-commands.js";
+import { type AutomationRunData, writeEvidenceBundle } from "../automation/evidence-bundle.js";
 import { loadConfig } from "../config/loader.js";
 import type { ConfigError, ConfigValues } from "../config/types.js";
 import { EventBus } from "../core/event-bus.js";
@@ -101,6 +102,7 @@ Commands:
   connect [HOST:PORT]    Connect and verify a wireless Android target
   context [SESSION]      Export bounded AI-ready diagnostic context
   dev [OPTIONS] [-- CMD] Prepare one target and run a development session
+  run [OPTIONS] -- CMD   Run one bounded verification job with evidence
   doctor                 Inspect the local ADB environment
   init                   Create a detected project configuration
   inspect ACTION         Build a bounded app or UI evidence snapshot
@@ -221,6 +223,17 @@ Development options:
   --[no-]logs            Enable or disable targeted logcat
   --[no-]cleanup-ports   Keep or remove session-created mappings on exit
   -- EXECUTABLE ARG...   Run a direct custom command without a shell
+`,
+  run: `Usage: adb-ready run [options] -- EXECUTABLE ARG...
+
+Starts the configured development service on one exclusively leased target,
+waits for every readiness assertion, runs one bounded verification command,
+then cleans owned resources. The verification exit code is preserved.
+
+Run options:
+  --run-timeout DURATION Bound the verification command (default: 15m)
+  --dry-run              Build an offline plan unless a target is explicit
+  -- EXECUTABLE ARG...   Verification command, passed directly without a shell
 `,
   doctor: `Usage: adb-ready doctor [options]
 
@@ -344,7 +357,9 @@ export interface CliDependencies extends CommandDependencies {
 
 function requiresTargetLease(options: CliOptions): boolean {
   if (options.dryRun) return false;
-  if (options.command === "dev" || options.command === "open") return true;
+  if (options.command === "dev" || options.command === "run" || options.command === "open") {
+    return true;
+  }
   if (options.command === "app") {
     return options.appAction !== "info" && options.appAction !== "resolve";
   }
@@ -498,7 +513,9 @@ function cliConfig(options: CliOptions): ConfigValues {
       : { devReversePorts: options.reversePorts.map((device) => ({ device: Number(device) })) }),
     ...(options.logs === undefined ? {} : { devLogs: options.logs }),
     ...(options.cleanupPorts === undefined ? {} : { devCleanupPorts: options.cleanupPorts }),
-    ...(options.customCommand === undefined ? {} : { devCommand: options.customCommand }),
+    ...(options.command !== "dev" || options.customCommand === undefined
+      ? {}
+      : { devCommand: options.customCommand }),
   };
 }
 
@@ -861,6 +878,7 @@ async function runCliInternal(
       options.command === "apps" ||
       options.command === "capture" ||
       options.command === "dev" ||
+      options.command === "run" ||
       options.command === "devices" ||
       options.command === "inspect" ||
       options.command === "logs" ||
@@ -871,6 +889,7 @@ async function runCliInternal(
       options.command === "apps" ||
       options.command === "capture" ||
       options.command === "dev" ||
+      options.command === "run" ||
       options.command === "inspect" ||
       options.command === "logs" ||
       options.command === "open" ||
@@ -929,7 +948,7 @@ async function runCliInternal(
     ...(options.dryRun ? { dryRun: true } : {}),
   };
   const offlineDevPlan =
-    options.command === "dev" &&
+    (options.command === "dev" || options.command === "run") &&
     options.dryRun &&
     !options.select &&
     options.device === undefined &&
@@ -940,7 +959,7 @@ async function runCliInternal(
     (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||
     options.command === "apps" ||
     options.command === "capture" ||
-    (options.command === "dev" && !offlineDevPlan) ||
+    ((options.command === "dev" || options.command === "run") && !offlineDevPlan) ||
     options.command === "inspect" ||
     options.command === "logs" ||
     options.command === "open" ||
@@ -952,7 +971,11 @@ async function runCliInternal(
       inventory.result.data?.targets.filter((target) =>
         target.transports.some(({ stable, state }) => stable && state === "device"),
       ) ?? [];
-    if (options.command === "dev" && selectable.length === 0 && !options.dryRun) {
+    if (
+      (options.command === "dev" || options.command === "run") &&
+      selectable.length === 0 &&
+      !options.dryRun
+    ) {
       const acquisition = planTargetAcquisition({
         ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
         ...(values.targetAliases === undefined ? {} : { aliases: values.targetAliases }),
@@ -975,7 +998,7 @@ async function runCliInternal(
         const connectedData = connected.result.data;
         if (!connected.result.ok || connectedData === null || !("serial" in connectedData)) {
           renderResult(
-            { ...connected.result, command: "dev" },
+            { ...connected.result, command: options.command },
             {
               format: options.format,
               capabilities: errorCapabilities,
@@ -1000,6 +1023,7 @@ async function runCliInternal(
         options.command === "apps" ||
         options.command === "capture" ||
         options.command === "dev" ||
+        options.command === "run" ||
         options.command === "inspect" ||
         options.command === "logs" ||
         options.command === "open" ||
@@ -1248,6 +1272,7 @@ async function runCliInternal(
     | CommandExecution<InspectAppData>
     | CommandExecution<InspectUiData>
     | CommandExecution<UiActionData>
+    | CommandExecution<AutomationRunData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
     | Awaited<ReturnType<typeof runDoctor>>
@@ -1414,7 +1439,7 @@ async function runCliInternal(
         commandDependencies,
         signal,
       );
-    } else if (options.command === "dev") {
+    } else if (options.command === "dev" || options.command === "run") {
       const devOptions = {
         cwd: io.cwd,
         ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
@@ -1424,6 +1449,16 @@ async function runCliInternal(
         ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
         ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
         ...(values.devWatch === undefined ? {} : { watch: values.devWatch }),
+        ...(values.devReadiness === undefined ? {} : { readiness: values.devReadiness }),
+        ...(options.command === "run"
+          ? {
+              mode: "run" as const,
+              verification: {
+                command: options.runCommand ?? { executable: "", args: [] },
+                timeoutMs: options.runTimeoutMs ?? 15 * 60_000,
+              },
+            }
+          : {}),
         recovery: {
           ...(values.recoveryMaxAttempts === undefined
             ? {}
@@ -1483,9 +1518,20 @@ async function runCliInternal(
             }
           : {}),
       } satisfies DevOptions;
-      execution = offlineDevPlan
+      const devExecution = offlineDevPlan
         ? await runDevOfflinePlan(devOptions, commandDependencies)
         : await runDev(devOptions, config, commandDependencies, signal);
+      execution =
+        options.command === "run" && !options.dryRun
+          ? (
+              await writeEvidenceBundle(devExecution, {
+                cwd: io.cwd,
+                ...(io.env.GITHUB_STEP_SUMMARY === undefined
+                  ? {}
+                  : { githubStepSummaryPath: io.env.GITHUB_STEP_SUMMARY }),
+              })
+            ).execution
+          : devExecution;
     } else if (options.command === "devices") {
       execution = await runDevices(config, commandDependencies, signal);
     } else if (options.command === "connect") {
@@ -1585,8 +1631,9 @@ async function runCliInternal(
           ...(data.hardwareSerial === undefined ? {} : { hardwareSerial: data.hardwareSerial }),
         };
       }
-    } else if (options.command === "dev") {
-      const data = execution.result.data as DevData | null;
+    } else if (options.command === "dev" || options.command === "run") {
+      const raw = execution.result.data as DevData | AutomationRunData | null;
+      const data = raw !== null && "session" in raw ? raw.session : raw;
       if (data?.selected !== undefined) {
         selectedTarget = {
           serial: data.selected.transport.serial,

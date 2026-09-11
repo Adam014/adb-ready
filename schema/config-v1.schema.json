@@ -206,6 +206,7 @@
         "logs": { "type": "boolean" },
         "cleanupPorts": { "type": "boolean" },
         "watch": { "type": "boolean" },
+        "ready": { "$ref": "#/$defs/ready" },
         "recovery": {
           "type": "object",
           "additionalProperties": false,
@@ -262,6 +263,97 @@
     "hooks": {
       "type": "array",
       "items": { "$ref": "#/$defs/hook" }
+    },
+    "ready": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all"],
+      "properties": {
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "pollIntervalMs": { "type": "integer", "minimum": 1 },
+        "all": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/readinessAssertion" }
+        }
+      }
+    },
+    "readinessAssertion": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "enum": ["boot", "unlocked"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "package"],
+          "properties": {
+            "kind": { "enum": ["foreground", "process"] },
+            "package": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "activity" },
+            "value": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "port"],
+          "properties": {
+            "kind": { "const": "host-port" },
+            "host": { "type": "string", "minLength": 1 },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "url"],
+          "properties": {
+            "kind": { "const": "http" },
+            "url": { "type": "string", "pattern": "^https?://" },
+            "status": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "integer", "minimum": 100, "maximum": 599 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "contains"],
+          "properties": {
+            "kind": { "const": "log" },
+            "contains": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "absent": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "selector"],
+          "properties": {
+            "kind": { "const": "ui" },
+            "selector": {
+              "type": "string",
+              "pattern": "^(?:desc|id|package|text)=.{1,256}$"
+            },
+            "state": { "enum": ["visible", "gone"] }
+          }
+        }
+      ]
     },
     "hook": {
       "type": "object",

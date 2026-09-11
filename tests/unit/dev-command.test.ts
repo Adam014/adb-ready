@@ -199,6 +199,123 @@ describe("runDev", () => {
     );
   });
 
+  test("does not mark a session ready until every configured readiness assertion passes", async () => {
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-server", args: [] },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+        readiness: { all: [{ kind: "boot" }], timeoutMs: 500 },
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.args?.includes("sys.boot_completed")) {
+          return result(request, { stdout: "1\n" });
+        }
+        if (request.executable === "dev-server") {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.readiness).toMatchObject({
+      ready: true,
+      assertions: [{ assertion: { kind: "boot" }, status: "passed" }],
+    });
+    const events = execution.result.data?.journal.events.map(({ type }) => type) ?? [];
+    expect(events.indexOf("readiness.passed")).toBeLessThan(events.indexOf("child.exited"));
+  });
+
+  test("runs one bounded verification command and intentionally stops the development service", async () => {
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: ["start"] },
+        verification: {
+          command: { executable: "smoke-test", args: ["--ci"] },
+          timeoutMs: 30_000,
+        },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.executable === "dev-service") {
+          return await new Promise<ProcessResult>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+              { once: true },
+            );
+          });
+        }
+        if (request.executable === "smoke-test") return result(request);
+        return result(request);
+      }),
+    );
+
+    expect(execution.result.command).toBe("run");
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.problems).toEqual([]);
+    expect(execution.result.data).toMatchObject({
+      status: "completed",
+      verification: {
+        passed: true,
+        exitCode: 0,
+        command: { executable: "smoke-test", args: ["--ci"] },
+      },
+    });
+  });
+
+  test("preserves a failed bounded verification command exit code", async () => {
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: [] },
+        verification: { command: { executable: "smoke-test", args: [] } },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.executable === "dev-service") {
+          return await new Promise<ProcessResult>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+              { once: true },
+            );
+          });
+        }
+        if (request.executable === "smoke-test") return result(request, { exitCode: 9 });
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(9);
+    expect(execution.result.data?.verification).toMatchObject({ passed: false, exitCode: 9 });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.VerificationFailed }),
+    );
+  });
+
   test("persists a finalized private session when storage is enabled", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-dev-session-"));
     try {

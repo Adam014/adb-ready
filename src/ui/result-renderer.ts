@@ -17,6 +17,7 @@ import type {
   ProblemsCommandData,
   SessionCommandData,
 } from "../app/session-commands.js";
+import type { AutomationRunData } from "../automation/evidence-bundle.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
@@ -93,6 +94,15 @@ function isDevData(value: unknown): value is DevData {
     isRecord(value.command) &&
     isRecord(value.ports) &&
     isRecord(value.journal)
+  );
+}
+
+function isAutomationRunData(value: unknown): value is AutomationRunData {
+  return (
+    isRecord(value) &&
+    typeof value.outcome === "string" &&
+    isRecord(value.evidence) &&
+    (value.session === null || isDevData(value.session))
   );
 }
 
@@ -312,8 +322,13 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     }
   }
 
-  if (result.command === "dev" && isDevData(result.data)) {
-    const data = result.data;
+  const developmentData = isDevData(result.data)
+    ? result.data
+    : isAutomationRunData(result.data)
+      ? result.data.session
+      : null;
+  if ((result.command === "dev" || result.command === "run") && developmentData !== null) {
+    const data = developmentData;
     const sessionMarker =
       data.status === "interrupted"
         ? style.warning(glyphs.warning, capabilities)
@@ -341,11 +356,27 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
         `${childMarker} Child    ${data.child.exitCode === null ? clean(data.child.signal) : `exit ${String(data.child.exitCode)}`}`,
       );
     }
+    if (data.readiness !== undefined) {
+      lines.push(
+        `${data.readiness.ready ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Ready    ${data.readiness.ready ? "verified" : "not verified"} · ${String(data.readiness.assertions.filter(({ status }) => status === "passed").length)}/${String(data.readiness.assertions.length)} checks`,
+      );
+    }
+    if (data.verification !== undefined) {
+      lines.push(
+        `${data.verification.passed ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Verify   ${data.verification.passed ? "passed" : data.verification.timedOut ? "timed out" : `exit ${String(data.verification.exitCode)}`}`,
+      );
+    }
     lines.push(
       `${style.success(glyphs.success, capabilities)} Journal  ${String(data.journal.events.length)} events${data.journal.dropped === 0 ? "" : ` · ${String(data.journal.dropped)} dropped`}`,
       `${data.recovery.failed ? style.failure(glyphs.failure, capabilities) : style.success(glyphs.success, capabilities)} Recovery ${data.recovery.failed ? "failed" : data.recovery.recoveries === 0 ? "healthy" : `${String(data.recovery.recoveries)} verified repair(s)`}`,
       `${sessionMarker} Session  ${clean(data.sessionId)} · ${clean(data.status)}`,
     );
+    if (isAutomationRunData(result.data)) {
+      lines.push(
+        `${result.data.outcome === "success" ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Outcome  ${clean(result.data.outcome)}`,
+        `${style.accent(glyphs.active, capabilities)} Evidence ${clean(result.data.evidence.path)}`,
+      );
+    }
   }
 
   if (result.command === "logs" && isLogsData(result.data)) {
@@ -729,22 +760,38 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`hardware_serial=${clean(result.data.hardwareSerial)}\n`);
     }
   }
-  if (isDevData(result.data)) {
-    sink.write(`session_id=${clean(result.data.sessionId)}\n`);
-    sink.write(`status=${clean(result.data.status)}\n`);
-    sink.write(`preset=${clean(result.data.preset)}\n`);
-    if (result.data.selected !== undefined) {
-      sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+  const developmentData = isDevData(result.data)
+    ? result.data
+    : isAutomationRunData(result.data)
+      ? result.data.session
+      : null;
+  if (developmentData !== null) {
+    sink.write(`session_id=${clean(developmentData.sessionId)}\n`);
+    sink.write(`status=${clean(developmentData.status)}\n`);
+    sink.write(`preset=${clean(developmentData.preset)}\n`);
+    if (developmentData.selected !== undefined) {
+      sink.write(`serial=${clean(developmentData.selected.transport.serial)}\n`);
     }
-    if (result.data.planScope !== undefined) {
-      sink.write(`plan_scope=${clean(result.data.planScope)}\n`);
+    if (developmentData.planScope !== undefined) {
+      sink.write(`plan_scope=${clean(developmentData.planScope)}\n`);
     }
-    sink.write(`project_root=${clean(result.data.project.root)}\n`);
-    sink.write(`port_count=${String(result.data.ports.requested.length)}\n`);
-    sink.write(`journal_event_count=${String(result.data.journal.events.length)}\n`);
-    sink.write(`journal_dropped=${String(result.data.journal.dropped)}\n`);
-    if (result.data.child !== undefined) {
-      sink.write(`child_exit_code=${String(result.data.child.exitCode)}\n`);
+    sink.write(`project_root=${clean(developmentData.project.root)}\n`);
+    sink.write(`port_count=${String(developmentData.ports.requested.length)}\n`);
+    sink.write(`journal_event_count=${String(developmentData.journal.events.length)}\n`);
+    sink.write(`journal_dropped=${String(developmentData.journal.dropped)}\n`);
+    if (developmentData.child !== undefined) {
+      sink.write(`child_exit_code=${String(developmentData.child.exitCode)}\n`);
+    }
+    if (developmentData.readiness !== undefined) {
+      sink.write(`ready=${String(developmentData.readiness.ready)}\n`);
+    }
+    if (developmentData.verification !== undefined) {
+      sink.write(`verification_passed=${String(developmentData.verification.passed)}\n`);
+      sink.write(`verification_exit_code=${String(developmentData.verification.exitCode)}\n`);
+    }
+    if (isAutomationRunData(result.data)) {
+      sink.write(`outcome=${clean(result.data.outcome)}\n`);
+      sink.write(`evidence=${clean(result.data.evidence.path)}\n`);
     }
   }
   if (isLogsData(result.data)) {

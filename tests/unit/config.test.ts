@@ -250,6 +250,16 @@ describe("loadConfig", () => {
         logs: true,
         cleanupPorts: true,
         watch: true,
+        ready: {
+          timeoutMs: 45_000,
+          pollIntervalMs: 500,
+          all: [
+            { kind: "boot" },
+            { kind: "host-port", port: 8081 },
+            { kind: "foreground", package: "com.example.app" },
+            { kind: "ui", selector: "text=Sign in" },
+          ],
+        },
         recovery: {
           maxAttempts: 4,
           initialDelayMs: 250,
@@ -304,6 +314,16 @@ describe("loadConfig", () => {
           devLogs: false,
           devCleanupPorts: false,
           devWatch: true,
+          devReadiness: {
+            timeoutMs: 45_000,
+            pollIntervalMs: 500,
+            all: [
+              { kind: "boot" },
+              { kind: "host-port", port: 8081 },
+              { kind: "foreground", package: "com.example.app" },
+              { kind: "ui", selector: "text=Sign in" },
+            ],
+          },
           recoveryMaxAttempts: 4,
           recoveryInitialDelayMs: 250,
           recoveryMaxDelayMs: 2000,

@@ -20,6 +20,16 @@ breaking changes.
 - Let `dev --dry-run` resolve and validate the project, command, ports, and
   lifecycle hooks without requiring ADB or allocating an Android target. An
   explicit target selector still produces the target-resolved plan.
+- Add composable readiness contracts for boot, unlock, process, foreground
+  activity, exact UI selectors, host ports, HTTP responses, and bounded log
+  presence or absence. Expo and React Native sessions now verify Android boot
+  and Metro reachability before reporting ready.
+- Add `adb-ready run -- COMMAND` as a finite automation entrypoint: start the
+  configured development service, satisfy readiness, execute one timeout-bound
+  verification command, preserve its exit code, and clean owned resources.
+- Produce an atomic, redacted evidence bundle for every executed `run` with a
+  versioned manifest, structured result, NDJSON timeline, problems, logcat,
+  bounded AI context, JUnit XML, and GitHub step-summary Markdown.
 
 ### Fixed
 

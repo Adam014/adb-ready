@@ -196,6 +196,39 @@ describe("parseArguments", () => {
     });
   });
 
+  test("requires and preserves one bounded run command", () => {
+    expect(
+      parseArguments([
+        "run",
+        "--preset",
+        "expo",
+        "--run-timeout",
+        "10m",
+        "--dry-run",
+        "--",
+        "maestro",
+        "test",
+        ".maestro/smoke.yaml",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "run",
+        preset: "expo",
+        runTimeoutMs: 600_000,
+        dryRun: true,
+        runCommand: {
+          executable: "maestro",
+          args: ["test", ".maestro/smoke.yaml"],
+        },
+      },
+    });
+    expect(parseArguments(["run"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("parses local session history and problem inspection", () => {
     expect(parseArguments(["sessions"])).toMatchObject({
       ok: true,

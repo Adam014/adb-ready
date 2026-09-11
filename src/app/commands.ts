@@ -10,6 +10,13 @@ import {
   parseAdbNetworkEndpoint,
   parseLogcatThreadtimeLine,
 } from "../adb/parsers.js";
+import {
+  createAdbReadinessProbe,
+  type ReadinessAssertion,
+  type ReadinessResult,
+  readinessProblem,
+  waitForReadiness,
+} from "../automation/readiness.js";
 import { EventBus } from "../core/event-bus.js";
 import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.js";
 import { redactText } from "../core/redaction.js";
@@ -1886,6 +1893,7 @@ export interface DevCommand {
 
 export interface DevOptions {
   cwd: string;
+  mode?: "dev" | "run";
   preset?: DevPreset;
   packageManager?: PackageManagerName;
   command?: DevCommand;
@@ -1907,6 +1915,15 @@ export interface DevOptions {
   watch?: boolean;
   watchIntervalMs?: number;
   recovery?: RecoveryPolicyInput;
+  readiness?: {
+    all: readonly ReadinessAssertion[];
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+  };
+  verification?: {
+    command: DevCommand;
+    timeoutMs?: number;
+  };
   sessionStore?: false | SessionStoreOptions;
 }
 
@@ -1951,6 +1968,17 @@ export interface DevData {
     failed: number;
   };
   recovery: SessionWatchSummary;
+  readiness?: ReadinessResult;
+  verification?: {
+    command: DevData["command"];
+    passed: boolean;
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    durationMs: number;
+    timedOut: boolean;
+    stdoutTruncated: boolean;
+    stderrTruncated: boolean;
+  };
 }
 
 async function regularFile(file: string): Promise<boolean> {
@@ -2049,6 +2077,21 @@ function normalizeDevPorts(
   return { mappings, problems };
 }
 
+function devReadinessAssertions(
+  options: DevOptions,
+  preset: DevPreset,
+  mappings: readonly { device: string; host: string }[],
+): readonly ReadinessAssertion[] {
+  if (options.readiness !== undefined) return options.readiness.all;
+  if (preset !== "expo" && preset !== "react-native") return [];
+  const metro = mappings.find(({ device }) => device === "tcp:8081") ?? mappings[0];
+  const port = metro?.host.match(/^tcp:(\d+)$/u)?.[1];
+  return [
+    { kind: "boot" },
+    ...(port === undefined ? [] : [{ kind: "host-port" as const, port: Number(port) }]),
+  ];
+}
+
 interface ResolvedDevDefinition {
   project: ProjectDetection;
   preset: DevPreset;
@@ -2142,7 +2185,7 @@ export async function runDevOfflinePlan(
 ): Promise<CommandExecution<DevData>> {
   const bus = dependencies.bus ?? new EventBus(dependencies.clock);
   const idFactory = dependencies.idFactory ?? randomUUID;
-  const context = createContext("dev", { ...dependencies, bus, idFactory });
+  const context = createContext(options.mode ?? "dev", { ...dependencies, bus, idFactory });
   const sessionId = idFactory();
   const journal = new EventJournal(bus, options.journal);
   const resolved = await resolveDevDefinition(options, dependencies, context.commandId);
@@ -2152,6 +2195,7 @@ export async function runDevOfflinePlan(
     return execution;
   }
   const { project, preset, childCommand, mappings } = resolved.definition;
+  const readinessAssertions = devReadinessAssertions(options, preset, mappings);
   const commandCwd = path.resolve(project.root, childCommand.cwd ?? ".");
   const hookSteps = (event: DevHookEvent) =>
     (options.hooks?.[event] ?? []).map((hook, index) => ({
@@ -2182,7 +2226,23 @@ export async function runDevOfflinePlan(
       executable: redactedPath(childCommand.executable),
       args: childCommand.args.map((argument) => redactText(argument).value),
     },
+    ...readinessAssertions.map((assertion, index) => ({
+      id: `ready-${String(index + 1)}`,
+      title: `Verify ${assertion.kind} readiness`,
+      risk: "read-only" as const,
+    })),
     ...hookSteps("onReady"),
+    ...(options.verification === undefined
+      ? []
+      : [
+          {
+            id: "run-verification",
+            title: "Run the bounded verification command",
+            risk: "open-world" as const,
+            executable: redactedPath(options.verification.command.executable),
+            args: options.verification.command.args.map((argument) => redactText(argument).value),
+          },
+        ]),
     ...hookSteps("onChildExit"),
     ...hookSteps("finally"),
   ];
@@ -2257,7 +2317,7 @@ export async function runDev(
   const idFactory = dependencies.idFactory ?? randomUUID;
   const sessionId = idFactory();
   const journal = new EventJournal(bus, options.journal);
-  const context = createContext("dev", { ...dependencies, bus, idFactory });
+  const context = createContext(options.mode ?? "dev", { ...dependencies, bus, idFactory });
   const problems: Problem[] = [];
   const stateMachine = new SessionStateMachine(dependencies.clock);
   const transition = (to: SessionState, reason: string): void => {
@@ -2279,7 +2339,7 @@ export async function runDev(
         bus,
         {
           sessionId,
-          command: "dev",
+          command: options.mode ?? "dev",
           startedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
           projectRoot: options.cwd,
         },
@@ -2434,6 +2494,7 @@ export async function runDev(
   recorder?.addPrivateLiteral(project.root);
   transition("preparing-ports", "target selected and project configuration resolved");
   const normalizedPorts = { mappings: requestedMappings };
+  const readinessAssertions = devReadinessAssertions(options, preset, requestedMappings);
 
   const targetCorrelation = { ...correlation, targetId: selected.target.id };
   const clientOptions = {
@@ -2609,7 +2670,23 @@ export async function runDev(
         executable: commandData.executable,
         args: commandData.args,
       },
+      ...readinessAssertions.map((assertion, index) => ({
+        id: `ready-${String(index + 1)}`,
+        title: `Verify ${assertion.kind} readiness`,
+        risk: "read-only" as const,
+      })),
       ...hookPlanSteps("onReady"),
+      ...(options.verification === undefined
+        ? []
+        : [
+            {
+              id: "run-verification",
+              title: "Run the bounded verification command",
+              risk: "open-world" as const,
+              executable: redactedPath(options.verification.command.executable),
+              args: options.verification.command.args.map((argument) => redactText(argument).value),
+            },
+          ]),
       ...hookPlanSteps("onChildExit"),
       ...hookPlanSteps("finally"),
     ];
@@ -2758,6 +2835,7 @@ export async function runDev(
   let activeLogPromise: Promise<ProcessResult> | undefined;
   let logStreamFailed = false;
   const logFindings = new Map<string, LogFinding & { evidence: string }>();
+  const recentLogLines: string[] = [];
   const abortLogs = () => activeLogController?.abort();
   signal?.addEventListener("abort", abortLogs, { once: true });
   const startLogStream = (): void => {
@@ -2769,6 +2847,8 @@ export async function runDev(
       const parsed = parseLogcatThreadtimeLine(raw);
       const safeRaw = redactText(raw).value;
       const safeMessage = parsed === undefined ? safeRaw : redactText(parsed.message).value;
+      recentLogLines.push(safeMessage);
+      if (recentLogLines.length > 200) recentLogLines.shift();
       bus.emit({
         type: "log.record",
         source: "logcat",
@@ -2892,7 +2972,88 @@ export async function runDev(
     onStdoutChunk: (chunk) => childStdout.push(chunk),
     onStderrChunk: (chunk) => childStderr.push(chunk),
   });
-  const readyHooksSucceeded = await runHookPhase("onReady");
+  const readinessController = new AbortController();
+  if (signal?.aborted === true) readinessController.abort();
+  const abortReadiness = () => readinessController.abort();
+  signal?.addEventListener("abort", abortReadiness, { once: true });
+  bus.emit({
+    type: "readiness.started",
+    source: "readiness",
+    severity: "info",
+    message:
+      readinessAssertions.length === 0
+        ? "No additional app readiness assertions are configured"
+        : `Waiting for ${String(readinessAssertions.length)} app readiness assertion(s)`,
+    correlation: targetCorrelation,
+    data: { count: readinessAssertions.length },
+  });
+  const readinessPromise = waitForReadiness(
+    readinessAssertions,
+    createAdbReadinessProbe({
+      client,
+      target,
+      logLines: () => recentLogLines,
+      ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+    }),
+    {
+      signal: readinessController.signal,
+      ...(options.readiness?.timeoutMs === undefined
+        ? {}
+        : { timeoutMs: options.readiness.timeoutMs }),
+      ...(options.readiness?.pollIntervalMs === undefined
+        ? {}
+        : { pollIntervalMs: options.readiness.pollIntervalMs }),
+      ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+      ...(dependencies.sleep === undefined
+        ? {}
+        : {
+            sleep: async (milliseconds: number, readinessSignal?: AbortSignal) => {
+              await dependencies.sleep?.(
+                milliseconds,
+                readinessSignal ?? readinessController.signal,
+              );
+            },
+          }),
+    },
+  );
+  const readinessRace =
+    readinessAssertions.length === 0
+      ? ("readiness" as const)
+      : await Promise.race([
+          readinessPromise.then(() => "readiness" as const),
+          childPromise.then(() => "child" as const),
+        ]);
+  if (readinessRace === "child") readinessController.abort();
+  const readiness = await readinessPromise;
+  signal?.removeEventListener("abort", abortReadiness);
+  if (!readiness.ready && signal?.aborted !== true) {
+    problems.push(readinessProblem(readiness, context.commandId, selected.target.id));
+    bus.emit({
+      type: "readiness.failed",
+      source: "readiness",
+      severity: "error",
+      message: "Application readiness was not verified",
+      correlation: targetCorrelation,
+      data: {
+        attempts: readiness.attempts,
+        timedOut: readiness.timedOut,
+        assertions: readiness.assertions.map(({ assertion, status }) => ({
+          kind: assertion.kind,
+          status,
+        })),
+      },
+    });
+  } else if (readiness.ready) {
+    bus.emit({
+      type: "readiness.passed",
+      source: "readiness",
+      severity: "info",
+      message: "Application readiness was verified",
+      correlation: targetCorrelation,
+      data: { attempts: readiness.attempts, durationMs: readiness.durationMs },
+    });
+  }
+  const readyHooksSucceeded = readiness.ready && (await runHookPhase("onReady"));
   if (!readyHooksSucceeded) childController.abort();
   if (readyHooksSucceeded) transition("ready", "target, ports, logs, and child are ready");
 
@@ -3161,13 +3322,113 @@ export async function runDev(
             });
           },
         });
+  const verificationController = new AbortController();
+  if (signal?.aborted === true || !readyHooksSucceeded) verificationController.abort();
+  const abortVerification = () => verificationController.abort();
+  signal?.addEventListener("abort", abortVerification, { once: true });
+  const verificationCommand = options.verification?.command;
+  const verificationCommandData =
+    verificationCommand === undefined
+      ? undefined
+      : {
+          executable: redactedPath(verificationCommand.executable),
+          args: verificationCommand.args.map((argument) => redactText(argument).value),
+          cwd: redactedPath(path.resolve(project.root, verificationCommand.cwd ?? ".")),
+          envKeys: ["ANDROID_SERIAL"],
+        };
+  const verificationLines = (stream: "stderr" | "stdout") =>
+    new TextLineBuffer((line) => {
+      const safe = redactText(line).value;
+      bus.emit({
+        type: `verification.${stream}`,
+        source: `verification.${stream}`,
+        severity: stream === "stderr" ? "warning" : "info",
+        message: safe,
+        correlation: targetCorrelation,
+        data: { raw: safe },
+      });
+      options.onChildLine?.(stream, safe);
+    });
+  const verificationStdout = verificationLines("stdout");
+  const verificationStderr = verificationLines("stderr");
+  const verificationPromise =
+    verificationCommand === undefined || !readyHooksSucceeded
+      ? undefined
+      : (() => {
+          bus.emit({
+            type: "verification.started",
+            source: "verification",
+            severity: "info",
+            message: "Starting bounded verification command",
+            correlation: targetCorrelation,
+            data: verificationCommandData ?? {},
+          });
+          return runner({
+            executable: verificationCommand.executable,
+            args: verificationCommand.args,
+            cwd: path.resolve(project.root, verificationCommand.cwd ?? "."),
+            env: { ...verificationCommand.env, ANDROID_SERIAL: selected.transport.serial },
+            signal: verificationController.signal,
+            stdin: "ignore",
+            ...(options.verification?.timeoutMs === undefined
+              ? {}
+              : { timeoutMs: options.verification.timeoutMs }),
+            maxBufferBytes: 4 * 1024 * 1024,
+            onStdoutChunk: (chunk) => verificationStdout.push(chunk),
+            onStderrChunk: (chunk) => verificationStderr.push(chunk),
+          });
+        })();
   const firstCompletion = await Promise.race([
     childPromise.then(() => "child" as const),
     watchPromise.then((summary) =>
       summary.failed ? ("watch-failed" as const) : ("watch-stopped" as const),
     ),
+    ...(verificationPromise === undefined
+      ? []
+      : [verificationPromise.then(() => "verification" as const)]),
   ]);
-  if (firstCompletion === "watch-failed") childController.abort();
+  if (firstCompletion === "watch-failed") {
+    childController.abort();
+    verificationController.abort();
+  } else if (firstCompletion === "child") {
+    verificationController.abort();
+  } else if (firstCompletion === "verification") {
+    childController.abort();
+  }
+  const verificationProcess = await verificationPromise;
+  if (verificationProcess !== undefined) childController.abort();
+  verificationStdout.flush();
+  verificationStderr.flush();
+  signal?.removeEventListener("abort", abortVerification);
+  const verification: DevData["verification"] =
+    verificationProcess === undefined || verificationCommandData === undefined
+      ? undefined
+      : {
+          command: verificationCommandData,
+          passed: processSucceeded(verificationProcess),
+          exitCode: verificationProcess.exitCode,
+          signal: verificationProcess.signal,
+          durationMs: verificationProcess.durationMs,
+          timedOut: verificationProcess.timedOut,
+          stdoutTruncated: verificationProcess.stdoutTruncated,
+          stderrTruncated: verificationProcess.stderrTruncated,
+        };
+  if (verification !== undefined) {
+    bus.emit({
+      type: "verification.completed",
+      source: "verification",
+      severity: verification.passed ? "info" : "error",
+      message: verification.passed ? "Verification command passed" : "Verification command failed",
+      correlation: targetCorrelation,
+      data: {
+        passed: verification.passed,
+        exitCode: verification.exitCode,
+        signal: verification.signal,
+        timedOut: verification.timedOut,
+        durationMs: verification.durationMs,
+      },
+    });
+  }
   const child = await childPromise;
   watchController.abort();
   recoverySummary = await watchPromise;
@@ -3268,7 +3529,12 @@ export async function runDev(
         context.commandId,
       ),
     );
-  } else if (!processSucceeded(child) && readyHooksSucceeded && !recoverySummary.failed) {
+  } else if (
+    !processSucceeded(child) &&
+    readyHooksSucceeded &&
+    !recoverySummary.failed &&
+    !(verification !== undefined && child.aborted)
+  ) {
     problems.push(
       commandProblem(
         ProblemCode.ChildProcessFailed,
@@ -3279,6 +3545,24 @@ export async function runDev(
         [
           { source: "child", field: "exitCode", value: child.exitCode },
           { source: "child", field: "signal", value: child.signal },
+        ],
+      ),
+    );
+  }
+  if (verification !== undefined && !verification.passed && signal?.aborted !== true) {
+    problems.push(
+      commandProblem(
+        ProblemCode.VerificationFailed,
+        "verification.exit",
+        verification.timedOut
+          ? "The verification command exceeded its timeout."
+          : "The verification command failed.",
+        `The command exited with ${verification.exitCode === null ? String(verification.signal) : String(verification.exitCode)}.`,
+        context.commandId,
+        [
+          { source: "verification", field: "exitCode", value: verification.exitCode },
+          { source: "verification", field: "signal", value: verification.signal },
+          { source: "verification", field: "timedOut", value: verification.timedOut },
         ],
       ),
     );
@@ -3308,9 +3592,14 @@ export async function runDev(
     },
     hooks: hookSummary(),
     recovery: recoverySummary,
+    readiness,
+    ...(verification === undefined ? {} : { verification }),
   });
   if (problems.some(({ code }) => code === ProblemCode.ChildProcessFailed)) {
     execution.exitCode = preservedChildExitCode(child) ?? execution.exitCode;
+  }
+  if (verificationProcess !== undefined && !processSucceeded(verificationProcess)) {
+    execution.exitCode = preservedChildExitCode(verificationProcess) ?? execution.exitCode;
   }
   return execution;
 }

@@ -53,6 +53,11 @@ export interface ConfigValues {
   devLogs?: boolean;
   devCleanupPorts?: boolean;
   devWatch?: boolean;
+  devReadiness?: {
+    all: ReadinessAssertion[];
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+  };
   recoveryMaxAttempts?: number;
   recoveryInitialDelayMs?: number;
   recoveryMaxDelayMs?: number;
@@ -100,3 +105,5 @@ export interface LoadedConfig {
 export type ConfigLoadResult =
   | { ok: true; config: LoadedConfig }
   | { ok: false; errors: ConfigError[] };
+
+import type { ReadinessAssertion } from "../automation/readiness.js";

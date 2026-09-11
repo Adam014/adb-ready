@@ -31,6 +31,7 @@ export type CommandName =
   | "pair"
   | "ports"
   | "problems"
+  | "run"
   | "sessions"
   | "ui"
   | "version";
@@ -78,6 +79,8 @@ export interface CliOptions {
   logs?: boolean;
   cleanupPorts?: boolean;
   customCommand?: { executable: string; args: string[] };
+  runCommand?: { executable: string; args: string[] };
+  runTimeoutMs?: number;
   sessionAction?: "events" | "list" | "show";
   sessionId?: string;
   logPackage?: string;
@@ -149,6 +152,7 @@ const COMMANDS = new Set<CommandName>([
   "pair",
   "ports",
   "problems",
+  "run",
   "sessions",
   "ui",
   "version",
@@ -266,6 +270,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logs: boolean | undefined;
   let cleanupPorts: boolean | undefined;
   let customCommand: CliOptions["customCommand"];
+  let runCommand: CliOptions["runCommand"];
+  let runTimeoutMs: number | undefined;
   let sessionAction: CliOptions["sessionAction"];
   let sessionId: string | undefined;
   let logPackage: string | undefined;
@@ -315,14 +321,16 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     }
 
     if (argument === "--") {
-      if (command !== "dev") {
-        return failure("CLI_USAGE", "-- command passthrough can only be used with dev.");
+      if (command !== "dev" && command !== "run") {
+        return failure("CLI_USAGE", "-- command passthrough can only be used with dev or run.");
       }
       const executable = argv[index + 1];
       if (executable === undefined || executable.trim() === "") {
-        return failure("CLI_USAGE", "dev -- requires an executable.");
+        return failure("CLI_USAGE", `${command} -- requires an executable.`);
       }
-      customCommand = { executable, args: argv.slice(index + 2) };
+      const passthrough = { executable, args: argv.slice(index + 2) };
+      if (command === "run") runCommand = passthrough;
+      else customCommand = passthrough;
       break;
     }
 
@@ -356,6 +364,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "pair" ||
           candidate === "ports" ||
           candidate === "problems" ||
+          candidate === "run" ||
           candidate === "sessions" ||
           candidate === "ui"
         ) {
@@ -846,6 +855,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           option,
         );
       }
+    } else if (option === "--run-timeout") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      runTimeoutMs = parseDuration(value);
+      if (runTimeoutMs === undefined) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid run timeout: ${value}. Use a positive duration such as 30s or 10m.`,
+          option,
+        );
+      }
     } else if (option === "--adb") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -937,6 +957,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command === "logs" ||
     command === "open" ||
     command === "ports" ||
+    command === "run" ||
     command === "ui";
   if (select && !targetCommand) {
     return failure(
@@ -980,6 +1001,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     dryRun &&
     command !== "connect" &&
     command !== "dev" &&
+    command !== "run" &&
     command !== "app" &&
     command !== "open" &&
     command !== "pair" &&
@@ -990,7 +1012,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   ) {
     return failure(
       "CLI_USAGE",
-      "--dry-run can only be used with app, connect, dev, init, open, pair, or ports.",
+      "--dry-run can only be used with app, connect, dev, run, init, open, pair, or ports.",
       "--dry-run",
     );
   }
@@ -1162,6 +1184,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (
     command !== "dev" &&
+    command !== "run" &&
     command !== "init" &&
     (preset !== undefined ||
       packageManager !== undefined ||
@@ -1170,7 +1193,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       cleanupPorts !== undefined ||
       customCommand !== undefined)
   ) {
-    return failure("CLI_USAGE", "Development options can only be used with the dev command.");
+    return failure("CLI_USAGE", "Development options can only be used with dev or run.");
+  }
+  if (command === "run" && runCommand === undefined) {
+    return failure("CLI_USAGE", "run requires a bounded command after --.");
+  }
+  if (runTimeoutMs !== undefined && command !== "run") {
+    return failure("CLI_USAGE", "--run-timeout can only be used with run.", "--run-timeout");
   }
   if (
     command !== "logs" &&
@@ -1248,6 +1277,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logs === undefined ? {} : { logs }),
       ...(cleanupPorts === undefined ? {} : { cleanupPorts }),
       ...(customCommand === undefined ? {} : { customCommand }),
+      ...(runCommand === undefined ? {} : { runCommand }),
+      ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
       ...(sessionAction === undefined ? {} : { sessionAction }),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(logPackage === undefined ? {} : { logPackage }),

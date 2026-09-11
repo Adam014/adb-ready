@@ -63,6 +63,7 @@ const DEV_KEYS = new Set([
   "logs",
   "cleanupPorts",
   "watch",
+  "ready",
   "recovery",
   "session",
   "journal",
@@ -88,6 +89,20 @@ const HOOK_EVENTS = new Set([
 const HOOK_KEYS = new Set(["run", "timeoutMs", "failure", "cwd", "envAllowlist"]);
 const RECOVERY_KEYS = new Set(["maxAttempts", "initialDelayMs", "maxDelayMs", "totalTimeoutMs"]);
 const SESSION_KEYS = new Set(["persist", "maxSessions", "maxAgeDays", "maxBytes"]);
+const READY_KEYS = new Set(["all", "timeoutMs", "pollIntervalMs"]);
+const READY_ASSERTION_KEYS = new Set([
+  "kind",
+  "value",
+  "package",
+  "host",
+  "port",
+  "url",
+  "status",
+  "contains",
+  "absent",
+  "selector",
+  "state",
+]);
 const PROFILE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -125,6 +140,130 @@ function validateUnknownKeys(
       );
     }
   }
+}
+
+function validateReadiness(
+  ready: unknown,
+  source: ConfigError["source"],
+  location: string,
+  errors: ConfigError[],
+): ConfigValues["devReadiness"] {
+  if (!isObject(ready)) {
+    errors.push(error(source, location, "dev.ready", "dev.ready must be an object."));
+    return undefined;
+  }
+  validateUnknownKeys(ready, READY_KEYS, "dev.ready.", source, location, errors);
+  const all = ready.all;
+  const assertions: NonNullable<ConfigValues["devReadiness"]>["all"] = [];
+  if (!Array.isArray(all)) {
+    errors.push(error(source, location, "dev.ready.all", "dev.ready.all must be an array."));
+  } else {
+    all.forEach((candidate, index) => {
+      const prefix = `dev.ready.all.${String(index)}`;
+      if (!isObject(candidate)) {
+        errors.push(error(source, location, prefix, "Readiness assertion must be an object."));
+        return;
+      }
+      validateUnknownKeys(candidate, READY_ASSERTION_KEYS, `${prefix}.`, source, location, errors);
+      const kind = candidate.kind;
+      let assertion: (typeof assertions)[number] | undefined;
+      if (kind === "boot" || kind === "unlocked") assertion = { kind };
+      else if (kind === "foreground" || kind === "process") {
+        assertion =
+          typeof candidate.package === "string" &&
+          /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(candidate.package)
+            ? { kind, package: candidate.package }
+            : undefined;
+      } else if (kind === "activity") {
+        assertion =
+          typeof candidate.value === "string" && candidate.value.trim() !== ""
+            ? { kind, value: candidate.value }
+            : undefined;
+      } else if (kind === "host-port") {
+        assertion =
+          Number.isSafeInteger(candidate.port) &&
+          (candidate.port as number) >= 1 &&
+          (candidate.port as number) <= 65_535 &&
+          (candidate.host === undefined ||
+            (typeof candidate.host === "string" && candidate.host.trim() !== ""))
+            ? {
+                kind,
+                port: candidate.port as number,
+                ...(candidate.host === undefined ? {} : { host: candidate.host as string }),
+              }
+            : undefined;
+      } else if (kind === "http") {
+        const statuses = candidate.status;
+        assertion =
+          typeof candidate.url === "string" &&
+          /^https?:\/\//u.test(candidate.url) &&
+          (statuses === undefined ||
+            (Array.isArray(statuses) &&
+              statuses.length > 0 &&
+              statuses.every(
+                (value) => Number.isSafeInteger(value) && value >= 100 && value <= 599,
+              )))
+            ? {
+                kind,
+                url: candidate.url,
+                ...(statuses === undefined ? {} : { status: statuses as number[] }),
+              }
+            : undefined;
+      } else if (kind === "log") {
+        assertion =
+          typeof candidate.contains === "string" &&
+          candidate.contains.length >= 1 &&
+          candidate.contains.length <= 256 &&
+          (candidate.absent === undefined || typeof candidate.absent === "boolean")
+            ? {
+                kind,
+                contains: candidate.contains,
+                ...(candidate.absent === undefined ? {} : { absent: candidate.absent }),
+              }
+            : undefined;
+      } else if (kind === "ui") {
+        assertion =
+          typeof candidate.selector === "string" &&
+          /^(?:desc|id|package|text)=.{1,256}$/u.test(candidate.selector) &&
+          (candidate.state === undefined ||
+            candidate.state === "visible" ||
+            candidate.state === "gone")
+            ? {
+                kind,
+                selector: candidate.selector,
+                ...(candidate.state === undefined ? {} : { state: candidate.state }),
+              }
+            : undefined;
+      }
+      if (assertion === undefined) {
+        errors.push(
+          error(source, location, prefix, "Invalid readiness assertion or assertion fields."),
+        );
+      } else assertions.push(assertion);
+    });
+  }
+  let validTiming = true;
+  for (const key of ["timeoutMs", "pollIntervalMs"] as const) {
+    const candidate = ready[key];
+    if (
+      candidate !== undefined &&
+      (!Number.isSafeInteger(candidate) || (candidate as number) < 1)
+    ) {
+      validTiming = false;
+      errors.push(
+        error(source, location, `dev.ready.${key}`, `dev.ready.${key} must be a positive integer.`),
+      );
+    }
+  }
+  return Array.isArray(all) && assertions.length === all.length && validTiming
+    ? {
+        all: assertions,
+        ...(ready.timeoutMs === undefined ? {} : { timeoutMs: ready.timeoutMs as number }),
+        ...(ready.pollIntervalMs === undefined
+          ? {}
+          : { pollIntervalMs: ready.pollIntervalMs as number }),
+      }
+    : undefined;
 }
 
 function validateDocument(
@@ -484,6 +623,10 @@ function validateDocument(
             values[configKey] = candidate;
           }
         }
+      }
+      if (document.dev.ready !== undefined) {
+        const readiness = validateReadiness(document.dev.ready, source, location, errors);
+        if (readiness !== undefined) values.devReadiness = readiness;
       }
       if (document.dev.recovery !== undefined) {
         if (!isObject(document.dev.recovery)) {
