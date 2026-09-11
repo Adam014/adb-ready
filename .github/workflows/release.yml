@@ -100,7 +100,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: bun run release:check -- --publish "$RELEASE_TAG"
 
-      - name: Require an immutable release tag for publish mode
+      - name: Require an immutable release target for publish mode
         if: inputs.mode == 'publish'
         env:
           RELEASE_REF: ${{ inputs.ref }}
@@ -108,7 +108,10 @@ jobs:
           WORKFLOW_REF: ${{ github.ref }}
         run: |
           test "$RELEASE_REF" = "$RELEASE_TAG"
-          test "$WORKFLOW_REF" = "refs/tags/$RELEASE_TAG"
+          if [ "$WORKFLOW_REF" != "refs/heads/main" ] && [ "$WORKFLOW_REF" != "refs/tags/$RELEASE_TAG" ]; then
+            echo "::error::Publish must be dispatched from protected main or the matching release tag."
+            exit 1
+          fi
           test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
 
       - name: Create the immutable npm artifact

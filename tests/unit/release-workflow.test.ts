@@ -8,8 +8,8 @@ describe("release workflow", () => {
     const workflow = await readFile(workflowUrl, "utf8");
     const preflightJob = workflow.indexOf("  release-preflight:");
     const validateJob = workflow.indexOf("  validate:");
-    const immutableTagStep = workflow.indexOf(
-      "- name: Require an immutable release tag for publish mode",
+    const immutableTargetStep = workflow.indexOf(
+      "- name: Require an immutable release target for publish mode",
     );
     const draftReleaseStep = workflow.indexOf(
       "- name: Require a matching draft GitHub release for publish mode",
@@ -19,10 +19,10 @@ describe("release workflow", () => {
 
     expect(preflightJob).toBeGreaterThan(-1);
     expect(validateJob).toBeGreaterThan(preflightJob);
-    expect(immutableTagStep).toBeGreaterThan(-1);
+    expect(immutableTargetStep).toBeGreaterThan(-1);
     expect(draftReleaseStep).toBeGreaterThan(preflightJob);
     expect(draftReleaseStep).toBeLessThan(validateJob);
-    expect(artifactStep).toBeGreaterThan(immutableTagStep);
+    expect(artifactStep).toBeGreaterThan(immutableTargetStep);
     expect(publishStep).toBeGreaterThan(artifactStep);
 
     const draftPreflight = workflow.slice(preflightJob, validateJob);
@@ -39,6 +39,10 @@ describe("release workflow", () => {
     expect(validation).toContain(
       "if: always() && (inputs.mode == 'validate' || needs.release-preflight.result == 'success')",
     );
+    expect(validation).toContain('test "$RELEASE_REF" = "$RELEASE_TAG"');
+    expect(validation).toContain('"refs/heads/main"');
+    expect(validation).toContain('"refs/tags/$RELEASE_TAG"');
+    expect(validation).toContain('git rev-parse "$RELEASE_TAG^{commit}"');
     expect(validation).not.toContain("contents: write");
   });
 });
