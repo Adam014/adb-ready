@@ -13,6 +13,8 @@ breaking changes.
 
 - Clarify package ownership and normalize the maintainer identity used by
   repository history and published package metadata.
+- Reorganize the public README around six user outcomes and explicit entry
+  paths for coding agents, terminal users, and CI automation.
 
 ## [0.3.0] - 2026-09-11
 
