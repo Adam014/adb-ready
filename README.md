@@ -27,10 +27,38 @@ verified evidence—for developers, agents, and CI.
 
 Install ADB Ready in the Android project your team wants to run:
 
+**npm** · default
+
 ```bash
 npm install --save-dev adb-ready
 npx adb-ready dev
 ```
+
+<details>
+<summary><strong>Use pnpm, Yarn, or Bun</strong></summary>
+
+#### pnpm
+
+```bash
+pnpm add --save-dev adb-ready
+pnpm exec adb-ready dev
+```
+
+#### Yarn
+
+```bash
+yarn add --dev adb-ready
+yarn adb-ready dev
+```
+
+#### Bun
+
+```bash
+bun add --dev adb-ready
+bunx adb-ready dev
+```
+
+</details>
 
 ```text
 $ adb-ready dev
