@@ -13,6 +13,8 @@ real app, verify what happened, and bring back evidence—not guesses.
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
 [![Deno](https://img.shields.io/badge/Deno_2-tested-111827?logo=deno&logoColor=white)](https://deno.com/)
+[![Flutter](https://img.shields.io/badge/Flutter-supported-02569B?logo=flutter&logoColor=white)](./docs/dev-sessions.md)
+[![Capacitor](https://img.shields.io/badge/Capacitor-supported-119EFF?logo=capacitor&logoColor=white)](./docs/dev-sessions.md)
 [![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
 
 [Quick start](#quick-start) · [AI agents](#built-for-agentic-android-development) · [Why ADB Ready](#why-adb-ready) ·
@@ -140,7 +142,7 @@ Running `adb-ready` without a command opens the interactive workflow home.
 
 | I want to…                                                  | Start here                                                                          |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| launch Expo, React Native, Gradle, or my own command        | [`adb-ready dev`](./docs/dev-sessions.md)                                           |
+| launch Expo, React Native, Flutter, Capacitor, Gradle, or my own command | [`adb-ready dev`](./docs/dev-sessions.md)                               |
 | pair or reconnect an Android device over Wi-Fi              | [Targets and Wireless debugging](./docs/targets-and-wireless.md)                    |
 | choose the right device when several are connected          | [Deterministic target selection](./docs/targets-and-wireless.md#explicit-selection) |
 | expose Metro, a local API, or a debugger to Android         | [Port workflows](./docs/dev-sessions.md#port-ownership)                             |
