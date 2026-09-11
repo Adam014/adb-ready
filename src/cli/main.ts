@@ -254,7 +254,11 @@ context implicitly.
 `,
   ui: `Usage:
   adb-ready ui tap REF|X Y [--dry-run]
+  adb-ready ui tap SELECTOR [--dry-run]
   adb-ready ui long-press REF|X Y [--dry-run]
+  adb-ready ui find SELECTOR
+  adb-ready ui assert SELECTOR [--state visible|gone]
+  adb-ready ui compare DIGEST
   adb-ready ui swipe up|down|left|right [--dry-run]
   adb-ready ui swipe X1 Y1 X2 Y2 [--dry-run]
   adb-ready ui type TEXT [--submit] [--dry-run]
@@ -262,8 +266,10 @@ context implicitly.
   adb-ready ui wait SELECTOR [--state visible|gone] [--timeout 5s]
 
 Uses fresh UI evidence before every mutation. A ui:* reference is accepted only
-while its snapshot digest still matches. Selectors are exact id=, text=, desc=,
-or package= values. Typed text uses a conservative shell-safe character set.
+while its snapshot digest still matches. Compact selectors use exact class=,
+id=, text=, desc=, or package= values; MCP additionally supports structured
+contains and prefix matching with state qualifiers. Typed text uses a
+conservative shell-safe character set.
 `,
   devices: `Usage: adb-ready devices [options]
 

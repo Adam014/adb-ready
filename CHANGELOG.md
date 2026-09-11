@@ -37,6 +37,10 @@ breaking changes.
   unambiguous paired wireless service before binding it.
 - Exercise the complete MCP contract on Node.js, Bun, and Deno across both the
   legacy 2025-11-25 and modern 2026-07-28 protocol eras.
+- Add semantic UI find, assert, digest comparison, and selector-driven tap or
+  long-press workflows. Structured selectors support exact, prefix, and
+  contains matching plus enabled/actionable qualifiers; ambiguous mutations
+  fail instead of guessing.
 
 ### Fixed
 

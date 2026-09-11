@@ -157,7 +157,17 @@ const COMMANDS = new Set<CommandName>([
   "ui",
   "version",
 ]);
-const UI_ACTIONS = new Set<UiAction>(["long-press", "press", "swipe", "tap", "type", "wait"]);
+const UI_ACTIONS = new Set<UiAction>([
+  "assert",
+  "compare",
+  "find",
+  "long-press",
+  "press",
+  "swipe",
+  "tap",
+  "type",
+  "wait",
+]);
 const APP_ACTIONS = new Set<AppAction>([
   "clear-data",
   "info",
@@ -443,7 +453,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           if (!UI_ACTIONS.has(argument as UiAction)) {
             return failure(
               "CLI_INVALID_VALUE",
-              `Invalid UI action: ${argument}. Expected tap, long-press, swipe, type, press, or wait.`,
+              `Invalid UI action: ${argument}. Expected find, assert, compare, tap, long-press, swipe, type, press, or wait.`,
             );
           }
           uiAction = argument as UiAction;
@@ -1057,6 +1067,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       const parsed = Number(value);
       return Number.isSafeInteger(parsed) && parsed <= 100_000 ? parsed : undefined;
     };
+    const selector = (value: string | undefined): string | undefined =>
+      value !== undefined && /^(?:class|desc|id|package|text)=.{1,256}$/u.test(value)
+        ? value
+        : undefined;
     if (uiAction === "tap" || uiAction === "long-press") {
       const [first, second] = uiOperands;
       const x = coordinate(first);
@@ -1068,10 +1082,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
             : { action: "long-press", ref: first ?? "" };
       else if (uiOperands.length === 2 && x !== undefined && y !== undefined)
         uiRequest = uiAction === "tap" ? { action: "tap", x, y } : { action: "long-press", x, y };
+      else if (uiOperands.length === 1 && selector(first) !== undefined)
+        uiRequest =
+          uiAction === "tap"
+            ? { action: "tap", selector: first ?? "" }
+            : { action: "long-press", selector: first ?? "" };
       else
         return failure(
           "CLI_USAGE",
-          `ui ${uiAction} requires one current UI ref or two integer coordinates.`,
+          `ui ${uiAction} requires one selector, current UI ref, or two integer coordinates.`,
         );
     } else if (uiAction === "swipe") {
       const direction = uiOperands[0] as UiDirection | undefined;
@@ -1119,6 +1138,25 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         );
       }
       uiRequest = { action: "press", key };
+    } else if (uiAction === "find" || uiAction === "assert") {
+      const selected = selector(uiOperands[0]);
+      if (uiOperands.length !== 1 || selected === undefined) {
+        return failure("CLI_USAGE", `ui ${uiAction} requires one valid selector.`);
+      }
+      uiRequest =
+        uiAction === "find"
+          ? { action: "find", selector: selected }
+          : {
+              action: "assert",
+              selector: selected,
+              ...(uiWaitState === undefined ? {} : { state: uiWaitState }),
+            };
+    } else if (uiAction === "compare") {
+      const digest = uiOperands[0];
+      if (uiOperands.length !== 1 || digest === undefined || !/^[a-f0-9]{64}$/u.test(digest)) {
+        return failure("CLI_USAGE", "ui compare requires one complete lowercase UI digest.");
+      }
+      uiRequest = { action: "compare", digest };
     } else {
       if (uiOperands.length !== 1) {
         return failure("CLI_USAGE", "ui wait requires one exact selector.");
@@ -1143,11 +1181,21 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (uiSubmit && (command !== "ui" || uiAction !== "type")) {
     return failure("CLI_USAGE", "--submit can only be used with ui type.");
   }
-  if (uiWaitState !== undefined && (command !== "ui" || uiAction !== "wait")) {
-    return failure("CLI_USAGE", "--state can only be used with ui wait.");
+  if (
+    uiWaitState !== undefined &&
+    (command !== "ui" || (uiAction !== "wait" && uiAction !== "assert"))
+  ) {
+    return failure("CLI_USAGE", "--state can only be used with ui wait or ui assert.");
   }
-  if (dryRun && command === "ui" && uiAction === "wait") {
-    return failure("CLI_USAGE", "--dry-run is not meaningful for the read-only ui wait action.");
+  if (
+    dryRun &&
+    command === "ui" &&
+    (uiAction === "wait" || uiAction === "find" || uiAction === "assert" || uiAction === "compare")
+  ) {
+    return failure(
+      "CLI_USAGE",
+      `--dry-run is not meaningful for the read-only ui ${uiAction} action.`,
+    );
   }
   if (outputPath !== undefined && command !== "capture") {
     return failure("CLI_USAGE", "--out can only be used with capture.");
@@ -1317,7 +1365,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         ? {}
         : {
             uiRequest:
-              dryRun && uiRequest.action !== "wait" ? { ...uiRequest, dryRun: true } : uiRequest,
+              dryRun &&
+              (uiRequest.action === "tap" ||
+                uiRequest.action === "long-press" ||
+                uiRequest.action === "swipe" ||
+                uiRequest.action === "type" ||
+                uiRequest.action === "press")
+                ? { ...uiRequest, dryRun: true }
+                : uiRequest,
           }),
     },
   };

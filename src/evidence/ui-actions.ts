@@ -11,21 +11,43 @@ import { type OperationPlan, type Problem, SCHEMA_VERSION } from "../domain/cont
 import type { SelectedTarget } from "../target/selection.js";
 import { parseUiHierarchy, type UiHierarchySnapshot, type UiNode } from "./ui-hierarchy.js";
 
-export type UiAction = "long-press" | "press" | "swipe" | "tap" | "type" | "wait";
+export type UiAction =
+  | "assert"
+  | "compare"
+  | "find"
+  | "long-press"
+  | "press"
+  | "swipe"
+  | "tap"
+  | "type"
+  | "wait";
 export type UiDirection = "down" | "left" | "right" | "up";
 export type UiKey = "back" | "enter" | "home" | "menu" | "volume-down" | "volume-up";
 export type UiWaitState = "gone" | "visible";
+export interface UiSelectorSpec {
+  field: "class" | "desc" | "id" | "package" | "text";
+  value: string;
+  match?: "contains" | "exact" | "starts-with" | undefined;
+  enabled?: boolean | undefined;
+  actionable?: boolean | undefined;
+}
+export type UiSelector = string | UiSelectorSpec;
 
 export type UiActionRequest =
   | { action: "tap"; ref: string; dryRun?: boolean }
   | { action: "tap"; x: number; y: number; dryRun?: boolean }
+  | { action: "tap"; selector: UiSelector; occurrence?: number; dryRun?: boolean }
   | { action: "long-press"; ref: string; dryRun?: boolean }
   | { action: "long-press"; x: number; y: number; dryRun?: boolean }
+  | { action: "long-press"; selector: UiSelector; occurrence?: number; dryRun?: boolean }
   | { action: "swipe"; direction: UiDirection; dryRun?: boolean }
   | { action: "swipe"; x1: number; y1: number; x2: number; y2: number; dryRun?: boolean }
   | { action: "type"; text: string; submit?: boolean; dryRun?: boolean }
   | { action: "press"; key: UiKey; dryRun?: boolean }
-  | { action: "wait"; selector: string; state?: UiWaitState; timeoutMs?: number };
+  | { action: "find"; selector: UiSelector; limit?: number }
+  | { action: "assert"; selector: UiSelector; state?: UiWaitState }
+  | { action: "compare"; digest: string }
+  | { action: "wait"; selector: UiSelector; state?: UiWaitState; timeoutMs?: number };
 
 export interface UiSnapshotSummary {
   digest: string;
@@ -37,16 +59,18 @@ export interface UiSnapshotSummary {
 export interface UiActionData {
   action: UiAction;
   selected: SelectedTarget;
-  status: "completed" | "matched" | "planned" | "timed-out";
+  status: "completed" | "matched" | "observed" | "planned" | "timed-out";
   verified: boolean;
   attempts: number;
   before?: UiSnapshotSummary;
   after?: UiSnapshotSummary;
   input: Record<string, boolean | number | string>;
   resolved?: { ref?: string; x: number; y: number };
-  verification: "planned" | "selector-matched" | "ui-changed" | "ui-unchanged";
+  verification: "planned" | "query-completed" | "selector-matched" | "ui-changed" | "ui-unchanged";
   verificationGap?: "ui-unchanged";
   matched?: Pick<UiNode, "className" | "contentDescription" | "ref" | "resourceId" | "text">;
+  matches?: Array<Pick<UiNode, "className" | "contentDescription" | "ref" | "resourceId" | "text">>;
+  matchCount?: number;
   plan?: OperationPlan;
 }
 
@@ -226,6 +250,90 @@ function resolveRef(
   };
 }
 
+function resolveSelector(
+  selector: UiSelector,
+  occurrence: number | undefined,
+  action: "long-press" | "tap",
+  snapshot: UiHierarchySnapshot,
+  commandId: string,
+  problems: Problem[],
+): { ref: string; x: number; y: number; matched: UiNode } | undefined {
+  const matches = snapshot.nodes.filter((node) => selectorMatch(selector, node));
+  if (matches.length === 0) {
+    problems.push(
+      problem(
+        "UI_SELECTOR_NOT_FOUND",
+        "input.ui.selector",
+        `No UI node matches ${selectorLabel(selector)}.`,
+        "Inspect the current UI or wait for the selector before acting.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  if (occurrence === undefined && matches.length > 1) {
+    problems.push(
+      problem(
+        "UI_SELECTOR_AMBIGUOUS",
+        "input.ui.selector",
+        `${selectorLabel(selector)} matches ${String(matches.length)} UI nodes.`,
+        "Add selector qualifiers or pass a one-based occurrence explicitly.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  if (occurrence !== undefined && (!Number.isSafeInteger(occurrence) || occurrence < 1)) {
+    problems.push(
+      problem(
+        "UI_SELECTOR_OCCURRENCE_INVALID",
+        "input.ui.selector",
+        "UI selector occurrence must be a one-based integer.",
+        "Use a value starting at 1 or make the selector unique.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  const node = matches[(occurrence ?? 1) - 1];
+  if (node === undefined) {
+    problems.push(
+      problem(
+        "UI_SELECTOR_OCCURRENCE_MISSING",
+        "input.ui.selector",
+        `${selectorLabel(selector)} has no occurrence ${String(occurrence)}.`,
+        `Choose an occurrence from 1 to ${String(matches.length)}.`,
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  const applicable =
+    node.enabled &&
+    (action === "long-press" ? node.longClickable : node.clickable || node.checkable) &&
+    node.bounds !== undefined &&
+    node.bounds.right > node.bounds.left &&
+    node.bounds.bottom > node.bounds.top;
+  if (!applicable || node.bounds === undefined) {
+    problems.push(
+      problem(
+        "UI_SELECTOR_NOT_ACTIONABLE",
+        "input.ui.selector",
+        `The selected UI node is not ${action === "tap" ? "clickable" : "long-clickable"}.`,
+        "Match an enabled actionable node or inspect the hierarchy for a better selector.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  return {
+    ref: node.ref,
+    x: Math.floor((node.bounds.left + node.bounds.right) / 2),
+    y: Math.floor((node.bounds.top + node.bounds.bottom) / 2),
+    matched: node,
+  };
+}
+
 function remoteArgs(ready: Ready, config: CommandConfig, args: string[]): string[] {
   return [
     ...(config.adbHost === undefined ? [] : ["-H", config.adbHost]),
@@ -237,20 +345,61 @@ function remoteArgs(ready: Ready, config: CommandConfig, args: string[]): string
   ];
 }
 
-function selectorMatch(selector: string, node: UiNode): boolean {
+function normalizeSelector(selector: UiSelector): UiSelectorSpec | undefined {
+  if (typeof selector !== "string") {
+    return selector.value.length >= 1 && selector.value.length <= 256 ? selector : undefined;
+  }
   const separator = selector.indexOf("=");
-  if (separator < 1) return false;
-  const kind = selector.slice(0, separator);
+  if (separator < 1) return undefined;
+  const field = selector.slice(0, separator);
   const value = selector.slice(separator + 1);
-  if (value === "") return false;
-  if (kind === "id") return node.resourceId === value;
-  if (kind === "text") return node.text === value;
-  if (kind === "desc") return node.contentDescription === value;
-  return kind === "package" && node.packageName === value;
+  if (!new Set(["class", "desc", "id", "package", "text"]).has(field) || value.length < 1) {
+    return undefined;
+  }
+  if (value.length > 256) return undefined;
+  return { field: field as UiSelectorSpec["field"], value, match: "exact" };
 }
 
-function validSelector(selector: string): boolean {
-  return /^(?:desc|id|package|text)=.{1,256}$/u.test(selector);
+function selectorLabel(selector: UiSelector): string {
+  if (typeof selector === "string") return selector;
+  const qualifiers = [
+    selector.match ?? "exact",
+    ...(selector.enabled === undefined ? [] : [`enabled:${String(selector.enabled)}`]),
+    ...(selector.actionable === undefined ? [] : [`actionable:${String(selector.actionable)}`]),
+  ];
+  return `${selector.field}=${selector.value} (${qualifiers.join(",")})`;
+}
+
+function nodeValue(field: UiSelectorSpec["field"], node: UiNode): string | undefined {
+  if (field === "id") return node.resourceId;
+  if (field === "text") return node.text;
+  if (field === "desc") return node.contentDescription;
+  if (field === "class") return node.className;
+  return node.packageName;
+}
+
+function actionable(node: UiNode): boolean {
+  return (
+    node.clickable || node.checkable || node.focusable || node.longClickable || node.scrollable
+  );
+}
+
+function selectorMatch(selector: UiSelector, node: UiNode): boolean {
+  const parsed = normalizeSelector(selector);
+  if (parsed === undefined) return false;
+  const candidate = nodeValue(parsed.field, node);
+  if (candidate === undefined) return false;
+  const matched =
+    parsed.match === "contains"
+      ? candidate.includes(parsed.value)
+      : parsed.match === "starts-with"
+        ? candidate.startsWith(parsed.value)
+        : candidate === parsed.value;
+  return (
+    matched &&
+    (parsed.enabled === undefined || parsed.enabled === node.enabled) &&
+    (parsed.actionable === undefined || parsed.actionable === actionable(node))
+  );
 }
 
 async function delay(
@@ -297,19 +446,107 @@ export async function runUiAction(
   const ready = await readyTarget(current, config, dependencies, problems, signal);
   if (ready === undefined) return finish<UiActionData>(current, null, problems);
 
-  if (request.action === "wait") {
-    if (!validSelector(request.selector)) {
+  if (request.action === "find" || request.action === "assert" || request.action === "wait") {
+    if (normalizeSelector(request.selector) === undefined) {
       problems.push(
         problem(
           "UI_SELECTOR_INVALID",
           "input.ui.selector",
-          `Invalid UI selector: ${request.selector}.`,
-          "Use an exact id=, text=, desc=, or package= selector.",
+          `Invalid UI selector: ${selectorLabel(request.selector)}.`,
+          "Use a bounded selector for id, text, description, class, or package.",
           current.commandId,
         ),
       );
       return finish<UiActionData>(current, null, problems);
     }
+  }
+
+  if (request.action === "find" || request.action === "assert") {
+    const snapshot = await hierarchy(ready, current.commandId, problems, signal);
+    if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
+    const matches = snapshot.nodes.filter((node) => selectorMatch(request.selector, node));
+    const limit = request.action === "find" ? (request.limit ?? 20) : 1;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      problems.push(
+        problem(
+          "UI_FIND_LIMIT_INVALID",
+          "input.ui.limit",
+          "UI result limit must be from 1 to 100.",
+          "Choose a bounded result limit.",
+          current.commandId,
+        ),
+      );
+      return finish<UiActionData>(current, null, problems);
+    }
+    const state = request.action === "assert" ? (request.state ?? "visible") : undefined;
+    const assertionPassed =
+      state === undefined || (state === "visible" ? matches.length > 0 : matches.length === 0);
+    if (!assertionPassed) {
+      problems.push(
+        problem(
+          "UI_ASSERTION_FAILED",
+          "ui.assert",
+          `Expected ${selectorLabel(request.selector)} to be ${state}.`,
+          `The current hierarchy contains ${String(matches.length)} matching node(s).`,
+          current.commandId,
+        ),
+      );
+    }
+    return finish(
+      current,
+      {
+        action: request.action,
+        selected: ready.selected,
+        status: request.action === "find" ? "observed" : assertionPassed ? "matched" : "observed",
+        verified: request.action === "find" || assertionPassed,
+        attempts: 1,
+        after: summary(snapshot),
+        input: {
+          selector: selectorLabel(request.selector),
+          ...(state === undefined ? { limit } : { state }),
+        },
+        verification: request.action === "find" ? "query-completed" : "selector-matched",
+        matchCount: matches.length,
+        matches: matches.slice(0, limit).map(compactNode),
+        ...(matches[0] === undefined ? {} : { matched: compactNode(matches[0]) }),
+      },
+      problems,
+    );
+  }
+
+  if (request.action === "compare") {
+    if (!/^[a-f0-9]{64}$/u.test(request.digest)) {
+      problems.push(
+        problem(
+          "UI_DIGEST_INVALID",
+          "input.ui.digest",
+          "UI digest must be a complete lowercase SHA-256 value.",
+          "Use the digest returned by inspect_ui or a previous UI action.",
+          current.commandId,
+        ),
+      );
+      return finish<UiActionData>(current, null, problems);
+    }
+    const snapshot = await hierarchy(ready, current.commandId, problems, signal);
+    if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
+    const changed = snapshot.digest !== request.digest;
+    return finish(
+      current,
+      {
+        action: "compare",
+        selected: ready.selected,
+        status: "observed",
+        verified: true,
+        attempts: 1,
+        after: summary(snapshot),
+        input: { digest: request.digest },
+        verification: changed ? "ui-changed" : "ui-unchanged",
+      },
+      problems,
+    );
+  }
+
+  if (request.action === "wait") {
     const state = request.state ?? "visible";
     const timeoutMs = request.timeoutMs ?? config.timeoutMs ?? 5_000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
@@ -346,7 +583,7 @@ export async function runUiAction(
             verified: true,
             attempts,
             after: summary(last),
-            input: { selector: request.selector, state, timeoutMs },
+            input: { selector: selectorLabel(request.selector), state, timeoutMs },
             verification: "selector-matched",
             ...(matched === undefined ? {} : { matched: compactNode(matched) }),
           },
@@ -359,7 +596,7 @@ export async function runUiAction(
       problem(
         "UI_WAIT_TIMEOUT",
         "ui.wait",
-        `UI selector ${request.selector} did not become ${state}.`,
+        `UI selector ${selectorLabel(request.selector)} did not become ${state}.`,
         `The bounded wait ended after ${String(attempts)} attempt(s).`,
         current.commandId,
       ),
@@ -373,7 +610,7 @@ export async function runUiAction(
         verified: false,
         attempts,
         ...(last === undefined ? {} : { after: summary(last) }),
-        input: { selector: request.selector, state, timeoutMs },
+        input: { selector: selectorLabel(request.selector), state, timeoutMs },
         verification: "ui-unchanged",
         verificationGap: "ui-unchanged",
       },
@@ -386,6 +623,7 @@ export async function runUiAction(
   let args: string[];
   let input: UiActionData["input"];
   let resolved: UiActionData["resolved"];
+  let matched: UiActionData["matched"];
 
   if (request.action === "tap" || request.action === "long-press") {
     const size = await screenSize(ready, current.commandId, problems, signal);
@@ -393,6 +631,22 @@ export async function runUiAction(
     if ("ref" in request) {
       resolved = resolveRef(request.ref, request.action, before, current.commandId, problems);
       input = { ref: request.ref };
+    } else if ("selector" in request) {
+      const selected = resolveSelector(
+        request.selector,
+        request.occurrence,
+        request.action,
+        before,
+        current.commandId,
+        problems,
+      );
+      resolved =
+        selected === undefined ? undefined : { ref: selected.ref, x: selected.x, y: selected.y };
+      matched = selected === undefined ? undefined : compactNode(selected.matched);
+      input = {
+        selector: selectorLabel(request.selector),
+        ...(request.occurrence === undefined ? {} : { occurrence: request.occurrence }),
+      };
     } else {
       resolved = { x: request.x, y: request.y };
       input = { x: request.x, y: request.y };
@@ -510,6 +764,7 @@ export async function runUiAction(
         before: summary(before),
         input,
         ...(resolved === undefined ? {} : { resolved }),
+        ...(matched === undefined ? {} : { matched }),
         verification: "planned",
         plan: { schemaVersion: SCHEMA_VERSION, dryRun: true, steps },
       },
@@ -557,6 +812,7 @@ export async function runUiAction(
       after: summary(after),
       input,
       ...(resolved === undefined ? {} : { resolved }),
+      ...(matched === undefined ? {} : { matched }),
       verification: changed ? "ui-changed" : "ui-unchanged",
       ...(changed ? {} : { verificationGap: "ui-unchanged" as const }),
     },

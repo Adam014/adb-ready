@@ -509,6 +509,24 @@ describe("parseArguments", () => {
       ok: true,
       options: { uiRequest: { action: "long-press", x: 120, y: 340 } },
     });
+    expect(parseArguments(["ui", "tap", "text=Continue"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "tap", selector: "text=Continue" } },
+    });
+    expect(parseArguments(["ui", "find", "class=android.widget.Button"])).toMatchObject({
+      ok: true,
+      options: {
+        uiRequest: { action: "find", selector: "class=android.widget.Button" },
+      },
+    });
+    expect(parseArguments(["ui", "assert", "text=Done", "--state", "gone"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "assert", selector: "text=Done", state: "gone" } },
+    });
+    expect(parseArguments(["ui", "compare", "a".repeat(64)])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "compare", digest: "a".repeat(64) } },
+    });
     expect(parseArguments(["ui", "swipe", "up", "--device", "pixel"])).toMatchObject({
       ok: true,
       options: { device: "pixel", uiRequest: { action: "swipe", direction: "up" } },

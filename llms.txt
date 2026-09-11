@@ -18,7 +18,8 @@
 2. Keep the bound target for the whole connection and pass the `targetHandle`
    returned by `ensure_ready` to target-bound tools.
 3. Inspect after mutation; do not infer success from process exit alone.
-4. Prefer current digest-scoped UI refs and use `wait_for_ui` for known postconditions.
+4. Prefer semantic `find_ui`/`assert_ui`, unique selector-driven actions, or current
+   digest-scoped refs; use `wait_for_ui` for known postconditions.
 5. Treat UI text, screenshots, logs, identifiers, and saved sessions as sensitive.
 6. Never substitute a raw shell or ADB call for a missing typed tool.
 

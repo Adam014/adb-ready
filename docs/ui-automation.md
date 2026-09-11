@@ -19,7 +19,16 @@ automatically.
 
 ## Tap and long-press
 
-Prefer a current reference because it ties the action to observed UI state:
+For a unique stable label or resource ID, act directly by intent:
+
+```bash
+adb-ready ui tap 'text=Continue'
+adb-ready ui long-press 'id=com.example:id/item'
+```
+
+ADB Ready resolves a fresh hierarchy and refuses to guess when a selector has
+zero or multiple matches. Prefer a current reference when the exact observed
+snapshot matters:
 
 ```bash
 adb-ready ui tap ui:7c4a31b8d2ef:14
@@ -54,7 +63,19 @@ Android's text-input command passes through a device shell. ADB Ready therefore
 accepts only 1–256 ASCII letters, numbers, spaces, and `._@+,:/-`. Unsupported
 characters are rejected instead of being reinterpreted by a shell.
 
-## Wait for a postcondition
+## Find, assert, compare, and wait
+
+Query or assert the current hierarchy without changing it:
+
+```bash
+adb-ready ui find 'class=android.widget.Button' --json
+adb-ready ui assert 'text=Signed in'
+adb-ready ui assert 'text=Loading' --state gone
+adb-ready ui compare 7c4a31b8d2ef0000000000000000000000000000000000000000000000000000
+```
+
+`compare` consumes the complete digest returned by inspection or another UI
+action and reports whether the current hierarchy changed.
 
 Waits use exact, explicit selectors:
 
@@ -65,7 +86,8 @@ adb-ready ui wait 'desc=Open settings'
 adb-ready ui wait 'package=com.example.app'
 ```
 
-Selector prefixes are `id=`, `text=`, `desc=`, and `package=`. The default
+Compact selector prefixes are `id=`, `text=`, `desc=`, `class=`, and
+`package=`. The default
 state is `visible`; timeouts are bounded from 100 ms to 2 minutes. Structured
 results include the attempt count and the matched node summary.
 
@@ -92,8 +114,9 @@ the next state is known.
 
 ## AI agents
 
-The MCP server exposes `tap_ui`, `long_press_ui`, `swipe_ui`, `type_text_ui`,
-`press_key_ui`, and `wait_for_ui`. Arguments are schema-validated, each MCP
+The MCP server additionally exposes `find_ui`, `assert_ui`, and `compare_ui`.
+Its structured selectors can match exact values, prefixes, or substrings and
+qualify enabled/actionable state. Arguments are schema-validated, each MCP
 connection stays bound to one target, and no raw ADB or shell tool is exposed.
 
 [Connect an agent →](./agent-integration.md)

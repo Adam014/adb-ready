@@ -90,6 +90,75 @@ describe("safe UI actions", () => {
     );
   });
 
+  test("finds semantic UI nodes and exposes a bounded match set", async () => {
+    const execution = await runUiAction(
+      {
+        action: "find",
+        selector: { field: "text", value: "Op", match: "starts-with", actionable: true },
+      },
+      {},
+      fixture([BEFORE]),
+    );
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        action: "find",
+        status: "observed",
+        verified: true,
+        matchCount: 1,
+        matches: [{ text: "Open", resourceId: "com.example:id/open" }],
+        verification: "query-completed",
+      },
+    });
+  });
+
+  test("taps one unique semantic match without requiring a prior ref", async () => {
+    const requests: string[][] = [];
+    const execution = await runUiAction(
+      { action: "tap", selector: "id=com.example:id/open" },
+      {},
+      fixture([BEFORE, AFTER], requests),
+    );
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        matched: { text: "Open", resourceId: "com.example:id/open" },
+        resolved: { x: 120, y: 150 },
+        verified: true,
+      },
+    });
+    expect(requests).toContainEqual(
+      expect.arrayContaining(["shell", "input", "tap", "120", "150"]),
+    );
+  });
+
+  test("fails a semantic assertion with structured current evidence", async () => {
+    const execution = await runUiAction(
+      { action: "assert", selector: "text=Missing" },
+      {},
+      fixture([BEFORE]),
+    );
+    expect(execution.result).toMatchObject({
+      ok: false,
+      data: { action: "assert", verified: false, matchCount: 0 },
+      problems: [{ code: "UI_ASSERTION_FAILED" }],
+    });
+  });
+
+  test("compares a prior complete digest with current UI", async () => {
+    const digest = parseUiHierarchy(BEFORE)?.digest;
+    expect(digest).toBeDefined();
+    const execution = await runUiAction(
+      { action: "compare", digest: digest ?? "" },
+      {},
+      fixture([AFTER]),
+    );
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: { action: "compare", verified: true, verification: "ui-changed" },
+    });
+  });
+
   test("rejects stale refs before sending input", async () => {
     const requests: string[][] = [];
     const execution = await runUiAction(

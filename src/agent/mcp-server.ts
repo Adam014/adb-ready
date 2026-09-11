@@ -542,14 +542,102 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       return toolResult(execution.result);
     },
   );
+  const uiSelectorSchema = z.union([
+    z.string().regex(/^(?:class|desc|id|package|text)=.{1,256}$/u),
+    z.object({
+      field: z.enum(["class", "desc", "id", "package", "text"]),
+      value: z.string().min(1).max(256),
+      match: z.enum(["contains", "exact", "starts-with"]).optional(),
+      enabled: z.boolean().optional(),
+      actionable: z.boolean().optional(),
+    }),
+  ]);
+  register(
+    "find_ui",
+    "Find bounded UI nodes by semantic id, text, description, class, or package selectors without changing device state.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      limit: z.number().int().min(1).max(100).optional(),
+    }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ selector, limit }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "find", selector, ...(limit === undefined ? {} : { limit }) },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "assert_ui",
+    "Assert that a semantic UI selector is visible or gone in the current hierarchy.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      state: z.enum(["gone", "visible"]).optional(),
+    }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ selector, state }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "assert", selector, ...(state === undefined ? {} : { state }) },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "compare_ui",
+    "Compare the current UI with a complete digest returned by an earlier inspection or action.",
+    z.object({ ...targetHandleShape, digest: z.string().regex(/^[a-f0-9]{64}$/u) }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ digest }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "compare", digest },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
   const pointSchema = z.union([
     z.object({ ref: z.string().regex(/^ui:[a-f0-9]{12}:\d+$/u) }),
+    z.object({
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+    }),
     z.object({ x: z.number().int().min(0).max(100_000), y: z.number().int().min(0).max(100_000) }),
   ]);
   for (const action of ["tap", "long-press"] as const) {
     register(
       `${action === "tap" ? "tap" : "long_press"}_ui`,
-      `${action === "tap" ? "Tap" : "Long-press"} a current digest-scoped UI ref or explicit display coordinate, then compare UI state.`,
+      `${action === "tap" ? "Tap" : "Long-press"} a unique semantic selector, current digest-scoped UI ref, or explicit display coordinate, then compare UI state.`,
       z.object({
         ...targetHandleShape,
         target: pointSchema,
@@ -570,24 +658,38 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
                   ref: target.ref,
                   ...(dryRun === undefined ? {} : { dryRun }),
                 }
-              : {
-                  action: "tap" as const,
-                  x: target.x,
-                  y: target.y,
-                  ...(dryRun === undefined ? {} : { dryRun }),
-                }
+              : "selector" in target
+                ? {
+                    action: "tap" as const,
+                    selector: target.selector,
+                    ...(target.occurrence === undefined ? {} : { occurrence: target.occurrence }),
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  }
+                : {
+                    action: "tap" as const,
+                    x: target.x,
+                    y: target.y,
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  }
             : "ref" in target
               ? {
                   action: "long-press" as const,
                   ref: target.ref,
                   ...(dryRun === undefined ? {} : { dryRun }),
                 }
-              : {
-                  action: "long-press" as const,
-                  x: target.x,
-                  y: target.y,
-                  ...(dryRun === undefined ? {} : { dryRun }),
-                };
+              : "selector" in target
+                ? {
+                    action: "long-press" as const,
+                    selector: target.selector,
+                    ...(target.occurrence === undefined ? {} : { occurrence: target.occurrence }),
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  }
+                : {
+                    action: "long-press" as const,
+                    x: target.x,
+                    y: target.y,
+                    ...(dryRun === undefined ? {} : { dryRun }),
+                  };
         const execution = await runUiAction(
           request,
           commandConfig(loaded, bound),
@@ -706,7 +808,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "Wait a bounded time for an exact id=, text=, desc=, or package= selector to be visible or gone.",
     z.object({
       ...targetHandleShape,
-      selector: z.string().min(3).max(264),
+      selector: uiSelectorSchema,
       state: z.enum(["gone", "visible"]).optional(),
       timeoutMs: z.number().int().min(100).max(120_000).optional(),
     }),

@@ -89,10 +89,13 @@ const requests = (protocolVersion) => {
   ];
 };
 const requiredTools = [
+  "assert_ui",
   "capture_screenshot",
+  "compare_ui",
   "compile_debug_context",
   "doctor",
   "ensure_ready",
+  "find_ui",
   "get_session_problems",
   "inspect_app",
   "inspect_ui",
