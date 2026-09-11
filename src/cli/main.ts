@@ -437,6 +437,7 @@ function rootInvocation(argv: readonly string[]): boolean {
       argument !== "--json" &&
       argument !== "--quiet" &&
       argument !== "--verbose" &&
+      argument !== "--non-interactive" &&
       argument !== "--color" &&
       argument !== "--no-color" &&
       argument !== "--unicode" &&
