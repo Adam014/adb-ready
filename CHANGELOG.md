@@ -100,6 +100,9 @@ breaking changes.
 - Classify Android's successful-exit `could not get idle state` response as a
   distinct `UI_NOT_IDLE` problem with a safe recovery instruction instead of
   misreporting an inaccessible hierarchy.
+- Finalize an explicitly stopped managed development task as interrupted even
+  when Windows terminates the owned child before its signal handler can write
+  the terminal record.
 
 ## [0.2.0] - 2026-09-10
 

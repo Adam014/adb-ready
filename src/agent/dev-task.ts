@@ -347,6 +347,32 @@ async function wait(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function finalizeIntentionalStop(
+  file: string,
+  expected: AgentDevTaskRecord,
+  clock: () => Date,
+): Promise<AgentDevTask> {
+  const current = await readRecord(file);
+  if (current !== undefined && terminal(current.status)) return publicTask(current);
+  const owned =
+    current !== undefined &&
+    current.handle === expected.handle &&
+    current.pid === expected.pid &&
+    current.projectFingerprint === expected.projectFingerprint &&
+    current.targetFingerprint === expected.targetFingerprint;
+  if (!owned) return publicTask(expected);
+  const finishedAt = clock().toISOString();
+  const interrupted: AgentDevTaskRecord = {
+    ...current,
+    status: "interrupted",
+    updatedAt: finishedAt,
+    finishedAt,
+    exitCode: 130,
+  };
+  await atomicRecord(file, interrupted);
+  return publicTask(interrupted);
+}
+
 export async function stopAgentDevTask(
   handle: string,
   options: AgentDevTaskLookupOptions,
@@ -373,14 +399,30 @@ export async function stopAgentDevTask(
   record = { ...record, status: "stopping", updatedAt: clock().toISOString() };
   await atomicRecord(resolved.file, record);
   const targetPid = (options.platform ?? process.platform) === "win32" ? record.pid : -record.pid;
-  process.kill(targetPid, "SIGTERM");
+  try {
+    process.kill(targetPid, "SIGTERM");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
   for (let attempt = 0; attempt < 50; attempt += 1) {
     await wait(100);
     const current = await readRecord(resolved.file);
     if (current !== undefined && terminal(current.status)) return publicTask(current);
-    if (!alive(record.pid)) return await getAgentDevTask(handle, options);
+    if (!alive(record.pid)) return await finalizeIntentionalStop(resolved.file, record, clock);
   }
-  if (alive(record.pid)) process.kill(targetPid, "SIGKILL");
+  if (alive(record.pid)) {
+    try {
+      process.kill(targetPid, "SIGKILL");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await wait(50);
+    const current = await readRecord(resolved.file);
+    if (current !== undefined && terminal(current.status)) return publicTask(current);
+    if (!alive(record.pid)) return await finalizeIntentionalStop(resolved.file, record, clock);
+  }
   return await getAgentDevTask(handle, options);
 }
 

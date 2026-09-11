@@ -90,4 +90,22 @@ describe("agent development tasks", () => {
     expect(stopped).toMatchObject({ handle: task.handle, status: "interrupted", exitCode: 130 });
     await awaitStatus(task.handle, project, state, "interrupted");
   });
+
+  test("records an intentional stop when the owned child exits before finalizing", async () => {
+    const { project, state } = await temporary();
+    const task = await startAgentDevTask({
+      cwd: project,
+      env: { ADB_READY_TASK_FIXTURE_ABRUPT: "1" },
+      cliPath: fixture,
+      serial: "fixture-usb",
+      targetIdentity: "hardware-1",
+      directory: state,
+    });
+    const stopped = await stopAgentDevTask(task.handle, {
+      cwd: project,
+      env: {},
+      directory: state,
+    });
+    expect(stopped).toMatchObject({ handle: task.handle, status: "interrupted", exitCode: 130 });
+  });
 });
