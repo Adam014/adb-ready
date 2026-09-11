@@ -1891,6 +1891,15 @@ export interface DevCommand {
   env?: Record<string, string>;
 }
 
+const TARGET_SERIAL_PLACEHOLDER = "{target.serial}";
+
+function bindTargetSerial(command: DevCommand, serial: string): DevCommand {
+  return {
+    ...command,
+    args: command.args.map((argument) => argument.replaceAll(TARGET_SERIAL_PLACEHOLDER, serial)),
+  };
+}
+
 export interface DevOptions {
   cwd: string;
   mode?: "dev" | "run";
@@ -2715,7 +2724,9 @@ export async function runDev(
               title: "Run the bounded verification command",
               risk: "open-world" as const,
               executable: redactedPath(options.verification.command.executable),
-              args: options.verification.command.args.map((argument) => redactText(argument).value),
+              args: bindTargetSerial(options.verification.command, target.serial).args.map(
+                (argument) => redactText(argument).value,
+              ),
             },
           ]),
       ...hookPlanSteps("onChildExit"),
@@ -3357,7 +3368,10 @@ export async function runDev(
   if (signal?.aborted === true || !readyHooksSucceeded) verificationController.abort();
   const abortVerification = () => verificationController.abort();
   signal?.addEventListener("abort", abortVerification, { once: true });
-  const verificationCommand = options.verification?.command;
+  const verificationCommand =
+    options.verification === undefined
+      ? undefined
+      : bindTargetSerial(options.verification.command, selected.transport.serial);
   const verificationCommandData =
     verificationCommand === undefined
       ? undefined
@@ -3365,7 +3379,7 @@ export async function runDev(
           executable: redactedPath(verificationCommand.executable),
           args: verificationCommand.args.map((argument) => redactText(argument).value),
           cwd: redactedPath(path.resolve(project.root, verificationCommand.cwd ?? ".")),
-          envKeys: ["ANDROID_SERIAL"],
+          envKeys: ["ADB_READY_TARGET_SERIAL", "ANDROID_SERIAL"],
         };
   const verificationLines = (stream: "stderr" | "stdout") =>
     new TextLineBuffer((line) => {
@@ -3398,7 +3412,11 @@ export async function runDev(
             executable: verificationCommand.executable,
             args: verificationCommand.args,
             cwd: path.resolve(project.root, verificationCommand.cwd ?? "."),
-            env: { ...verificationCommand.env, ANDROID_SERIAL: selected.transport.serial },
+            env: {
+              ...verificationCommand.env,
+              ADB_READY_TARGET_SERIAL: selected.transport.serial,
+              ANDROID_SERIAL: selected.transport.serial,
+            },
             signal: verificationController.signal,
             stdin: "ignore",
             ...(options.verification?.timeoutMs === undefined

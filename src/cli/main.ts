@@ -234,6 +234,9 @@ Run options:
   --run-timeout DURATION Bound the verification command (default: 15m)
   --dry-run              Build an offline plan unless a target is explicit
   -- EXECUTABLE ARG...   Verification command, passed directly without a shell
+
+The literal placeholder {target.serial} is resolved inside arguments after target selection.
+Verification processes also receive ANDROID_SERIAL and ADB_READY_TARGET_SERIAL.
 `,
   doctor: `Usage: adb-ready doctor [options]
 

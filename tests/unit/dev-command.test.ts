@@ -234,6 +234,7 @@ describe("runDev", () => {
   });
 
   test("runs one bounded verification command and intentionally stops the development service", async () => {
+    let verificationRequest: ProcessRequest | undefined;
     const execution = await runDev(
       {
         cwd: "/workspace/app",
@@ -241,7 +242,10 @@ describe("runDev", () => {
         preset: "custom",
         command: { executable: "dev-service", args: ["start"] },
         verification: {
-          command: { executable: "smoke-test", args: ["--ci"] },
+          command: {
+            executable: "smoke-test",
+            args: ["--device={target.serial}", "--ci"],
+          },
           timeoutMs: 30_000,
         },
         reversePorts: [],
@@ -261,7 +265,10 @@ describe("runDev", () => {
             );
           });
         }
-        if (request.executable === "smoke-test") return result(request);
+        if (request.executable === "smoke-test") {
+          verificationRequest = request;
+          return result(request);
+        }
         return result(request);
       }),
     );
@@ -274,8 +281,12 @@ describe("runDev", () => {
       verification: {
         passed: true,
         exitCode: 0,
-        command: { executable: "smoke-test", args: ["--ci"] },
+        command: { executable: "smoke-test", args: ["--device=USB-1", "--ci"] },
       },
+    });
+    expect(verificationRequest).toMatchObject({
+      args: ["--device=USB-1", "--ci"],
+      env: { ADB_READY_TARGET_SERIAL: "USB-1", ANDROID_SERIAL: "USB-1" },
     });
   });
 

@@ -132,13 +132,19 @@ leaving a development server open:
 
 ```bash
 adb-ready run --preset expo --run-timeout 10m -- \
-  maestro test .maestro/smoke.yaml
+  maestro '--device={target.serial}' test .maestro/smoke.yaml
 ```
 
 ADB Ready selects and exclusively leases one target, prepares the configured
 ports and development command, waits for every readiness assertion, runs the
 exact command after `--`, and cleans only the resources it created. It never
 retries a failed product assertion as if it were an infrastructure failure.
+
+The literal `{target.serial}` inside a verification argument is replaced only
+after ADB Ready selects and leases the target. The child also receives the
+same value as `ANDROID_SERIAL` and `ADB_READY_TARGET_SERIAL`. This keeps tools
+such as Maestro pinned explicitly without invoking a shell; tools that already
+honor `ANDROID_SERIAL`, including common Gradle/ADB workflows, need no placeholder.
 
 Every executed run prints the path to a project-local evidence directory under
 `.adb-ready/artifacts/`. Its manifest references the structured result,

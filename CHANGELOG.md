@@ -62,6 +62,10 @@ breaking changes.
 - Add a bounded CLI/MCP screen audit that identifies enabled actionable nodes
   without human-readable labels and controls without stable resource IDs,
   returning concrete nodes instead of a subjective score.
+- Bind finite verification commands to the leased target through
+  `ANDROID_SERIAL`, `ADB_READY_TARGET_SERIAL`, and an explicit
+  `{target.serial}` argument placeholder for tools such as Maestro that require
+  their own device flag.
 
 ### Changed
 
