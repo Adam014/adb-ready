@@ -70,6 +70,7 @@ for (const name of [
 
 const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
 const changelog = await readFile(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+const security = await readFile(new URL("../SECURITY.md", import.meta.url), "utf8");
 const markdownInventory = xSync("git", ["ls-files", "*.md"], {
   nodeOptions: { cwd: root, shell: false, windowsHide: true },
 });
@@ -89,8 +90,14 @@ const stableVersion = /^\d+\.\d+\.\d+$/u.test(manifest.version);
 const releaseReady = publishMode || stableVersion;
 
 if (releaseReady) {
+  const [major, minor] = manifest.version.split(".");
+  const supportedReleaseLine = `| \`${major}.${minor}.x\` | Yes |`;
   requireCondition(manifest.private === false, "remove the private publish guard before release");
   requireCondition(stableVersion, "public release version cannot be a prerelease");
+  requireCondition(
+    security.includes(supportedReleaseLine),
+    `SECURITY.md must mark ${major}.${minor}.x as supported`,
+  );
   if (publishMode) {
     requireCondition(
       expectedTag === `v${manifest.version}`,

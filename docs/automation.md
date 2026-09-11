@@ -25,7 +25,12 @@ agent or integration to identify the installed CLI first:
 
 ```bash
 adb-ready --json
+adb-ready --json --non-interactive
 ```
+
+Root presentation flags may appear in either order. Adding
+`--non-interactive` does not change the result shape or fall back to human
+help.
 
 Machine data is written to `stdout`. Human progress and diagnostics are written
 to `stderr`. `--quiet` hides successful human output without hiding failures.

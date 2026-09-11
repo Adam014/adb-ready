@@ -159,21 +159,29 @@ describe("runCli", () => {
     expect(streams.error.value).not.toContain("\u001B[36m");
   });
 
-  test("returns a structured product overview for a bare machine invocation", async () => {
-    const streams = io();
-    const exitCode = await runCli(["--json"], streams, {
-      loadConfig: async () => {
-        throw new Error("overview must not load configuration");
-      },
-    });
+  test("returns a structured product overview for every bare JSON flag order", async () => {
+    for (const argv of [
+      ["--json"],
+      ["--json", "--non-interactive"],
+      ["--non-interactive", "--json"],
+      ["--format", "json", "--non-interactive"],
+      ["--non-interactive", "--format=json", "--no-color", "--no-animation"],
+    ]) {
+      const streams = io();
+      const exitCode = await runCli(argv, streams, {
+        loadConfig: async () => {
+          throw new Error("overview must not load configuration");
+        },
+      });
 
-    expect(exitCode).toBe(ExitCode.Success);
-    expect(JSON.parse(streams.output.value)).toMatchObject({
-      command: "overview",
-      ok: true,
-      data: { name: "ADB Ready", mcp: { transport: "stdio" } },
-    });
-    expect(streams.error.value).toBe("");
+      expect(exitCode).toBe(ExitCode.Success);
+      expect(JSON.parse(streams.output.value)).toMatchObject({
+        command: "overview",
+        ok: true,
+        data: { name: "ADB Ready", mcp: { transport: "stdio" } },
+      });
+      expect(streams.error.value).toBe("");
+    }
   });
 
   test("keeps a bare interactive session open and returns to a compact menu", async () => {

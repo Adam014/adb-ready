@@ -224,6 +224,34 @@ try {
   assertions += 1;
 
   for (const alias of ["adb-ready", "adbr"]) {
+    /** @type {Array<[string, string[]]>} */
+    const rootMachineCases = [
+      ["root JSON non-interactive", ["--json", "--non-interactive"]],
+      ["root non-interactive JSON", ["--non-interactive", "--json"]],
+      ["root explicit JSON format", ["--format", "json", "--non-interactive"]],
+      [
+        "root JSON presentation overrides",
+        ["--non-interactive", "--format=json", "--no-color", "--no-animation"],
+      ],
+    ];
+    for (const [label, args] of rootMachineCases) {
+      const execution = command(alias, args, env);
+      expectStatus(execution, 0, `${alias} ${label}`);
+      assertMachineClean(execution, `${alias} ${label}`);
+      const payload = parseJson(execution.stdout, `${alias} ${label}`);
+      if (
+        payload.command !== "overview" ||
+        payload.ok !== true ||
+        payload.data?.name !== "ADB Ready"
+      ) {
+        throw new Error(`${alias} ${label}: unexpected product overview`);
+      }
+      if (execution.stderr !== "") {
+        throw new Error(`${alias} ${label}: JSON mode wrote to stderr`);
+      }
+      assertions += 1;
+    }
+
     for (const [label, args, expected] of [
       ["bare non-TTY", [], "ADB Ready"],
       ["help flag", ["--help"], "adb-ready [command]"],

@@ -9,6 +9,22 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-11
+
+### Fixed
+
+- Keep the commandless capability overview as clean structured JSON when
+  `--non-interactive` is combined with `--json` or `--format json`, regardless
+  of flag order, and cover the installed package through both executable
+  aliases.
+
+### Changed
+
+- Keep the public security support table aligned with the current release line
+  through an automated release check.
+- Clarify which verification, real-device, and support-expansion evidence is
+  required for each kind of release.
+
 ## [0.3.1] - 2026-09-11
 
 ### Changed
@@ -191,7 +207,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Adam014/adb-ready/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Adam014/adb-ready/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Adam014/adb-ready/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Adam014/adb-ready/compare/v0.1.2...v0.2.0
