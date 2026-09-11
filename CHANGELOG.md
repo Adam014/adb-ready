@@ -30,6 +30,13 @@ breaking changes.
 - Produce an atomic, redacted evidence bundle for every executed `run` with a
   versioned manifest, structured result, NDJSON timeline, problems, logcat,
   bounded AI context, JUnit XML, and GitHub step-summary Markdown.
+- Advertise and validate a versioned result-envelope output schema for every
+  MCP tool, return screenshot pixels as MCP image content, and issue stable
+  connection-scoped target handles that reject stale or cross-connection use.
+- Let MCP `ensure_ready` reconnect an explicitly addressed endpoint or the only
+  unambiguous paired wireless service before binding it.
+- Exercise the complete MCP contract on Node.js, Bun, and Deno across both the
+  legacy 2025-11-25 and modern 2026-07-28 protocol eras.
 
 ### Fixed
 

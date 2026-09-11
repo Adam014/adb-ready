@@ -46,8 +46,8 @@ schema version.
 The npm package includes two versioned public artifacts:
 
 - `schema/config-v1.schema.json` validates project configuration; and
-- `schema/agent-tools-v1.json` catalogs every MCP tool's generated input schema
-  and safety annotations for the matching package version.
+- `schema/agent-tools-v1.json` catalogs every MCP tool's generated input and
+  output schemas plus safety annotations for the matching package version.
 
 ## Event envelope
 

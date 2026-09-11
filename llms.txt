@@ -15,7 +15,8 @@
 ## Agent contract
 
 1. Call `ensure_ready` before target-bound MCP tools.
-2. Keep the bound target for the whole connection.
+2. Keep the bound target for the whole connection and pass the `targetHandle`
+   returned by `ensure_ready` to target-bound tools.
 3. Inspect after mutation; do not infer success from process exit alone.
 4. Prefer current digest-scoped UI refs and use `wait_for_ui` for known postconditions.
 5. Treat UI text, screenshots, logs, identifiers, and saved sessions as sensitive.

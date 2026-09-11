@@ -135,8 +135,12 @@ Ask the agent to follow this sequence:
 6. Use `get_session_problems` or `compile_debug_context` for an existing
    development session.
 
-The first successful `ensure_ready` binds one target to that MCP connection.
-Later tools cannot silently switch to another target.
+The first successful `ensure_ready` binds one target to that MCP connection and
+returns a `targetHandle`. Pass that handle to later target-bound calls when the
+client supports workflow state. A stale or cross-connection handle is rejected,
+and later tools cannot silently switch targets. When no ready target exists,
+`ensure_ready` may reconnect an explicit network endpoint or the single
+unambiguous paired service; it never guesses among multiple devices.
 
 Tool calls within one MCP connection are executed in submission order. This
 prevents parallel agent requests from interleaving target binding, UI snapshots,
@@ -162,12 +166,15 @@ MCP resources keep larger read-only context outside tool calls:
 | `adb-ready://sessions/{sessionId}/events/{offset}/{limit}` | a page of up to 200 redacted events |
 | `adb-ready://sessions/{sessionId}/context` | a bounded redacted Markdown context document |
 
-Tool results contain the same structured success, problem, evidence, and
-verification data used by CLI JSON output.
+Every tool advertises an output schema and returns the same versioned result
+envelope used by CLI JSON output. Screenshot capture additionally returns MCP
+`image` content so a vision-capable agent can inspect the pixels directly; the
+verified project-local PNG remains the evidence source of record.
 
 The npm package also ships `schema/agent-tools-v1.json`, generated from the
 server's real `tools/list` response during every build. Integrations can inspect
-version-matched input schemas and safety annotations without starting ADB.
+version-matched input and output schemas plus safety annotations without
+starting ADB.
 
 ## Safety boundary
 
@@ -191,8 +198,8 @@ the complete trust model.
 ## Runtime alternatives
 
 The published bundle is smoke-tested as an MCP stdio server under Node.js, Bun,
-and Deno. Replace the command and arguments when Node.js is not your chosen
-runtime:
+and Deno against the legacy 2025-11-25 and modern 2026-07-28 protocol eras.
+Replace the command and arguments when Node.js is not your chosen runtime:
 
 ```text
 Bun:  bun  ./node_modules/adb-ready/dist/cli.js mcp

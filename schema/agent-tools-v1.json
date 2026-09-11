@@ -7,11 +7,16 @@
   "tools": [
     {
       "name": "capture_screenshot",
-      "description": "Capture a verified PNG inside the project without overwriting an existing file.",
+      "description": "Capture a verified PNG inside the project and return its image pixels to the client without overwriting an existing file.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "out": {
             "type": "string",
             "minLength": 1
@@ -23,6 +28,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -48,6 +105,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -63,11 +172,63 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
       "name": "ensure_ready",
-      "description": "Select exactly one ready Android target and bind it for this MCP connection.",
+      "description": "Select exactly one ready Android target, safely reconnect one unambiguous paired wireless target when needed, and bind it for this MCP connection.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -83,10 +244,62 @@
         }
       },
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -107,6 +320,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -116,6 +381,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "applicationId": {
             "type": "string",
             "minLength": 3
@@ -127,6 +397,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -136,6 +458,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "interactiveOnly": {
             "type": "boolean"
           },
@@ -151,6 +478,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -160,6 +539,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "path": {
             "type": "string",
             "minLength": 1
@@ -182,6 +566,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -191,6 +627,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "applicationId": {
             "type": "string",
             "minLength": 3
@@ -206,6 +647,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -221,6 +714,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -230,6 +775,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "target": {
             "anyOf": [
               {
@@ -271,6 +821,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -280,6 +882,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "url": {
             "type": "string",
             "format": "uri"
@@ -296,6 +903,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -305,6 +964,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "key": {
             "type": "string",
             "enum": ["back", "enter", "home", "menu", "volume-down", "volume-up"]
@@ -320,6 +984,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -340,6 +1056,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -349,6 +1117,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "applicationId": {
             "type": "string",
             "minLength": 3
@@ -364,6 +1137,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -373,6 +1198,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "direction": {
             "type": "string",
             "enum": ["down", "left", "right", "up"]
@@ -407,6 +1237,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -416,6 +1298,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "target": {
             "anyOf": [
               {
@@ -457,6 +1344,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -466,6 +1405,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "text": {
             "type": "string",
             "minLength": 1,
@@ -485,6 +1429,58 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     },
     {
@@ -494,6 +1490,11 @@
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "selector": {
             "type": "string",
             "minLength": 3,
@@ -516,6 +1517,58 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "additionalProperties": {}
       }
     }
   ]

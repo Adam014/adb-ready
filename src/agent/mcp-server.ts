@@ -1,4 +1,5 @@
-import { realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { type CallToolResult, McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
@@ -8,6 +9,7 @@ import { runApp, runOpen } from "../app/app-commands.js";
 import {
   type CommandConfig,
   type CommandDependencies,
+  runConnect,
   runDevices,
   runDoctor,
 } from "../app/commands.js";
@@ -22,11 +24,13 @@ import type { ResultEnvelope } from "../domain/contracts.js";
 import { runCapture } from "../evidence/capture.js";
 import { runInspectApp, runInspectUi } from "../evidence/inspect.js";
 import { runUiAction } from "../evidence/ui-actions.js";
+import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { acquireTargetLease, type TargetLeaseOptions } from "../state/target-lease.js";
 import { selectTarget } from "../target/selection.js";
 import { SerialTaskQueue } from "./serial-task-queue.js";
 
 interface BoundTarget {
+  handle: string;
   serial: string;
   identity: string;
   transportId?: string;
@@ -54,13 +58,48 @@ function toolResult(result: ResultEnvelope<unknown>): CallToolResult {
 }
 
 function inputFailure(code: string, message: string): CallToolResult {
-  const structuredContent = { ok: false, problems: [{ code, message }] };
-  return {
-    content: [{ type: "text", text: JSON.stringify(structuredContent) }],
-    structuredContent,
-    isError: true,
-  };
+  const timestamp = new Date().toISOString();
+  const commandId = randomUUID();
+  return toolResult({
+    schemaVersion: 1,
+    command: "mcp",
+    commandId,
+    ok: false,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    durationMs: 0,
+    data: null,
+    problems: [
+      {
+        code,
+        category: "input.mcp",
+        severity: "error",
+        summary: message,
+        detail: message,
+        retryable: false,
+        evidence: [],
+        actions: [],
+        correlation: { commandId },
+      },
+    ],
+  });
 }
+
+const resultEnvelopeSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    command: z.string(),
+    commandId: z.string(),
+    ok: z.boolean(),
+    startedAt: z.string(),
+    finishedAt: z.string(),
+    durationMs: z.number().nonnegative(),
+    data: z.unknown().nullable(),
+    problems: z.array(z.object({ code: z.string() }).passthrough()),
+  })
+  .passthrough();
+
+const targetHandleShape = { targetHandle: z.uuid().optional() };
 
 function commandConfig(
   loaded: LoadedConfig,
@@ -84,31 +123,6 @@ function commandConfig(
           : selector === undefined
             ? {}
             : { targetSelector: selector }),
-  };
-}
-
-function selectedTarget(data: unknown): BoundTarget | undefined {
-  if (typeof data !== "object" || data === null || !("selected" in data)) return undefined;
-  const selected = (
-    data as {
-      selected?: {
-        target?: { id?: unknown; hardwareSerial?: unknown };
-        transport?: { serial?: unknown; transportId?: unknown };
-      };
-    }
-  ).selected;
-  if (typeof selected?.transport?.serial !== "string") return undefined;
-  return {
-    serial: selected.transport.serial,
-    identity:
-      typeof selected.target?.hardwareSerial === "string"
-        ? selected.target.hardwareSerial
-        : typeof selected.target?.id === "string"
-          ? selected.target.id
-          : selected.transport.serial,
-    ...(typeof selected.transport.transportId === "string"
-      ? { transportId: selected.transport.transportId }
-      : {}),
   };
 }
 
@@ -139,7 +153,13 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     name: string,
     description: string,
     schema: z.ZodObject<Shape>,
-    annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean },
+    annotations: {
+      readOnlyHint: boolean;
+      destructiveHint: boolean;
+      idempotentHint: boolean;
+      targetBound?: boolean;
+      leaseTarget?: boolean;
+    },
     handler: (
       input: z.infer<z.ZodObject<Shape>>,
       signal: AbortSignal,
@@ -151,7 +171,13 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       {
         description,
         inputSchema: schema,
-        annotations: { ...annotations, openWorldHint: false },
+        outputSchema: resultEnvelopeSchema,
+        annotations: {
+          readOnlyHint: annotations.readOnlyHint,
+          destructiveHint: annotations.destructiveHint,
+          idempotentHint: annotations.idempotentHint,
+          openWorldHint: false,
+        },
       },
       async (input, context) =>
         await toolQueue.run(async () => {
@@ -162,15 +188,27 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
               loaded.errors.map(({ code, message }) => `${code}: ${message}`).join("; "),
             );
           }
-          if (annotations.readOnlyHint || options.targetLease === false) {
-            return await handler(input, context.mcpReq.signal, loaded.config);
-          }
-          if (bound === undefined) {
+          const requestedHandle = (input as Record<string, unknown>).targetHandle;
+          if ((annotations.targetBound === true || annotations.leaseTarget === true) && !bound) {
             return inputFailure(
               "MCP_TARGET_NOT_BOUND",
-              "Call ensure_ready before a target-mutating tool.",
+              "Call ensure_ready before a target-bound tool.",
             );
           }
+          if (
+            requestedHandle !== undefined &&
+            (bound === undefined || requestedHandle !== bound.handle)
+          ) {
+            return inputFailure(
+              "MCP_TARGET_HANDLE_INVALID",
+              "The target handle is stale or belongs to another MCP connection. Call ensure_ready again.",
+            );
+          }
+          const shouldLease = annotations.leaseTarget ?? !annotations.readOnlyHint;
+          if (!shouldLease || options.targetLease === false) {
+            return await handler(input, context.mcpReq.signal, loaded.config);
+          }
+          if (bound === undefined) throw new Error("Target lease requested without a bound target");
           const acquired = await acquireTargetLease(
             {
               targetIdentity: bound.identity,
@@ -207,12 +245,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "ensure_ready",
-    "Select exactly one ready Android target and bind it for this MCP connection.",
+    "Select exactly one ready Android target, safely reconnect one unambiguous paired wireless target when needed, and bind it for this MCP connection.",
     z.object({
       device: z.string().min(1).optional(),
       transportId: z.string().min(1).optional(),
     }),
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      leaseTarget: false,
+    },
     async ({ device, transportId }, signal, loaded) => {
       if (device !== undefined && transportId !== undefined) {
         return inputFailure(
@@ -230,19 +273,65 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
           `This connection is bound to ${bound.serial}.`,
         );
       }
-      const execution = await runDevices(
+      let execution = await runDevices(
         commandConfig(loaded, bound, device, transportId),
         dependencies,
         signal,
       );
-      if (!execution.result.ok || execution.result.data === null) {
+      if (execution.result.data === null) {
         return toolResult(execution.result);
       }
-      const data = execution.result.data;
-      const selection =
+      let data = execution.result.data;
+      let selection =
         data.selected === undefined
           ? selectTarget(data.targets)
           : { kind: "selected" as const, selection: data.selected };
+      if (selection.kind !== "selected" && transportId === undefined) {
+        const acquisition = planTargetAcquisition({
+          ...(device === undefined ? {} : { selector: device }),
+          ...(loaded.values.targetAliases === undefined
+            ? {}
+            : { aliases: loaded.values.targetAliases }),
+          services: data.discovery.mdns.services,
+        });
+        if (
+          acquisition.kind === "connect" &&
+          (device === undefined || acquisition.reason === "explicit-endpoint")
+        ) {
+          const connected = await runConnect(
+            acquisition.endpoint,
+            {
+              ...commandConfig(loaded),
+              ...(acquisition.discovered
+                ? {
+                    endpointWasDiscovered: true,
+                    discoveredEndpointCandidates: acquisition.candidates,
+                  }
+                : {}),
+            },
+            dependencies,
+            signal,
+          );
+          if (
+            !connected.result.ok ||
+            connected.result.data === null ||
+            !("serial" in connected.result.data)
+          ) {
+            return toolResult(connected.result);
+          }
+          execution = await runDevices(
+            commandConfig(loaded, undefined, connected.result.data.serial),
+            dependencies,
+            signal,
+          );
+          if (execution.result.data === null) return toolResult(execution.result);
+          data = execution.result.data;
+          selection =
+            data.selected === undefined
+              ? selectTarget(data.targets)
+              : { kind: "selected" as const, selection: data.selected };
+        }
+      }
       if (selection.kind !== "selected") {
         return inputFailure(
           "MCP_TARGET_SELECTION_REQUIRED",
@@ -250,6 +339,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         );
       }
       bound = {
+        handle: bound?.handle ?? randomUUID(),
         serial: selection.selection.transport.serial,
         identity:
           selection.selection.target.hardwareSerial ??
@@ -261,12 +351,16 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       };
       return toolResult({
         ...execution.result,
-        data: { ...data, selected: selection.selection },
+        data: { ...data, selected: selection.selection, targetHandle: bound.handle },
       });
     },
   );
 
   const appSchema = z.object({ applicationId: z.string().min(3).optional() });
+  const boundAppSchema = z.object({
+    ...targetHandleShape,
+    applicationId: z.string().min(3).optional(),
+  });
   register(
     "resolve_app",
     "Resolve the Android project application ID with provenance.",
@@ -286,7 +380,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -295,10 +388,16 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       `${action}_app`,
       `${action === "launch" ? "Launch" : "Restart"} the resolved app and verify it is foreground.`,
       z.object({
+        ...targetHandleShape,
         applicationId: z.string().min(3).optional(),
         activity: z.string().min(1).optional(),
       }),
-      { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        targetBound: true,
+      },
       async ({ applicationId, activity }, signal, loaded) => {
         const execution = await runApp(
           {
@@ -314,7 +413,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
           dependencies,
           signal,
         );
-        bound ??= selectedTarget(execution.result.data);
         return toolResult(execution.result);
       },
     );
@@ -323,12 +421,18 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "install_app",
     "Install one project-local APK and verify its package. Downloads and split APKs are rejected.",
     z.object({
+      ...targetHandleShape,
       path: z.string().min(1),
       applicationId: z.string().min(3).optional(),
       replace: z.boolean().optional(),
       grantRuntimePermissions: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async (
       { path: requested, applicationId, replace, grantRuntimePermissions },
       signal,
@@ -357,15 +461,23 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
   register(
     "open_url",
     "Open an absolute URL and verify an explicit app handler when provided.",
-    z.object({ url: z.url(), applicationId: z.string().min(3).optional() }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    z.object({
+      ...targetHandleShape,
+      url: z.url(),
+      applicationId: z.string().min(3).optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ url, applicationId }, signal, loaded) => {
       const execution = await runOpen(
         url,
@@ -374,15 +486,19 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
   register(
     "inspect_app",
     "Return bounded sensitive app, foreground, and classified-log evidence without a screenshot.",
-    appSchema,
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    boundAppSchema,
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
     async ({ applicationId }, signal, loaded) => {
       const execution = await runInspectApp(
         {
@@ -396,7 +512,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -404,10 +519,16 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "inspect_ui",
     "Return a bounded sensitive accessibility snapshot with digest-scoped references.",
     z.object({
+      ...targetHandleShape,
       interactiveOnly: z.boolean().optional(),
       maxDepth: z.number().int().min(1).max(100).optional(),
     }),
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
     async ({ interactiveOnly, maxDepth }, signal, loaded) => {
       const execution = await runInspectUi(
         {
@@ -418,7 +539,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -430,8 +550,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     register(
       `${action === "tap" ? "tap" : "long_press"}_ui`,
       `${action === "tap" ? "Tap" : "Long-press"} a current digest-scoped UI ref or explicit display coordinate, then compare UI state.`,
-      z.object({ target: pointSchema, dryRun: z.boolean().optional() }),
-      { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      z.object({
+        ...targetHandleShape,
+        target: pointSchema,
+        dryRun: z.boolean().optional(),
+      }),
+      {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        targetBound: true,
+      },
       async ({ target, dryRun }, signal, loaded) => {
         const request =
           action === "tap"
@@ -465,7 +594,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
           dependencies,
           signal,
         );
-        bound ??= selectedTarget(execution.result.data);
         return toolResult(execution.result);
       },
     );
@@ -474,6 +602,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "swipe_ui",
     "Swipe in a screen-relative direction or between explicit display coordinates, then compare UI state.",
     z.object({
+      ...targetHandleShape,
       direction: z.enum(["down", "left", "right", "up"]).optional(),
       x1: z.number().int().min(0).max(100_000).optional(),
       y1: z.number().int().min(0).max(100_000).optional(),
@@ -481,7 +610,12 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       y2: z.number().int().min(0).max(100_000).optional(),
       dryRun: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ direction, x1, y1, x2, y2, dryRun }, signal, loaded) => {
       const coordinateCount = [x1, y1, x2, y2].filter((value) => value !== undefined).length;
       if (
@@ -510,7 +644,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -518,11 +651,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "type_text_ui",
     "Type conservative shell-safe text into the focused Android field and optionally press enter.",
     z.object({
+      ...targetHandleShape,
       text: z.string().min(1).max(256),
       submit: z.boolean().optional(),
       dryRun: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ text, submit, dryRun }, signal, loaded) => {
       const execution = await runUiAction(
         {
@@ -535,7 +674,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -543,10 +681,16 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "press_key_ui",
     "Press one allowlisted Android navigation or volume key, then compare UI state.",
     z.object({
+      ...targetHandleShape,
       key: z.enum(["back", "enter", "home", "menu", "volume-down", "volume-up"]),
       dryRun: z.boolean().optional(),
     }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ key, dryRun }, signal, loaded) => {
       const execution = await runUiAction(
         { action: "press", key, ...(dryRun === undefined ? {} : { dryRun }) },
@@ -554,7 +698,6 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
@@ -562,11 +705,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "wait_for_ui",
     "Wait a bounded time for an exact id=, text=, desc=, or package= selector to be visible or gone.",
     z.object({
+      ...targetHandleShape,
       selector: z.string().min(3).max(264),
       state: z.enum(["gone", "visible"]).optional(),
       timeoutMs: z.number().int().min(100).max(120_000).optional(),
     }),
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
     async ({ selector, state, timeoutMs }, signal, loaded) => {
       const execution = await runUiAction(
         {
@@ -579,15 +728,19 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
       return toolResult(execution.result);
     },
   );
   register(
     "capture_screenshot",
-    "Capture a verified PNG inside the project without overwriting an existing file.",
-    z.object({ out: z.string().min(1).optional() }),
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    "Capture a verified PNG inside the project and return its image pixels to the client without overwriting an existing file.",
+    z.object({ ...targetHandleShape, out: z.string().min(1).optional() }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
     async ({ out }, signal, loaded) => {
       const execution = await runCapture(
         { kind: "screenshot", cwd: options.cwd, ...(out === undefined ? {} : { out }) },
@@ -595,8 +748,17 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
-      bound ??= selectedTarget(execution.result.data);
-      return toolResult(execution.result);
+      const result = toolResult(execution.result);
+      const evidence = execution.result.data?.evidence;
+      if (execution.result.ok && evidence?.mediaType === "image/png") {
+        const pixels = await readFile(path.resolve(options.cwd, evidence.path));
+        result.content.push({
+          type: "image",
+          data: pixels.toString("base64"),
+          mimeType: "image/png",
+        });
+      }
+      return result;
     },
   );
   register(
