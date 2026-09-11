@@ -65,7 +65,7 @@ existing file unless `--force` is explicit. Use `--dry-run` first.
 
 | Field | Values or shape |
 | --- | --- |
-| `preset` | `expo`, `react-native`, `gradle`, or `custom` |
+| `preset` | `expo`, `react-native`, `flutter`, `capacitor`, `gradle`, or `custom` |
 | `packageManager` | `npm`, `pnpm`, `yarn`, or `bun` |
 | `command` | `{ "executable": string, "args": string[], "cwd"?: string }` |
 | `reversePorts` | integers or `{ "device": number, "host"?: number }` objects |

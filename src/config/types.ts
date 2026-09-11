@@ -5,7 +5,13 @@ export interface ConfigProvenance {
   location?: string;
 }
 
-export type ConfigDevPreset = "custom" | "expo" | "gradle" | "react-native";
+export type ConfigDevPreset =
+  | "capacitor"
+  | "custom"
+  | "expo"
+  | "flutter"
+  | "gradle"
+  | "react-native";
 export type ConfigPackageManager = "bun" | "npm" | "pnpm" | "yarn";
 
 export interface ConfigDevCommand {

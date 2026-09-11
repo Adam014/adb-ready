@@ -171,7 +171,7 @@
       "additionalProperties": false,
       "properties": {
         "preset": {
-          "enum": ["custom", "expo", "gradle", "react-native"]
+          "enum": ["capacitor", "custom", "expo", "flutter", "gradle", "react-native"]
         },
         "packageManager": {
           "enum": ["bun", "npm", "pnpm", "yarn"]

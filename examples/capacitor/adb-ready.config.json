@@ -1,0 +1,9 @@
+{
+  "$schema": "../../schema/config-v1.schema.json",
+  "version": 1,
+  "dev": {
+    "preset": "capacitor",
+    "logs": true,
+    "watch": true
+  }
+}

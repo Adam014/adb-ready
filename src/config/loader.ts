@@ -453,14 +453,16 @@ function validateDocument(
       validateUnknownKeys(document.dev, DEV_KEYS, "dev.", source, location, errors);
       if (document.dev.preset !== undefined) {
         if (
-          !new Set(["custom", "expo", "gradle", "react-native"]).has(document.dev.preset as string)
+          !new Set(["capacitor", "custom", "expo", "flutter", "gradle", "react-native"]).has(
+            document.dev.preset as string,
+          )
         ) {
           errors.push(
             error(
               source,
               location,
               "dev.preset",
-              "dev.preset must be custom, expo, gradle, or react-native.",
+              "dev.preset must be capacitor, custom, expo, flutter, gradle, or react-native.",
             ),
           );
         } else {
@@ -1201,7 +1203,11 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
   }
 
   const enumStrings = [
-    ["ADB_READY_PRESET", "devPreset", new Set(["custom", "expo", "gradle", "react-native"])],
+    [
+      "ADB_READY_PRESET",
+      "devPreset",
+      new Set(["capacitor", "custom", "expo", "flutter", "gradle", "react-native"]),
+    ],
     ["ADB_READY_PACKAGE_MANAGER", "packageManager", new Set(["bun", "npm", "pnpm", "yarn"])],
     [
       "ADB_READY_JOURNAL_MINIMUM_SEVERITY",

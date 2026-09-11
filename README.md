@@ -105,7 +105,7 @@ use. It does not replace Android Studio or force your project onto Bun.
 
 | Projects                              | Package managers        | CLI runtimes         |
 | ------------------------------------- | ----------------------- | -------------------- |
-| Expo · React Native · Gradle · custom | npm · pnpm · Yarn · Bun | Node.js · Bun · Deno |
+| Expo · React Native · Flutter · Capacitor · Gradle · custom | npm · pnpm · Yarn · Bun | Node.js · Bun · Deno |
 
 ## Quick start
 

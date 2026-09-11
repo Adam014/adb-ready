@@ -706,7 +706,7 @@ describe("parseArguments", () => {
   });
 
   test("rejects invalid or misplaced development options", () => {
-    expect(parseArguments(["dev", "--preset", "flutter"])).toMatchObject({
+    expect(parseArguments(["dev", "--preset", "native-script"])).toMatchObject({
       ok: false,
       code: "CLI_INVALID_VALUE",
     });

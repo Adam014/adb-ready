@@ -2012,9 +2012,16 @@ async function resolveDevCommand(
   project: ProjectDetection,
   options: DevOptions,
   dependencies: CommandDependencies,
+  targetSerial?: string,
 ): Promise<DevCommand | undefined> {
   if (options.command !== undefined) return options.command;
   if (preset === "custom") return undefined;
+  if (preset === "flutter") {
+    const flutter = await (dependencies.locateExecutable ?? locateExecutable)("flutter");
+    return flutter === undefined
+      ? undefined
+      : { executable: flutter, args: ["run", "-d", targetSerial ?? "<selected-target>"] };
+  }
   if (preset === "gradle") {
     const wrapperJar = path.join(project.root, "gradle", "wrapper", "gradle-wrapper.jar");
     const locate = dependencies.locateExecutable ?? locateExecutable;
@@ -2035,6 +2042,14 @@ async function resolveDevCommand(
   }
   const manager = project.packageManager;
   if (manager.name === undefined || manager.executable === undefined) return undefined;
+  if (preset === "capacitor") {
+    return directPackageCommand(manager.name, manager.executable, "cap", [
+      "run",
+      "android",
+      "--target",
+      targetSerial ?? "<selected-target>",
+    ]);
+  }
   const script = preset === "expo" ? "start" : "android";
   const frameworkArgs = preset === "expo" ? ["--android"] : [];
   if (project.packageJson?.scripts[script] !== undefined) {
@@ -2083,12 +2098,16 @@ function devReadinessAssertions(
   mappings: readonly { device: string; host: string }[],
 ): readonly ReadinessAssertion[] {
   if (options.readiness !== undefined) return options.readiness.all;
-  if (preset !== "expo" && preset !== "react-native") return [];
+  if (preset === "custom") return [];
   const metro = mappings.find(({ device }) => device === "tcp:8081") ?? mappings[0];
   const port = metro?.host.match(/^tcp:(\d+)$/u)?.[1];
   return [
     { kind: "boot" },
-    ...(port === undefined ? [] : [{ kind: "host-port" as const, port: Number(port) }]),
+    ...(preset !== "expo" && preset !== "react-native"
+      ? []
+      : port === undefined
+        ? []
+        : [{ kind: "host-port" as const, port: Number(port) }]),
   ];
 }
 
@@ -2103,6 +2122,7 @@ async function resolveDevDefinition(
   options: DevOptions,
   dependencies: CommandDependencies,
   commandId: string,
+  targetSerial?: string,
 ): Promise<{ definition?: ResolvedDevDefinition; problems: Problem[] }> {
   const problems: Problem[] = [];
   const project = await (dependencies.detectProject ?? detectProject)({
@@ -2118,7 +2138,7 @@ async function resolveDevDefinition(
         ProblemCode.DevPresetNotFound,
         "input.dev.preset",
         "ADB Ready could not determine a development preset.",
-        "Choose --preset expo, react-native, gradle, or pass a custom command after --.",
+        "Choose --preset expo, react-native, flutter, capacitor, gradle, or pass a custom command after --.",
         commandId,
       ),
     );
@@ -2126,7 +2146,7 @@ async function resolveDevDefinition(
   }
   if (
     project.packageManager.conflicts.length > 0 &&
-    (preset === "expo" || preset === "react-native")
+    (preset === "expo" || preset === "react-native" || preset === "capacitor")
   ) {
     problems.push(
       commandProblem(
@@ -2141,7 +2161,7 @@ async function resolveDevDefinition(
     return { problems };
   }
   if (
-    (preset === "expo" || preset === "react-native") &&
+    (preset === "expo" || preset === "react-native" || preset === "capacitor") &&
     (project.packageManager.name === undefined || project.packageManager.executable === undefined)
   ) {
     problems.push(
@@ -2155,7 +2175,13 @@ async function resolveDevDefinition(
     );
     return { problems };
   }
-  const childCommand = await resolveDevCommand(preset, project, options, dependencies);
+  const childCommand = await resolveDevCommand(
+    preset,
+    project,
+    options,
+    dependencies,
+    targetSerial,
+  );
   if (childCommand === undefined || childCommand.executable.trim() === "") {
     problems.push(
       commandProblem(
@@ -2487,7 +2513,12 @@ export async function runDev(
     correlation: { ...correlation, targetId: selected.target.id },
     data: { serial: selected.transport.serial, reason: selected.reason },
   });
-  const resolved = await resolveDevDefinition(options, dependencies, context.commandId);
+  const resolved = await resolveDevDefinition(
+    options,
+    dependencies,
+    context.commandId,
+    selected.transport.serial,
+  );
   problems.push(...resolved.problems);
   if (resolved.definition === undefined) return await complete(null);
   const { project, preset, childCommand, mappings: requestedMappings } = resolved.definition;

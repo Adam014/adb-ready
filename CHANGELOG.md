@@ -50,6 +50,8 @@ breaking changes.
   history.
 - Install a single APK or a complete split APK set through verified `install`
   and `install-multiple` workflows in both CLI and MCP.
+- Detect and run Flutter and Capacitor Android projects on the exact selected
+  target, with boot readiness and no invented default port mappings.
 
 ### Changed
 

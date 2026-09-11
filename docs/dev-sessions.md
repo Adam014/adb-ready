@@ -10,6 +10,8 @@ local diagnostic record.
 | --- | --- | --- | --- |
 | Expo | `expo` dependency | project `start` script with `--android`, otherwise Expo CLI | `8081` |
 | React Native | `react-native` dependency | project `android` script, otherwise React Native CLI | `8081` |
+| Flutter | `pubspec.yaml` | `flutter run -d <selected-target>` | none |
+| Capacitor | `@capacitor/android` or `@capacitor/core` dependency | Capacitor CLI for the selected target | none |
 | Gradle | wrapper or Gradle build file | wrapper `installDebug` | none |
 | Custom | explicit config or `--` | exact executable and argument array | none |
 
@@ -18,6 +20,8 @@ Select a preset when detection is intentionally unavailable or ambiguous:
 ```bash
 adb-ready dev --preset expo
 adb-ready dev --preset react-native --package-manager pnpm
+adb-ready dev --preset flutter
+adb-ready dev --preset capacitor
 adb-ready dev --preset gradle --device emulator-5554
 ```
 

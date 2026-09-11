@@ -3,7 +3,7 @@ import path from "node:path";
 import { locateExecutable } from "../platform/executable.js";
 
 export type PackageManagerName = "bun" | "npm" | "pnpm" | "yarn";
-export type DevPreset = "custom" | "expo" | "gradle" | "react-native";
+export type DevPreset = "capacitor" | "custom" | "expo" | "flutter" | "gradle" | "react-native";
 
 export interface PackageManagerResolution {
   name?: PackageManagerName;
@@ -76,9 +76,17 @@ async function nearestProjectRoot(
   exists: (file: string) => Promise<boolean>,
 ): Promise<string> {
   let current = path.resolve(start);
+  let nativeFallback: string | undefined;
   while (true) {
-    const markers = [
-      "package.json",
+    const ecosystemMarkers = ["package.json", "pubspec.yaml"];
+    if (
+      (
+        await Promise.all(ecosystemMarkers.map((marker) => exists(path.join(current, marker))))
+      ).some(Boolean)
+    ) {
+      return current;
+    }
+    const nativeMarkers = [
       "gradlew",
       "gradlew.bat",
       "build.gradle",
@@ -87,12 +95,15 @@ async function nearestProjectRoot(
       "settings.gradle.kts",
     ];
     if (
-      (await Promise.all(markers.map((marker) => exists(path.join(current, marker))))).some(Boolean)
+      nativeFallback === undefined &&
+      (await Promise.all(nativeMarkers.map((marker) => exists(path.join(current, marker))))).some(
+        Boolean,
+      )
     ) {
-      return current;
+      nativeFallback = current;
     }
     const parent = path.dirname(current);
-    if (parent === current) return path.resolve(start);
+    if (parent === current) return nativeFallback ?? path.resolve(start);
     current = parent;
   }
 }
@@ -142,12 +153,21 @@ export async function detectProject(options: DetectProjectOptions): Promise<Proj
 
   const presetEvidence: string[] = [];
   let preset: DevPreset | undefined;
-  if (dependencies.expo !== undefined) {
+  if (await exists(path.join(root, "pubspec.yaml"))) {
+    preset = "flutter";
+    presetEvidence.push("Flutter pubspec.yaml");
+  } else if (dependencies.expo !== undefined) {
     preset = "expo";
     presetEvidence.push("package.json dependency: expo");
   } else if (dependencies["react-native"] !== undefined) {
     preset = "react-native";
     presetEvidence.push("package.json dependency: react-native");
+  } else if (
+    dependencies["@capacitor/android"] !== undefined ||
+    dependencies["@capacitor/core"] !== undefined
+  ) {
+    preset = "capacitor";
+    presetEvidence.push("package.json dependency: Capacitor");
   } else if (
     (await exists(path.join(root, "gradlew"))) ||
     (await exists(path.join(root, "gradlew.bat"))) ||

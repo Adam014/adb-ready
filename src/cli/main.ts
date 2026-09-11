@@ -217,7 +217,7 @@ child output with targeted logcat. Ctrl-C stops owned processes and removes
 only mappings created by this session.
 
 Development options:
-  --preset NAME          expo, react-native, gradle, or custom
+  --preset NAME          expo, react-native, flutter, capacitor, gradle, or custom
   --package-manager PM   npm, pnpm, yarn, or bun
   --port PORT            Add a reverse TCP port; repeat for more ports
   --[no-]logs            Enable or disable targeted logcat

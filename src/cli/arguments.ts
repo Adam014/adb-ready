@@ -659,11 +659,18 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       const value = readValue();
       if (typeof value !== "string") return value;
       if (
-        !new Set<DevPreset>(["custom", "expo", "gradle", "react-native"]).has(value as DevPreset)
+        !new Set<DevPreset>([
+          "capacitor",
+          "custom",
+          "expo",
+          "flutter",
+          "gradle",
+          "react-native",
+        ]).has(value as DevPreset)
       ) {
         return failure(
           "CLI_INVALID_VALUE",
-          `Invalid preset: ${value}. Expected custom, expo, gradle, or react-native.`,
+          `Invalid preset: ${value}. Expected capacitor, custom, expo, flutter, gradle, or react-native.`,
           option,
         );
       }

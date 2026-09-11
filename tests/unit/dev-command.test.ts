@@ -506,6 +506,56 @@ describe("runDev", () => {
     }
   });
 
+  test("binds Flutter and Capacitor commands to the selected Android target", async () => {
+    const flutterDeps = dependencies(async (request) => targetProbe(request) ?? result(request));
+    flutterDeps.detectProject = async () => ({
+      root: "/workspace/flutter",
+      preset: "flutter",
+      presetEvidence: ["Flutter pubspec.yaml"],
+      packageManager: { conflicts: [] },
+    });
+    flutterDeps.locateExecutable = async (name) =>
+      name === "flutter" ? "/sdk/flutter/bin/flutter" : undefined;
+    const flutter = await runDev({ cwd: "/workspace/flutter" }, { dryRun: true }, flutterDeps);
+    expect(flutter.result.data).toMatchObject({
+      preset: "flutter",
+      ports: { requested: [] },
+      command: {
+        executable: "/sdk/flutter/bin/flutter",
+        args: ["run", "-d", "USB-1"],
+      },
+    });
+    expect(flutter.result.data?.plan?.steps).toContainEqual(
+      expect.objectContaining({ id: "ready-1", title: "Verify boot readiness" }),
+    );
+
+    const capacitorDeps = dependencies(async (request) => targetProbe(request) ?? result(request));
+    capacitorDeps.detectProject = async () => ({
+      root: "/workspace/capacitor",
+      preset: "capacitor",
+      presetEvidence: ["package.json dependency: Capacitor"],
+      packageManager: {
+        name: "pnpm",
+        executable: "/bin/pnpm",
+        source: "package-json",
+        conflicts: [],
+      },
+    });
+    const capacitor = await runDev(
+      { cwd: "/workspace/capacitor" },
+      { dryRun: true },
+      capacitorDeps,
+    );
+    expect(capacitor.result.data).toMatchObject({
+      preset: "capacitor",
+      ports: { requested: [] },
+      command: {
+        executable: "/bin/pnpm",
+        args: ["exec", "cap", "run", "android", "--target", "USB-1"],
+      },
+    });
+  });
+
   test("runs lifecycle hooks in session order with direct arguments and reports warnings", async () => {
     const calls: string[] = [];
     let mapped = false;
