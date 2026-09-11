@@ -21,10 +21,24 @@ The workflow does not use a long-lived npm write token.
 
 ## Prepare a release
 
-1. Complete the real-device acceptance matrix for the advertised hosts and
-   workflows.
+Release evidence has three tiers:
+
+- **Every release:** the complete fixture, unit, integration, runtime, package,
+  documentation, privacy, and release-artifact verification gate must pass.
+- **Device-behavior changes:** rerun every affected workflow on a real target
+  and record the exact host, target, Android version, and transport. A
+  documentation, metadata, or machine-output-only patch does not manufacture
+  new hardware evidence.
+- **Support expansion:** before promoting a new host, architecture, transport,
+  framework, or device class to a tested tier, complete and record its
+  dedicated acceptance matrix.
+
+Then prepare the release:
+
+1. Confirm the relevant acceptance tier above is complete and that
+   `COMPATIBILITY.md` still states the observed boundary accurately.
 2. Set the exact release version in `package.json`.
-3. Change `private` to `false` only in the release commit.
+3. Confirm the published package keeps `private: false`.
 4. Move the relevant entries from `Unreleased` into a dated
    `## [VERSION] - YYYY-MM-DD` section in `CHANGELOG.md` and update its links.
 5. Replace all prerelease installation examples and private-preview language in

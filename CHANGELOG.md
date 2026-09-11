@@ -9,6 +9,20 @@ breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the commandless capability overview as clean structured JSON when
+  `--non-interactive` is combined with `--json` or `--format json`, regardless
+  of flag order, and cover the installed package through both executable
+  aliases.
+
+### Changed
+
+- Keep the public security support table aligned with the current release line
+  through an automated release check.
+- Clarify which verification, real-device, and support-expansion evidence is
+  required for each kind of release.
+
 ## [0.3.1] - 2026-09-11
 
 ### Changed
