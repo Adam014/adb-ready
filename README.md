@@ -35,10 +35,14 @@ npx adb-ready dev
 ```text
 $ adb-ready dev
 
-✓ Android target selected       Pixel 9 · wireless
-✓ Localhost ports ready         8081 → 8081
-✓ Development command started   npx expo start --android
-● Session healthy               watching target, ports, and logs
+✓ Target ready
+  Pixel 9 · wireless
+✓ Port ready
+  8081 → 8081
+✓ Project started
+  npx expo start --android
+● Session healthy
+  watching target · ports · logs
 ```
 
 ADB Ready handles the state around ADB that a person, script, or coding agent
@@ -52,14 +56,19 @@ Running `adb-ready` without a command opens the interactive workflow home.
 
 ## What ADB Ready does
 
-| Job | Use ADB Ready to… |
-| --- | --- |
-| [**Run the project**](./docs/dev-sessions.md) | Select one target, prepare ports, launch the framework, and keep the session healthy. |
-| [**Connect the device**](./docs/targets-and-wireless.md) | Discover, pair, reconnect, and deterministically bind a physical device or emulator. |
-| [**Operate the app**](./docs/apps-and-evidence.md#app-lifecycle) | Resolve, install, launch, restart, deep-link, and inspect the project app. |
-| [**Verify the UI**](./docs/ui-automation.md) | Find semantic elements, act by intent, assert state, and capture the screen. |
-| [**Debug with evidence**](./docs/logs-and-context.md) | Keep focused logs, session history, screenshots, recordings, and redacted context together. |
-| [**Automate a real device**](./docs/automation.md#run-one-bounded-verification) | Gate a finite command on readiness and return stable results, reports, and artifacts. |
+- [**Run the project**](./docs/dev-sessions.md) — select one target, prepare
+  ports, launch the framework, and keep the session healthy.
+- [**Connect the device**](./docs/targets-and-wireless.md) — discover, pair,
+  reconnect, and deterministically bind a physical device or emulator.
+- [**Operate the app**](./docs/apps-and-evidence.md#app-lifecycle) — resolve,
+  install, launch, restart, deep-link, and inspect the project app.
+- [**Verify the UI**](./docs/ui-automation.md) — find semantic elements, act
+  by intent, assert state, and capture the screen.
+- [**Debug with evidence**](./docs/logs-and-context.md) — keep focused logs,
+  session history, screenshots, recordings, and redacted context together.
+- [**Automate a real device**](./docs/automation.md#run-one-bounded-verification)
+  — gate a finite command on readiness and return stable results, reports, and
+  artifacts.
 
 ## Choose how you work
 
