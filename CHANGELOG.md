@@ -9,6 +9,11 @@ breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Clarify package ownership and normalize the maintainer identity used by
+  repository history and published package metadata.
+
 ## [0.3.0] - 2026-09-11
 
 ### Added

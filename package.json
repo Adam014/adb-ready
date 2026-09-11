@@ -55,6 +55,11 @@
     "url": "https://github.com/Adam014/adb-ready/issues"
   },
   "homepage": "https://github.com/Adam014/adb-ready#readme",
+  "author": {
+    "name": "Adam Stádník",
+    "email": "adam.stadnik@seznam.cz",
+    "url": "https://github.com/Adam014"
+  },
   "keywords": [
     "adb",
     "ai-agents",
