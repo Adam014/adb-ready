@@ -124,6 +124,15 @@ bunx adb-ready@VERSION --version
 deno run -A npm:adb-ready@VERSION --version
 ```
 
+Deno 2 applies a 24-hour minimum dependency age by default. For an immediate
+post-publish verification only, override that safety delay explicitly:
+
+```bash
+deno run -A --minimum-dependency-age 0 npm:adb-ready@VERSION --version
+```
+
+Normal consumers should keep Deno's default policy and omit the override.
+
 Confirm the npm page shows the expected README, MIT license, repository,
 provenance, executable names, unpacked size, and file inventory. Then verify
 the `latest` dist-tag points to the released version.

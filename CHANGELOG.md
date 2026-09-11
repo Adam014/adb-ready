@@ -9,6 +9,13 @@ breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Fail closed before npm publishing unless the immutable release tag already
+  has a matching draft GitHub release.
+- Document Deno's 24-hour minimum dependency age and the explicit override
+  reserved for immediate post-publish verification.
+
 ## [0.3.2] - 2026-09-11
 
 ### Fixed

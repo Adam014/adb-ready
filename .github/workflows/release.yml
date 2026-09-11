@@ -92,6 +92,15 @@ jobs:
           test "$WORKFLOW_REF" = "refs/tags/$RELEASE_TAG"
           test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
 
+      - name: Require a matching draft GitHub release for publish mode
+        if: inputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          release_is_draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+          test "$release_is_draft" = "true"
+
       - name: Create the immutable npm artifact
         id: package
         env:
