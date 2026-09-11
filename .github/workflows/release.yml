@@ -29,8 +29,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-preflight:
+    name: Confirm prepared draft release
+    if: inputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: write # Inspect a draft release without checking out or running repository code.
+
+    steps:
+      - name: Require a matching draft GitHub release for publish mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          release_is_draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+          test "$release_is_draft" = "true"
+
   validate:
     name: Validate npm release artifact
+    needs: release-preflight
+    if: always() && (inputs.mode == 'validate' || needs.release-preflight.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -92,15 +111,6 @@ jobs:
           test "$WORKFLOW_REF" = "refs/tags/$RELEASE_TAG"
           test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
 
-      - name: Require a matching draft GitHub release for publish mode
-        if: inputs.mode == 'publish'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          release_is_draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
-          test "$release_is_draft" = "true"
-
       - name: Create the immutable npm artifact
         id: package
         env:
@@ -138,7 +148,9 @@ jobs:
   publish:
     name: Publish verified artifact to npm
     if: inputs.mode == 'publish'
-    needs: validate
+    needs:
+      - release-preflight
+      - validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
