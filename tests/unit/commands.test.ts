@@ -94,6 +94,93 @@ function deterministicDependencies(runner: ProcessRunner) {
 }
 
 describe("runDoctor", () => {
+  test("stops at failed or interrupted required ADB boundaries", async () => {
+    const scenarios: Array<{
+      fail: string;
+      expected: ExitCode;
+      problem: string;
+      aborted?: boolean;
+    }> = [
+      { fail: "version", expected: ExitCode.AdbOperation, problem: ProblemCode.AdbCommandFailed },
+      {
+        fail: "host-features",
+        expected: ExitCode.Interrupted,
+        problem: ProblemCode.OperationInterrupted,
+        aborted: true,
+      },
+      {
+        fail: "server-status",
+        expected: ExitCode.Interrupted,
+        problem: ProblemCode.OperationInterrupted,
+        aborted: true,
+      },
+      { fail: "devices", expected: ExitCode.AdbOperation, problem: ProblemCode.AdbCommandFailed },
+      {
+        fail: "mdns-services",
+        expected: ExitCode.Interrupted,
+        problem: ProblemCode.OperationInterrupted,
+        aborted: true,
+      },
+      {
+        fail: "hardware-serial:USB-1",
+        expected: ExitCode.Interrupted,
+        problem: ProblemCode.OperationInterrupted,
+        aborted: true,
+      },
+    ];
+    for (const scenario of scenarios) {
+      const execution = await runDoctor(
+        {},
+        deterministicDependencies(async (request) => {
+          const name = commandName(request);
+          if (name === scenario.fail) {
+            return processResult(request, {
+              exitCode: scenario.aborted ? null : 1,
+              signal: scenario.aborted ? "SIGTERM" : null,
+              aborted: scenario.aborted === true,
+              stderr: "fixture failure",
+            });
+          }
+          const outputs: Record<string, string> = {
+            version: "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n",
+            "host-features": "server_status\n",
+            "server-status": "USB backend: libusb\n",
+            devices: "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+            "hardware-serial:USB-1": "PHONE-1\n",
+            "mdns-services": "List of discovered mdns services\n",
+          };
+          return processResult(request, { stdout: outputs[name] ?? "" });
+        }),
+      );
+      expect(execution.exitCode).toBe(scenario.expected);
+      expect(execution.result.problems.some(({ code }) => code === scenario.problem)).toBeTrue();
+    }
+  });
+
+  test("keeps optional server status and identity failures as diagnostics", async () => {
+    const execution = await runDoctor(
+      {},
+      deterministicDependencies(async (request) => {
+        const name = commandName(request);
+        if (name === "server-status" || name.startsWith("hardware-serial:")) {
+          return processResult(request, { exitCode: 1, stderr: "unsupported" });
+        }
+        const outputs: Record<string, string> = {
+          version: "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n",
+          "host-features": "server_status\n",
+          devices: "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+          "mdns-services": "List of discovered mdns services\n",
+        };
+        return processResult(request, { stdout: outputs[name] ?? "" });
+      }),
+    );
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.discovery.identity).toEqual({ probed: 1, resolved: 0 });
+    expect(
+      execution.result.problems.some(({ code }) => code === ProblemCode.AdbOptionalProbeFailed),
+    ).toBeTrue();
+  });
+
   test("collects portable runtime, ADB capabilities, status, and target data", async () => {
     const execution = await runDoctor(
       {},
@@ -279,6 +366,26 @@ describe("runDoctor", () => {
 });
 
 describe("runDevices", () => {
+  test("fails when ADB is missing or target inventory cannot be read", async () => {
+    const missing = await runDevices(
+      { adbPath: "/missing/adb" },
+      { locateAdb: async () => undefined, idFactory: () => "missing", clock: () => new Date(0) },
+    );
+    expect(missing.exitCode).toBe(ExitCode.Environment);
+    expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);
+
+    const failed = await runDevices(
+      {},
+      deterministicDependencies(async (request) =>
+        commandName(request) === "devices"
+          ? processResult(request, { exitCode: 1, stderr: "server unavailable" })
+          : processResult(request),
+      ),
+    );
+    expect(failed.exitCode).toBe(ExitCode.AdbOperation);
+    expect(failed.result.data).toBeNull();
+  });
+
   test("reports an empty inventory as a non-fatal diagnostic warning", async () => {
     const execution = await runDevices(
       {},
@@ -448,6 +555,76 @@ describe("runDevices", () => {
 });
 
 describe("wireless target commands", () => {
+  test("preserves failures at every connect verification boundary", async () => {
+    const endpoint = "192.168.1.20:37123";
+    const missing = await runConnect(endpoint, {}, { locateAdb: async () => undefined });
+    expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);
+
+    const notConfirmed = await runConnect(
+      endpoint,
+      {},
+      deterministicDependencies(fixtureRunner({ connect: `failed to connect to ${endpoint}\n` })),
+    );
+    expect(notConfirmed.result.problems[0]?.code).toBe(ProblemCode.WirelessConnectionFailed);
+
+    const stateFailed = await runConnect(
+      endpoint,
+      {},
+      deterministicDependencies(async (request) =>
+        commandName(request) === "connect"
+          ? processResult(request, { stdout: `connected to ${endpoint}\n` })
+          : processResult(request, { exitCode: 1, stderr: "transport lost" }),
+      ),
+    );
+    expect(stateFailed.result.ok).toBeFalse();
+
+    const offline = await runConnect(
+      endpoint,
+      {},
+      deterministicDependencies(
+        fixtureRunner({ connect: `connected to ${endpoint}\n`, "get-state": "offline\n" }),
+      ),
+    );
+    expect(offline.result.problems[0]?.code).toBe(ProblemCode.WirelessConnectionFailed);
+
+    const identityInterrupted = await runConnect(
+      endpoint,
+      {},
+      deterministicDependencies(async (request) => {
+        const name = commandName(request);
+        if (name === "connect")
+          return processResult(request, { stdout: `connected to ${endpoint}\n` });
+        if (name === "get-state") return processResult(request, { stdout: "device\n" });
+        return processResult(request, { exitCode: null, signal: "SIGTERM", aborted: true });
+      }),
+    );
+    expect(identityInterrupted.exitCode).toBe(ExitCode.Interrupted);
+  });
+
+  test("preserves failures at every pairing boundary", async () => {
+    const endpoint = "192.168.1.20:41234";
+    const missing = await runPair(endpoint, "123456", {}, { locateAdb: async () => undefined });
+    expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);
+
+    const processFailed = await runPair(
+      endpoint,
+      "123456",
+      {},
+      deterministicDependencies(async (request) =>
+        processResult(request, { exitCode: 1, stderr: "pairing rejected" }),
+      ),
+    );
+    expect(processFailed.result.ok).toBeFalse();
+
+    const unconfirmed = await runPair(
+      endpoint,
+      "123456",
+      {},
+      deterministicDependencies(fixtureRunner({ pair: "Pairing started\n" })),
+    );
+    expect(unconfirmed.result.problems[0]?.code).toBe(ProblemCode.WirelessPairingFailed);
+  });
+
   test("returns deterministic de-duplicated mDNS choices for interactive callers", async () => {
     const execution = await runWirelessDiscovery(
       "connect",

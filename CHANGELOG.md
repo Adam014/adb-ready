@@ -15,6 +15,8 @@ breaking changes.
   has a matching draft GitHub release.
 - Document Deno's 24-hour minimum dependency age and the explicit override
   reserved for immediate post-publish verification.
+- Enforce 90% LCOV line and function coverage floors in the authoritative
+  verification gate and preserve its LCOV report in CI.
 
 ## [0.3.2] - 2026-09-11
 

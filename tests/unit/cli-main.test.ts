@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { type CliDependencies, type CliInput, type CliIo, runCli } from "../../src/cli/main.js";
@@ -139,6 +139,129 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
 }
 
 describe("runCli", () => {
+  test("routes the complete non-interactive public command surface", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-surface-"));
+    const ui =
+      '<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Open" resource-id="com.example:id/open" class="android.widget.Button" clickable="true" long-clickable="true" enabled="true" bounds="[20,100][220,200]" /><node text="old" resource-id="com.example:id/email" class="android.widget.EditText" focusable="true" enabled="true" bounds="[100,300][900,420]" /><node resource-id="com.example:id/list" scrollable="true" enabled="true" bounds="[100,400][900,2000]" /></node></hierarchy>';
+    await writeFile(path.join(root, "app.apk"), "apk");
+    try {
+      const commands: string[][] = [
+        ["doctor"],
+        ["apps", "list", "--user", "--filter", "example"],
+        ["app", "launch", "com.example.app"],
+        ["app", "restart", "com.example.app", "--activity", ".MainActivity"],
+        ["app", "install", "app.apk", "--package", "com.example.app", "--replace"],
+        ["open", "https://example.com", "--package", "com.example.app"],
+        ["ports", "reverse", "list"],
+        ["ports", "reverse", "add", "8081", "8081", "--dry-run"],
+        ["ports", "forward", "add", "9229", "9229", "--dry-run"],
+        ["ui", "audit"],
+        ["ui", "find", "text=Open"],
+        ["ui", "get", "id=com.example:id/open"],
+        ["ui", "assert", "text=Open"],
+        ["ui", "compare", "0".repeat(64)],
+        ["ui", "tap", "text=Open", "--dry-run"],
+        ["ui", "long-press", "120", "150", "--dry-run"],
+        ["ui", "swipe", "10", "20", "30", "40", "--dry-run"],
+        ["ui", "scroll", "down", "id=com.example:id/list", "--dry-run"],
+        ["ui", "type", "hello", "--submit", "--dry-run"],
+        ["ui", "fill", "id=com.example:id/email", "person@example.com", "--dry-run"],
+        ["ui", "clear", "id=com.example:id/email", "--dry-run"],
+        ["ui", "wait", "text=Open", "--timeout", "100ms"],
+        ["capture", "screen-record", "--duration", "1s", "--out", "demo.mp4"],
+        ["run", "--dry-run", "--", "node", "verify.mjs"],
+      ];
+
+      for (const command of commands) {
+        const streams = io();
+        streams.cwd = root;
+        const fixture = dependencies(
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+        fixture.runner = async (request) => {
+          const args = request.args ?? [];
+          if (args.includes("version")) {
+            return result(request, "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n");
+          }
+          if (args.includes("devices")) {
+            return result(
+              request,
+              "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+            );
+          }
+          if (args.includes("host-features")) return result(request, "shell_v2,server_status\n");
+          if (args.includes("server-status")) return result(request, "USB backend: libusb\n");
+          if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+          if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+          if (args.includes("reverse") && args.includes("--list")) return result(request, "");
+          if (args.includes("forward") && args.includes("--list")) return result(request, "");
+          if (args.includes("list") && args.includes("packages")) {
+            return result(request, "package:/data/app/com.example.app/base.apk=com.example.app\n");
+          }
+          if (args.includes("resolve-activity")) {
+            return result(request, "com.example.app/.MainActivity\n");
+          }
+          if (args.includes("activity") && args.includes("activities")) {
+            return result(
+              request,
+              "mResumedActivity: ActivityRecord{42 u0 com.example.app/.MainActivity t12}\n",
+            );
+          }
+          if (args.includes("dumpsys") && args.includes("package")) {
+            return result(
+              request,
+              "Package [com.example.app]\n codePath=/data/app/com.example.app\n versionCode=7 targetSdk=36\n versionName=1.0.0\n pkgFlags=[ DEBUGGABLE ]\n",
+            );
+          }
+          if (args.includes("pidof")) return result(request, "321\n");
+          if (args.includes("wm") && args.includes("size")) {
+            return result(request, "Physical size: 1080x2400\n");
+          }
+          if (args.includes("input") && args.includes("help")) {
+            return result(request, "text keyevent keycombination\n");
+          }
+          if (args.includes("uiautomator")) return result(request, ui);
+          if (args.includes("screenrecord")) return result(request, "");
+          if (args.includes("pull")) {
+            const destination = args.at(-1);
+            if (destination !== undefined) {
+              await writeFile(
+                destination,
+                Uint8Array.from([0, 0, 0, 12, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4]),
+              );
+            }
+            return result(request, "");
+          }
+          return result(request, args.includes("start") ? "Status: ok\n" : "");
+        };
+        const separator = command.indexOf("--");
+        const argv =
+          separator < 0
+            ? [...command, "--json", "--non-interactive"]
+            : [
+                ...command.slice(0, separator),
+                "--json",
+                "--non-interactive",
+                ...command.slice(separator),
+              ];
+        const exitCode = await runCli(argv, streams, fixture);
+        if (streams.output.value === "") {
+          throw new Error(`No JSON output for: ${command.join(" ")} (exit ${String(exitCode)})`);
+        }
+        const payload = JSON.parse(streams.output.value) as {
+          command: string;
+          problems: unknown[];
+        };
+        expect(exitCode).not.toBe(ExitCode.Internal);
+        expect(payload.command).not.toBe("cli");
+        expect(payload.problems).toBeArray();
+        expect(streams.error.value).toBe("");
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("keeps bare non-TTY invocation script-safe by showing help without ANSI", async () => {
     const streams = io();
     const exitCode = await runCli([], streams, dependencies());

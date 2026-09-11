@@ -33,6 +33,7 @@
     "ui:playground": "bun run scripts/ui-playground.ts",
     "ui:check": "bun run scripts/ui-playground.ts --all --non-interactive",
     "test": "bun test",
+    "test:coverage": "bun test --coverage && bun run scripts/coverage-check.mjs",
     "test:commands": "bun run build && bun run scripts/command-matrix.mjs",
     "test:package-managers": "bun run build && bun run scripts/package-manager-smoke.mjs",
     "test:integration": "bun test tests/integration",

@@ -2,12 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { redactText } from "../../src/core/redaction.js";
 import {
   adbProcessProblem,
+  multipleTargetsProblem,
   noTargetsProblem,
   ProblemCode,
   problemsForDevices,
   problemsForServerStatus,
+  targetInventoryProblems,
+  targetSelectionProblem,
 } from "../../src/domain/problems.js";
 import type { ProcessResult } from "../../src/platform/process-runner.js";
+import type { AndroidTarget } from "../../src/target/model.js";
 
 function failedProcess(overrides: Partial<ProcessResult> = {}): ProcessResult {
   return {
@@ -54,6 +58,15 @@ describe("redactText", () => {
 });
 
 describe("problem classification", () => {
+  const target = (overrides: Partial<AndroidTarget> = {}): AndroidTarget => ({
+    id: "target-1",
+    serial: "USB-1",
+    state: "device",
+    name: "Pixel 9",
+    transports: [{ serial: "USB-1", state: "device", kind: "usb", stable: true }],
+    ...overrides,
+  });
+
   test("classifies a timeout from structured process state", () => {
     const problem = adbProcessProblem(
       "devices",
@@ -183,6 +196,100 @@ describe("problem classification", () => {
       id: "pair_discovered_target",
       risk: "device-reversible",
       automatic: false,
+    });
+  });
+
+  test("turns every unsafe selection outcome into deterministic guidance", () => {
+    const ready = target();
+    const offline = target({
+      state: "offline",
+      transports: [{ serial: "USB-1", state: "offline", kind: "usb", stable: true }],
+    });
+    const duplicate = target({
+      transports: [
+        { serial: "USB-1", state: "device", kind: "usb", stable: true, transportId: "1" },
+        { serial: "USB-1", state: "device", kind: "usb", stable: true, transportId: "2" },
+      ],
+    });
+    const correlation = { commandId: "command-1" };
+    const problems = [
+      targetSelectionProblem({ kind: "ambiguous", candidates: [ready] }, correlation),
+      targetSelectionProblem(
+        { kind: "duplicate", target: duplicate, transports: duplicate.transports },
+        correlation,
+      ),
+      targetSelectionProblem({ kind: "not-found", selector: "missing" }, correlation),
+      targetSelectionProblem({ kind: "unavailable", target: offline }, correlation),
+      targetSelectionProblem({ kind: "none" }, correlation),
+    ];
+    expect(problems.map(({ code }) => code)).toEqual([
+      ProblemCode.MultipleTargets,
+      ProblemCode.DuplicateTargetTransport,
+      ProblemCode.TargetNotFound,
+      ProblemCode.NoSelectableTarget,
+      ProblemCode.NoSelectableTarget,
+    ]);
+    expect(problems.every(({ correlation: value }) => value === correlation)).toBeTrue();
+  });
+
+  test("detects unstable and duplicate target transports from inventory evidence", () => {
+    const unstable = target({
+      id: "unstable",
+      serial: "service._adb-tls-connect._tcp",
+      transports: [
+        {
+          serial: "service._adb-tls-connect._tcp",
+          state: "device",
+          kind: "unknown",
+          stable: false,
+        },
+      ],
+    });
+    const duplicate = target({
+      id: "duplicate",
+      transports: [
+        { serial: "USB-1", state: "device", kind: "usb", stable: true, transportId: "1" },
+        { serial: "USB-1", state: "device", kind: "usb", stable: true, transportId: "2" },
+      ],
+    });
+    const problems = targetInventoryProblems([unstable, duplicate], { commandId: "command-1" });
+    expect(problems.map(({ code }) => code)).toEqual([
+      ProblemCode.UnstableTargetSerial,
+      ProblemCode.DuplicateTargetTransport,
+    ]);
+    expect(problems.every(({ severity }) => severity === "warning")).toBeTrue();
+  });
+
+  test("classifies host permission failures and exposes explicit multi-target selection", () => {
+    const devices = [
+      { serial: "usb-1", state: "no-permissions" as const, properties: {}, unparsed: [] },
+      { serial: "usb-2", state: "device" as const, properties: {}, unparsed: [] },
+    ];
+    const permission = problemsForDevices(devices, { commandId: "command-1" }, "warning");
+    expect(permission).toMatchObject([
+      {
+        code: ProblemCode.TargetNoPermissions,
+        severity: "warning",
+        actions: [{ id: "review_usb_permissions", kind: "documentation" }],
+      },
+    ]);
+    expect(multipleTargetsProblem(devices, { commandId: "command-1" })).toMatchObject({
+      code: ProblemCode.MultipleTargets,
+      evidence: [{ value: ["usb-1", "usb-2"] }],
+      actions: [{ id: "select_target" }],
+    });
+  });
+
+  test("maps a missing ADB executable to setup guidance", () => {
+    const problem = adbProcessProblem(
+      "devices",
+      failedProcess({ spawnError: { code: "ENOENT", message: "not found" } }),
+      { commandId: "command-1" },
+    );
+    expect(problem).toMatchObject({
+      code: ProblemCode.AdbNotFound,
+      evidence: [{ source: "configuration", field: "adb.path", value: "adb" }],
+      actions: [{ id: "configure_adb_path" }],
     });
   });
 });

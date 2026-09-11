@@ -30,10 +30,15 @@ Useful focused commands:
 ```bash
 bun run dev -- --help
 bun run test
+bun run test:coverage
 bun run test:integration
 bun run ui:playground
 bun run verify:real-adb
 ```
+
+The authoritative verification enforces at least 90% LCOV line and function
+coverage, then generates `coverage/lcov.info`. Coverage measures
+exercised code; it does not replace the real-device acceptance matrix.
 
 The real-ADB verification is read-only. Do not add a hardware mutation to it.
 

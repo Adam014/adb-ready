@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { type CommandDependencies, runDev, runDevOfflinePlan } from "../../src/app/commands.js";
+import type { ProjectDetection } from "../../src/dev/project.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import { ProblemCode } from "../../src/domain/problems.js";
 import type {
@@ -487,6 +488,223 @@ describe("runDev", () => {
         command: { executable: `/bin/${fixture.manager}`, args: fixture.expected },
       });
     }
+  });
+
+  test("plans direct framework binaries for every supported JavaScript package manager", async () => {
+    const fixtures = [
+      {
+        preset: "expo" as const,
+        manager: "npm" as const,
+        args: ["exec", "--", "expo", "start", "--android"],
+      },
+      {
+        preset: "expo" as const,
+        manager: "bun" as const,
+        args: ["x", "expo", "start", "--android"],
+      },
+      {
+        preset: "react-native" as const,
+        manager: "yarn" as const,
+        args: ["react-native", "run-android"],
+      },
+      {
+        preset: "capacitor" as const,
+        manager: "pnpm" as const,
+        args: ["exec", "cap", "run", "android", "--target", "<selected-target>"],
+      },
+    ];
+    for (const fixture of fixtures) {
+      const deps = dependencies(async (request) => result(request));
+      deps.detectProject = async () => ({
+        root: "/workspace/app",
+        preset: fixture.preset,
+        presetEvidence: [],
+        packageManager: {
+          name: fixture.manager,
+          executable: `/bin/${fixture.manager}`,
+          source: "config",
+          conflicts: [],
+        },
+      });
+      const execution = await runDevOfflinePlan({ cwd: "/workspace/app" }, deps);
+      expect(execution.exitCode).toBe(ExitCode.Success);
+      expect(execution.result.data?.command).toMatchObject({
+        executable: `/bin/${fixture.manager}`,
+        args: fixture.args,
+      });
+    }
+  });
+
+  test("rejects incomplete or conflicting offline development definitions", async () => {
+    const fixtures: Array<{
+      project: ProjectDetection;
+      options: { cwd: string; preset?: "custom" };
+      code: string;
+    }> = [
+      {
+        project: { root: "/workspace/app", presetEvidence: [], packageManager: { conflicts: [] } },
+        options: { cwd: "/workspace/app" },
+        code: ProblemCode.DevPresetNotFound,
+      },
+      {
+        project: {
+          root: "/workspace/app",
+          preset: "expo" as const,
+          presetEvidence: [],
+          packageManager: {
+            name: "npm" as const,
+            executable: "/bin/npm",
+            source: "lockfile" as const,
+            conflicts: ["npm", "pnpm"],
+          },
+        },
+        options: { cwd: "/workspace/app" },
+        code: ProblemCode.PackageManagerConflict,
+      },
+      {
+        project: {
+          root: "/workspace/app",
+          preset: "react-native" as const,
+          presetEvidence: [],
+          packageManager: { name: "npm" as const, source: "lockfile" as const, conflicts: [] },
+        },
+        options: { cwd: "/workspace/app" },
+        code: ProblemCode.PackageManagerNotFound,
+      },
+      {
+        project: {
+          root: "/workspace/app",
+          preset: "custom" as const,
+          presetEvidence: [],
+          packageManager: { conflicts: [] },
+        },
+        options: { cwd: "/workspace/app", preset: "custom" as const },
+        code: ProblemCode.DevCommandNotFound,
+      },
+    ];
+    for (const fixture of fixtures) {
+      const deps = dependencies(async (request) => result(request));
+      deps.detectProject = async () => fixture.project;
+      const execution = await runDevOfflinePlan(fixture.options, deps);
+      expect(execution.exitCode).not.toBe(ExitCode.Success);
+      expect(execution.result.data).toBeNull();
+      expect(execution.result.problems).toContainEqual(
+        expect.objectContaining({ code: fixture.code }),
+      );
+    }
+  });
+
+  test("rejects unavailable native tools and malformed reverse ports offline", async () => {
+    const nativeFixtures = [
+      { preset: "flutter" as const, locate: async () => undefined },
+      { preset: "gradle" as const, locate: async () => undefined },
+    ];
+    for (const fixture of nativeFixtures) {
+      const root = await mkdtemp(path.join(tmpdir(), `adb-ready-${fixture.preset}-`));
+      try {
+        const deps = dependencies(async (request) => result(request));
+        deps.detectProject = async () => ({
+          root,
+          preset: fixture.preset,
+          presetEvidence: [],
+          packageManager: { conflicts: [] },
+        });
+        deps.locateExecutable = fixture.locate;
+        const execution = await runDevOfflinePlan({ cwd: root }, deps);
+        expect(execution.result.problems).toContainEqual(
+          expect.objectContaining({ code: ProblemCode.DevCommandNotFound }),
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+
+    const deps = dependencies(async (request) => result(request));
+    const execution = await runDevOfflinePlan(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "node", args: [] },
+        reversePorts: [{ device: 0 }, { device: 8081, host: 70_000 }],
+      },
+      deps,
+    );
+    expect(execution.result.problems.map(({ code }) => code)).toEqual([
+      ProblemCode.InvalidPort,
+      ProblemCode.InvalidPort,
+    ]);
+  });
+
+  test("produces a complete redacted offline plan with hooks, readiness, and verification", async () => {
+    const deps = dependencies(async (request) => result(request));
+    deps.detectProject = async () => ({
+      root: "/Users/adam/private-app",
+      preset: "custom",
+      presetEvidence: [],
+      packageJson: {
+        path: "/Users/adam/private-app/package.json",
+        name: "private-app",
+        scripts: {},
+      },
+      packageManager: {
+        name: "bun",
+        executable: "/opt/bin/bun",
+        source: "package-json",
+        conflicts: [],
+      },
+    });
+    const execution = await runDevOfflinePlan(
+      {
+        cwd: "/Users/adam/private-app",
+        command: {
+          executable: "/Users/adam/private-app/node_modules/.bin/expo",
+          args: ["start", "token=secret-value"],
+          cwd: "mobile",
+          env: { PUBLIC_MODE: "demo", API_TOKEN: "secret-value" },
+        },
+        reversePorts: [
+          { device: 8081, host: 3000 },
+          { device: 8081, host: 3000 },
+        ],
+        hooks: {
+          beforeDev: [{ run: ["node", "before.mjs"] }],
+          onTargetReady: [{ run: ["node", "target.mjs"] }],
+          onPortsReady: [{ run: ["node", "ports.mjs"] }],
+          onReady: [{ run: ["node", "ready.mjs"] }],
+          onChildExit: [{ run: ["node", "exit.mjs"] }],
+          finally: [{ run: ["node", "finally.mjs"] }],
+        },
+        readiness: { all: [{ kind: "boot" }, { kind: "host-port", port: 3000 }] },
+        verification: { command: { executable: "node", args: ["verify.mjs"] } },
+      },
+      deps,
+    );
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data).toMatchObject({
+      status: "planned",
+      project: { name: "private-app" },
+      packageManager: { name: "bun", source: "package-json" },
+      ports: { requested: [{ device: "tcp:8081", host: "tcp:3000" }] },
+      command: {
+        cwd: "/Users/adam/private-app/mobile",
+        envKeys: ["ANDROID_SERIAL", "API_TOKEN", "PUBLIC_MODE"],
+      },
+    });
+    expect(execution.result.data?.plan?.steps.map(({ id }) => id)).toEqual([
+      "acquire-target",
+      "hook-beforeDev-1",
+      "hook-onTargetReady-1",
+      "reverse-1",
+      "hook-onPortsReady-1",
+      "start-child",
+      "ready-1",
+      "ready-2",
+      "hook-onReady-1",
+      "run-verification",
+      "hook-onChildExit-1",
+      "hook-finally-1",
+    ]);
+    expect(JSON.stringify(execution.result.data)).not.toContain("secret-value");
   });
 
   test("runs the native Gradle wrapper through Java without a command shell", async () => {

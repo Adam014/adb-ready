@@ -59,6 +59,114 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
 }
 
 describe("runPorts", () => {
+  test("fails safely across discovery, selection, listing, mutation, and verification", async () => {
+    const missing = await runPorts(
+      { direction: "reverse", action: "list" },
+      {},
+      { locateAdb: async () => undefined },
+    );
+    expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);
+
+    const inventoryFailure = await runPorts(
+      { direction: "reverse", action: "list" },
+      {},
+      dependencies(async (request) =>
+        request.args?.includes("devices")
+          ? result(request, "", 1, "server unavailable")
+          : result(request),
+      ),
+    );
+    expect(inventoryFailure.result.data).toBeNull();
+
+    const noTarget = await runPorts(
+      { direction: "reverse", action: "list" },
+      {},
+      dependencies(async (request) =>
+        request.args?.includes("devices")
+          ? result(request, "List of devices attached\n")
+          : result(request),
+      ),
+    );
+    expect(noTarget.exitCode).toBe(ExitCode.Target);
+
+    const listFailure = await runPorts(
+      { direction: "reverse", action: "list" },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        return request.args?.includes("--list")
+          ? result(request, "", 1, "list failed")
+          : result(request);
+      }),
+    );
+    expect(listFailure.result.ok).toBeFalse();
+
+    const notFound = await runPorts(
+      { direction: "reverse", action: "remove", devicePort: 8081 },
+      {},
+      dependencies(async (request) => targetProbe(request) ?? result(request)),
+    );
+    expect(notFound.result.data?.status).toBe("not-found");
+
+    let listCount = 0;
+    const mutationFailure = await runPorts(
+      { direction: "reverse", action: "add", devicePort: 8081 },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.args?.includes("--list")) return result(request);
+        return result(request, "", 1, "mutation failed");
+      }),
+    );
+    expect(mutationFailure.result.ok).toBeFalse();
+
+    const verifyListFailure = await runPorts(
+      { direction: "reverse", action: "add", devicePort: 8081 },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.args?.includes("--list")) {
+          listCount += 1;
+          return listCount === 1 ? result(request) : result(request, "", 1, "verify failed");
+        }
+        return result(request);
+      }),
+    );
+    expect(verifyListFailure.result.ok).toBeFalse();
+
+    listCount = 0;
+    const mismatch = await runPorts(
+      { direction: "reverse", action: "add", devicePort: 8081 },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.args?.includes("--list")) {
+          listCount += 1;
+          return result(request, "");
+        }
+        return result(request);
+      }),
+    );
+    expect(mismatch.result.problems.at(-1)?.code).toBe(ProblemCode.PortMappingVerificationFailed);
+  });
+
+  test("validates missing and malformed primary and secondary ports", async () => {
+    const requests = [
+      { direction: "reverse" as const, action: "add" as const },
+      { direction: "forward" as const, action: "add" as const },
+      { direction: "reverse" as const, action: "add" as const, devicePort: 8081, hostPort: 0 },
+      { direction: "forward" as const, action: "add" as const, hostPort: 9229, devicePort: 0 },
+    ];
+    for (const request of requests) {
+      const execution = await runPorts(request, {}, { locateAdb: async () => "/sdk/adb" });
+      expect(execution.result.problems[0]?.code).toBe(ProblemCode.InvalidPort);
+    }
+  });
+
   test("adds with no-rebind, uses the transport ID, and verifies the result", async () => {
     const requests: ProcessRequest[] = [];
     let listCount = 0;
