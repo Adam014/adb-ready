@@ -134,6 +134,7 @@ describe("safe UI actions", () => {
       data: {
         action: "get",
         verified: true,
+        after: { acquisitionDurationMs: 10 },
         matched: {
           text: "old",
           className: "android.widget.EditText",

@@ -66,6 +66,8 @@ breaking changes.
   `ANDROID_SERIAL`, `ADB_READY_TARGET_SERIAL`, and an explicit
   `{target.serial}` argument placeholder for tools such as Maestro that require
   their own device flag.
+- Report measured acquisition time alongside every before/after UI snapshot so
+  agents and CI can identify slow accessibility inspection without guessing.
 
 ### Changed
 
@@ -81,13 +83,12 @@ breaking changes.
 
 - Return a structured capability overview for bare machine-mode invocation and
   suggest high-confidence corrections for mistyped commands or options.
-
-### Fixed
-
 - Apply retention limits per project before the global safety cap so one noisy
   project cannot evict another project's recent diagnostic history.
 - Keep packaged command-matrix development sessions inside an isolated
   temporary state directory instead of polluting the user's session store.
+- Correct the public installation guide so its compatibility note no longer
+  contradicts the documented split APK support.
 
 ## [0.2.0] - 2026-09-10
 

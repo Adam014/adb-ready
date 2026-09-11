@@ -77,6 +77,7 @@ export interface UiSnapshotSummary {
   complete: boolean;
   totalNodes: number;
   truncated: boolean;
+  acquisitionDurationMs?: number;
 }
 
 export interface UiActionData {
@@ -135,13 +136,17 @@ const KEYCODES: Record<UiKey, number> = {
 };
 
 type Ready = NonNullable<Awaited<ReturnType<typeof readyTarget>>>;
+type MeasuredUiSnapshot = UiHierarchySnapshot & { acquisitionDurationMs: number };
 
-function summary(snapshot: UiHierarchySnapshot): UiSnapshotSummary {
+function summary(snapshot: UiHierarchySnapshot | MeasuredUiSnapshot): UiSnapshotSummary {
   return {
     digest: snapshot.digest,
     complete: snapshot.complete,
     totalNodes: snapshot.totalNodes,
     truncated: snapshot.truncated,
+    ...("acquisitionDurationMs" in snapshot
+      ? { acquisitionDurationMs: snapshot.acquisitionDurationMs }
+      : {}),
   };
 }
 
@@ -154,7 +159,7 @@ async function hierarchy(
   commandId: string,
   problems: Problem[],
   signal?: AbortSignal,
-): Promise<UiHierarchySnapshot | undefined> {
+): Promise<MeasuredUiSnapshot | undefined> {
   const observation = await ready.client.targetCommand(
     ready.target,
     "ui-snapshot",
@@ -179,7 +184,9 @@ async function hierarchy(
       ),
     );
   }
-  return observation.value;
+  return observation.value === undefined
+    ? undefined
+    : { ...observation.value, acquisitionDurationMs: observation.process.durationMs };
 }
 
 function parseScreenSize(output: string): { width: number; height: number } | undefined {

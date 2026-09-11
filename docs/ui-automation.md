@@ -143,6 +143,8 @@ adb-ready ui press back --json --non-interactive
 - `ok: true` means Android accepted the allowlisted input operation.
 - `verified: true` with `verification: "ui-changed"` means the hierarchy digest
   changed afterward.
+- `before.acquisitionDurationMs` and `after.acquisitionDurationMs` expose the
+  measured cost of each UI Automator snapshot instead of hiding slow devices.
 - `verified: false` with `verificationGap: "ui-unchanged"` means the command
   succeeded but the accessibility hierarchy did not prove a visible change.
 - A successful `ui wait` is independently verified by its selector
