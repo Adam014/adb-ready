@@ -12,9 +12,9 @@ on:
           - validate
           - publish
       release_tag:
-        description: Exact release tag matching package.json (for example v0.2.0)
+        description: Exact release tag matching package.json (for example v0.3.0)
         required: true
-        default: v0.2.0
+        default: v0.3.0
         type: string
       ref:
         description: Git ref to validate; publish mode requires the release tag

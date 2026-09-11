@@ -1,7 +1,7 @@
 {
   "name": "adb-ready",
-  "version": "0.2.0",
-  "description": "Make an Android target ready, then keep the development session working.",
+  "version": "0.3.0",
+  "description": "Agent-ready Android CLI for reliable ADB sessions, app automation, and verified evidence.",
   "private": false,
   "type": "module",
   "bin": {
@@ -64,8 +64,10 @@
     "adb-reverse",
     "android-debugging",
     "cli",
+    "capacitor",
     "developer-tools",
     "expo",
+    "flutter",
     "logcat",
     "localhost",
     "metro",

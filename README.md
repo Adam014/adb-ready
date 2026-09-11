@@ -226,7 +226,7 @@ Ready itself. [Explore the agent contract →](./docs/agent-integration.md)
 | [Threat model](./docs/threat-model.md)                           | Which trust boundaries, controls, and residual risks apply?           |
 | [Troubleshooting](./docs/troubleshooting.md)                     | What should I do for each common failure?                             |
 | [Compatibility](./COMPATIBILITY.md)                              | Which hosts, runtimes, and environments are covered?                  |
-| [Example configs](./examples/README.md)                          | What can I copy for Expo, React Native, Gradle, or custom projects?   |
+| [Example configs](./examples/README.md)                          | What can I copy for Expo, React Native, Flutter, Capacitor, Gradle, or custom projects? |
 
 Run `adb-ready --help` for the full command list or
 `adb-ready help COMMAND` for focused options.
