@@ -61,8 +61,8 @@ Android App Bundles (`.aab`) and APK Set archives (`.apks`) are not directly
 installable. Generate device-specific APKs with the Android build tool that
 created them, then pass those `.apk` files explicitly.
 
-- Installation currently accepts one ordinary APK. Split APK sets, `.apks`,
-  `.aab`, and implicit downloads are not accepted.
+- Installation accepts one ordinary APK or an explicit complete split APK set.
+  `.apks`, `.aab`, and implicit downloads are not accepted yet.
 - Install, launch, stop, restart, and explicit deep-link handlers are checked
   after ADB accepts the request.
 - `restart` is a verified stop followed by a verified launch.
