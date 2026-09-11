@@ -90,6 +90,7 @@ const requests = (protocolVersion) => {
 };
 const requiredTools = [
   "assert_ui",
+  "audit_ui",
   "capture_screenshot",
   "clear_ui",
   "compare_ui",

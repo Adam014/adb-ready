@@ -17,6 +17,20 @@ device still returns that same UI digest; after any screen change, inspect
 again. Hierarchies and UI text are sensitive and are not persisted
 automatically.
 
+## Audit one screen for people and agents
+
+```bash
+adb-ready ui audit --json --non-interactive
+```
+
+The audit reports enabled actionable nodes that have no visible text or
+content description, and nodes that have no resource ID for a stable selector.
+It returns the exact current references and attributes, plus bounded totals;
+it deliberately does not invent a subjective quality score. A missing label is
+an accessibility warning. A missing stable ID is an automation advisory—use a
+resource ID or expose a Compose test tag through `testTagsAsResourceId` where
+appropriate.
+
 ## Tap and long-press
 
 For a unique stable label or resource ID, act directly by intent:
@@ -142,7 +156,7 @@ the next state is known.
 
 ## AI agents
 
-The MCP server exposes the same intent-level workflow through `get_ui`,
+The MCP server exposes the same intent-level workflow through `audit_ui`, `get_ui`,
 `find_ui`, `fill_ui`, `clear_ui`, `scroll_ui`, `assert_ui`, and `compare_ui`.
 Its structured selectors can match exact values, prefixes, or substrings and
 qualify enabled/actionable state. An optional one-based occurrence is accepted

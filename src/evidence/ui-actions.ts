@@ -13,6 +13,7 @@ import { parseUiHierarchy, type UiHierarchySnapshot, type UiNode } from "./ui-hi
 
 export type UiAction =
   | "assert"
+  | "audit"
   | "clear"
   | "compare"
   | "fill"
@@ -38,6 +39,7 @@ export interface UiSelectorSpec {
 export type UiSelector = string | UiSelectorSpec;
 
 export type UiActionRequest =
+  | { action: "audit" }
   | { action: "tap"; ref: string; dryRun?: boolean }
   | { action: "tap"; x: number; y: number; dryRun?: boolean }
   | { action: "tap"; selector: UiSelector; occurrence?: number; dryRun?: boolean }
@@ -100,7 +102,24 @@ export interface UiActionData {
   matched?: UiNode;
   matches?: UiNode[];
   matchCount?: number;
+  audit?: UiAuditReport;
   plan?: OperationPlan;
+}
+
+export interface UiAuditFinding {
+  code: "UI_ACTIONABLE_UNLABELED" | "UI_ACTIONABLE_WITHOUT_STABLE_ID";
+  severity: "info" | "warning";
+  summary: string;
+  node: UiNode;
+}
+
+export interface UiAuditReport {
+  actionableNodes: number;
+  labeledNodes: number;
+  stableIdNodes: number;
+  findingCount: number;
+  findingsTruncated: boolean;
+  findings: UiAuditFinding[];
 }
 
 const MAX_COORDINATE = 100_000;
@@ -577,6 +596,48 @@ function correspondingNode(node: UiNode, snapshot: UiHierarchySnapshot): UiNode 
   );
 }
 
+function auditSnapshot(snapshot: UiHierarchySnapshot): UiAuditReport {
+  const controls = snapshot.nodes.filter(
+    (node) =>
+      node.enabled && (node.clickable || node.checkable || node.focusable || node.longClickable),
+  );
+  const findings: UiAuditFinding[] = [];
+  let labeledNodes = 0;
+  let stableIdNodes = 0;
+  for (const node of controls) {
+    const labeled =
+      (node.text !== undefined && node.text.trim() !== "") ||
+      (node.contentDescription !== undefined && node.contentDescription.trim() !== "");
+    const stableId = node.resourceId !== undefined && node.resourceId.trim() !== "";
+    if (labeled) labeledNodes += 1;
+    else {
+      findings.push({
+        code: "UI_ACTIONABLE_UNLABELED",
+        severity: "warning",
+        summary: "Enabled actionable node has no visible text or content description.",
+        node: compactNode(node),
+      });
+    }
+    if (stableId) stableIdNodes += 1;
+    else {
+      findings.push({
+        code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
+        severity: "info",
+        summary: "Enabled actionable node has no resource ID for a stable automation selector.",
+        node: compactNode(node),
+      });
+    }
+  }
+  return {
+    actionableNodes: controls.length,
+    labeledNodes,
+    stableIdNodes,
+    findingCount: findings.length,
+    findingsTruncated: findings.length > 100,
+    findings: findings.slice(0, 100),
+  };
+}
+
 export async function runUiAction(
   request: UiActionRequest,
   config: CommandConfig = {},
@@ -602,6 +663,26 @@ export async function runUiAction(
       );
       return finish<UiActionData>(current, null, problems);
     }
+  }
+
+  if (request.action === "audit") {
+    const snapshot = await hierarchy(ready, current.commandId, problems, signal);
+    if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
+    return finish(
+      current,
+      {
+        action: "audit",
+        selected: ready.selected,
+        status: "observed",
+        verified: true,
+        attempts: 1,
+        after: summary(snapshot),
+        input: {},
+        verification: "query-completed",
+        audit: auditSnapshot(snapshot),
+      },
+      problems,
+    );
   }
 
   if (request.action === "get") {

@@ -9,6 +9,7 @@ const AFTER = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><
 const FIELD = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="old" resource-id="com.example:id/email" class="android.widget.EditText" focusable="true" enabled="true" bounds="[100,300][900,420]" /></node></hierarchy>`;
 const FILLED_FIELD = FIELD.replace('text="old"', 'text="person@example.com"');
 const SCROLLER = `<?xml version="1.0"?><hierarchy><node resource-id="com.example:id/list" scrollable="true" enabled="true" bounds="[100,400][900,2000]" /></hierarchy>`;
+const AUDIT = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Save" resource-id="com.example:id/save" clickable="true" enabled="true" bounds="[20,100][220,200]" /><node class="android.widget.ImageButton" clickable="true" enabled="true" bounds="[240,100][440,200]" /></node></hierarchy>`;
 
 function processResult(request: ProcessRequest, stdout = "", exitCode = 0): ProcessResult {
   return {
@@ -139,6 +140,28 @@ describe("safe UI actions", () => {
           enabled: true,
           focusable: true,
           bounds: { left: 100, top: 300, right: 900, bottom: 420 },
+        },
+      },
+    });
+  });
+
+  test("audits actionable nodes without inventing an aggregate quality score", async () => {
+    const execution = await runUiAction({ action: "audit" }, {}, fixture([AUDIT]));
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        action: "audit",
+        verified: true,
+        audit: {
+          actionableNodes: 2,
+          labeledNodes: 1,
+          stableIdNodes: 1,
+          findingCount: 2,
+          findingsTruncated: false,
+          findings: [
+            { code: "UI_ACTIONABLE_UNLABELED", severity: "warning" },
+            { code: "UI_ACTIONABLE_WITHOUT_STABLE_ID", severity: "info" },
+          ],
         },
       },
     });

@@ -59,6 +59,9 @@ breaking changes.
 - Add a project-scoped MCP session index with status, preset, recency, limit,
   and stable cursor pagination so agents can locate relevant saved evidence
   without scanning unrelated history.
+- Add a bounded CLI/MCP screen audit that identifies enabled actionable nodes
+  without human-readable labels and controls without stable resource IDs,
+  returning concrete nodes instead of a subjective score.
 
 ### Changed
 

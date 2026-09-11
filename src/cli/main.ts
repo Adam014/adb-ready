@@ -256,6 +256,7 @@ context implicitly.
   adb-ready ui tap REF|X Y [--dry-run]
   adb-ready ui tap SELECTOR [--dry-run]
   adb-ready ui long-press REF|X Y [--dry-run]
+  adb-ready ui audit
   adb-ready ui find SELECTOR
   adb-ready ui get SELECTOR
   adb-ready ui assert SELECTOR [--state visible|gone]

@@ -651,6 +651,22 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     }),
   ]);
   register(
+    "audit_ui",
+    "Audit the current screen for enabled actionable nodes without human-readable labels or stable automation IDs.",
+    z.object({ ...targetHandleShape }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async (_input, signal, loaded) =>
+      toolResult(
+        (await runUiAction({ action: "audit" }, commandConfig(loaded, bound), dependencies, signal))
+          .result,
+      ),
+  );
+  register(
     "find_ui",
     "Find bounded UI nodes by semantic id, text, description, class, or package selectors without changing device state.",
     z.object({

@@ -528,6 +528,10 @@ describe("parseArguments", () => {
   });
 
   test("parses bounded UI actions and rejects ambiguous input", () => {
+    expect(parseArguments(["ui", "audit"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "audit" } },
+    });
     expect(parseArguments(["ui", "tap", "ui:012345abcdef:4", "--dry-run"])).toMatchObject({
       ok: true,
       options: {

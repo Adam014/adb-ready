@@ -163,6 +163,7 @@ const COMMANDS = new Set<CommandName>([
 ]);
 const UI_ACTIONS = new Set<UiAction>([
   "assert",
+  "audit",
   "clear",
   "compare",
   "fill",
@@ -496,7 +497,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           if (!UI_ACTIONS.has(argument as UiAction)) {
             return failure(
               "CLI_INVALID_VALUE",
-              `Invalid UI action: ${argument}. Expected find, get, assert, compare, tap, long-press, scroll, swipe, fill, clear, type, press, or wait.`,
+              `Invalid UI action: ${argument}. Expected audit, find, get, assert, compare, tap, long-press, scroll, swipe, fill, clear, type, press, or wait.`,
             );
           }
           uiAction = argument as UiAction;
@@ -1203,7 +1204,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       value !== undefined && /^(?:class|desc|id|package|text)=.{1,256}$/u.test(value)
         ? value
         : undefined;
-    if (uiAction === "tap" || uiAction === "long-press") {
+    if (uiAction === "audit") {
+      if (uiOperands.length !== 0) return failure("CLI_USAGE", "ui audit accepts no operands.");
+      uiRequest = { action: "audit" };
+    } else if (uiAction === "tap" || uiAction === "long-press") {
       const [first, second] = uiOperands;
       const x = coordinate(first);
       const y = coordinate(second);
@@ -1361,7 +1365,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (
     dryRun &&
     command === "ui" &&
-    (uiAction === "wait" ||
+    (uiAction === "audit" ||
+      uiAction === "wait" ||
       uiAction === "find" ||
       uiAction === "get" ||
       uiAction === "assert" ||
