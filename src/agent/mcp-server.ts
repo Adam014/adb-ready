@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { type CallToolResult, McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
@@ -27,6 +28,7 @@ import { runUiAction } from "../evidence/ui-actions.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { acquireTargetLease, type TargetLeaseOptions } from "../state/target-lease.js";
 import { selectTarget } from "../target/selection.js";
+import { getAgentDevTask, startAgentDevTask, stopAgentDevTask } from "./dev-task.js";
 import { SerialTaskQueue } from "./serial-task-queue.js";
 
 interface BoundTarget {
@@ -42,6 +44,7 @@ export interface McpServerOptions {
   dependencies?: CommandDependencies;
   targetLease?: false | TargetLeaseOptions;
   version?: string;
+  cliPath?: string;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -82,6 +85,21 @@ function inputFailure(code: string, message: string): CallToolResult {
         correlation: { commandId },
       },
     ],
+  });
+}
+
+function successResult(command: string, data: Record<string, unknown>): CallToolResult {
+  const timestamp = new Date().toISOString();
+  return toolResult({
+    schemaVersion: 1,
+    command,
+    commandId: randomUUID(),
+    ok: true,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    durationMs: 0,
+    data,
+    problems: [],
   });
 }
 
@@ -353,6 +371,77 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         ...execution.result,
         data: { ...data, selected: selection.selection, targetHandle: bound.handle },
       });
+    },
+  );
+
+  register(
+    "start_dev_session",
+    "Start the configured development session as a durable local process and return an opaque handle immediately.",
+    z.object({ ...targetHandleShape }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+      leaseTarget: false,
+    },
+    async () => {
+      if (bound === undefined) {
+        return inputFailure(
+          "MCP_TARGET_NOT_BOUND",
+          "Call ensure_ready before starting development.",
+        );
+      }
+      try {
+        const task = await startAgentDevTask({
+          cwd: options.cwd,
+          env: options.env,
+          cliPath: options.cliPath ?? fileURLToPath(import.meta.url),
+          serial: bound.serial,
+          targetIdentity: bound.identity,
+        });
+        return successResult("mcp start_dev_session", { task });
+      } catch {
+        return inputFailure(
+          "MCP_DEV_START_FAILED",
+          "ADB Ready could not start the managed development process.",
+        );
+      }
+    },
+  );
+  register(
+    "get_dev_session",
+    "Read the durable status of a project-scoped development-session handle after reconnects.",
+    z.object({ taskHandle: z.uuid() }),
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ taskHandle }) => {
+      const task = await getAgentDevTask(taskHandle, { cwd: options.cwd, env: options.env });
+      return task === undefined
+        ? inputFailure(
+            "MCP_DEV_TASK_NOT_FOUND",
+            "No development task with this handle exists in the current project.",
+          )
+        : successResult("mcp get_dev_session", { task });
+    },
+  );
+  register(
+    "stop_dev_session",
+    "Stop only the durable project-scoped development process owned by an opaque handle.",
+    z.object({ taskHandle: z.uuid() }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      leaseTarget: false,
+    },
+    async ({ taskHandle }) => {
+      const task = await stopAgentDevTask(taskHandle, { cwd: options.cwd, env: options.env });
+      return task === undefined
+        ? inputFailure(
+            "MCP_DEV_TASK_NOT_FOUND",
+            "No development task with this handle exists in the current project.",
+          )
+        : successResult("mcp stop_dev_session", { task });
     },
   );
 

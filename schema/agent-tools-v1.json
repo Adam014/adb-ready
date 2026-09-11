@@ -112,7 +112,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -189,7 +199,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -267,7 +287,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -344,7 +374,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -411,7 +451,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -487,7 +537,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -599,7 +659,101 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
+      "name": "get_dev_session",
+      "description": "Read the durable status of a project-scoped development-session handle after reconnects.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "taskHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["taskHandle"]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -671,7 +825,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -748,7 +912,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -829,7 +1003,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -917,7 +1101,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -998,7 +1192,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1065,7 +1269,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1216,7 +1430,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1298,7 +1522,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1379,7 +1613,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1451,7 +1695,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1532,7 +1786,184 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
+      "name": "start_dev_session",
+      "description": "Start the configured development session as a durable local process and return an opaque handle immediately.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
+      "name": "stop_dev_session",
+      "description": "Stop only the durable project-scoped development process owned by an opaque handle.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "taskHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["taskHandle"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1632,7 +2063,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1783,7 +2224,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1868,7 +2319,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     },
@@ -1984,7 +2445,17 @@
             }
           }
         },
-        "required": ["schemaVersion", "command", "commandId", "ok", "startedAt", "finishedAt", "durationMs", "data", "problems"],
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
         "additionalProperties": {}
       }
     }

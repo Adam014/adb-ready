@@ -129,10 +129,13 @@ Ask the agent to follow this sequence:
 1. Call `doctor` when host or ADB health is unknown.
 2. Call `ensure_ready`; provide an exact device serial, configured alias, or
    transport ID when more than one ready target exists.
-3. Resolve the project app with `resolve_app`.
-4. Use `inspect_app` or `inspect_ui` for bounded current evidence.
-5. Perform one typed action, then inspect again instead of assuming success.
-6. Use `get_session_problems` or `compile_debug_context` for an existing
+3. Start the configured stack with `start_dev_session` when it is not already
+   running; retain its task handle and poll `get_dev_session` without holding a
+   tool call open.
+4. Resolve the project app with `resolve_app`.
+5. Use `inspect_app` or `inspect_ui` for bounded current evidence.
+6. Perform one typed action, then inspect again instead of assuming success.
+7. Use `get_session_problems` or `compile_debug_context` for an existing
    development session.
 
 The first successful `ensure_ready` binds one target to that MCP connection and
@@ -151,6 +154,7 @@ or device mutations. Separate MCP connections remain independent.
 | Capability | MCP tools |
 | --- | --- |
 | Host and target readiness | `doctor`, `list_targets`, `ensure_ready` |
+| Durable development lifecycle | `start_dev_session`, `get_dev_session`, `stop_dev_session` |
 | App identity and lifecycle | `resolve_app`, `install_app`, `launch_app`, `restart_app`, `open_url` |
 | Current evidence | `inspect_app`, `inspect_ui`, `capture_screenshot` |
 | Safe UI queries and actions | `find_ui`, `assert_ui`, `compare_ui`, `tap_ui`, `long_press_ui`, `swipe_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui` |
@@ -188,6 +192,8 @@ starting ADB.
 - Data clearing and uninstall are intentionally absent from the agent surface.
 - Tool annotations help clients request approval, but ADB Ready enforces its
   own target, path, and destructive-action rules.
+- Durable development handles are random, project-scoped, heartbeat-checked,
+  and can signal only the owned managed process recorded for that handle.
 - Nothing is uploaded by ADB Ready. The selected AI client controls what tool
   results it sends to its model provider.
 

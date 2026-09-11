@@ -83,12 +83,14 @@ export async function generateAgentContract(options) {
   };
   const json = JSON.stringify(artifact, null, 2).replace(
     /\[\n((?:\s+(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?|true|false|null),?\n)+)\s*\]/gu,
-    (_match, /** @type {string} */ body) =>
-      `[${body
+    (match, /** @type {string} */ body) => {
+      const compact = `[${body
         .trim()
         .split(/\n/u)
         .map((line) => line.trim())
-        .join(" ")}]`,
+        .join(" ")}]`;
+      return compact.length <= 100 ? compact : match;
+    },
   );
   await writeFile(path.join(options.root, "schema", "agent-tools-v1.json"), `${json}\n`, "utf8");
 }

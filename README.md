@@ -41,7 +41,7 @@ npx adb-ready dev
 ## Android tools built for AI agents
 
 ADB Ready turns coding agents from passive log readers into safe Android
-operators. Its local MCP server exposes **22 schema-validated tools** for target
+operators. Its local MCP server exposes **25 schema-validated tools** for target
 readiness, app lifecycle, UI inspection, evidence capture, and verified UI
 actions—without giving the model a generic shell or unrestricted ADB access.
 
@@ -53,6 +53,7 @@ npx adb-ready agent setup codex
 Codex, Claude Code, Cursor, VS Code/Copilot, Windsurf, and other MCP clients can:
 
 - find and bind one deterministic Android target;
+- start, check, and stop a durable development session across agent reconnects;
 - resolve, install, launch, restart, and inspect the project app;
 - find or assert semantic UI, tap by intent, type, swipe, and compare state;
 - capture screenshots and read bounded, redacted session evidence; and

@@ -41,6 +41,11 @@ breaking changes.
   long-press workflows. Structured selectors support exact, prefix, and
   contains matching plus enabled/actionable qualifiers; ambiguous mutations
   fail instead of guessing.
+- Add project-scoped `start_dev_session`, `get_dev_session`, and
+  `stop_dev_session` MCP tools backed by opaque durable handles. Managed
+  sessions continue outside one tool call, survive client reconnects, report
+  heartbeats and terminal exit state, and stop only their verified owned
+  process group.
 
 ### Fixed
 
