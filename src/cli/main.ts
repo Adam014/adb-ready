@@ -647,6 +647,7 @@ async function runInteractiveSession(
       init: ["init"],
       "inspect-app": ["inspect", "app"],
       "inspect-ui": ["inspect", "ui", "--interactive-only"],
+      "ui-audit": ["ui", "audit"],
       logs: ["logs"],
       pair: ["pair"],
       "run-help": ["help", "run"],

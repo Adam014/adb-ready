@@ -19,6 +19,7 @@ export type HomeAction =
   | "init"
   | "inspect-app"
   | "inspect-ui"
+  | "ui-audit"
   | "logs"
   | "pair"
   | "run-help"
@@ -247,6 +248,11 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         value: "inspect-ui",
         label: "Inspect current UI",
         description: "Read a bounded, sensitive accessibility snapshot.",
+      },
+      {
+        value: "ui-audit",
+        label: "Audit UI for agents",
+        description: "Find controls without a useful label or stable selector.",
       },
       {
         value: "capture-screenshot",

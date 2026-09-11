@@ -76,6 +76,8 @@ breaking changes.
 - Reorganize the interactive home around development, test automation, device,
   debugging, and project tasks; preserve root presentation flags and use copy
   that remains meaningful in narrow terminals.
+- Add the screen agent-readiness audit to the task-oriented Debug & evidence
+  menu without expanding the root menu.
 - Lead the public README with the agent outcome, immediate setup, and a concrete
   first task before the implementation details.
 

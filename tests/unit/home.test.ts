@@ -121,6 +121,7 @@ describe("home screen", () => {
     expect(selected).toEqual({ kind: "action", action: "inspect-ui" });
     expect(sink.value).toContain("HOME / DEBUG & EVIDENCE");
     expect(sink.value).toContain("Inspect project app");
+    expect(sink.value).toContain("Audit UI for agents");
     expect(sink.value).toContain("Capture screenshot");
   });
 
