@@ -35,9 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
-      # GitHub exposes draft releases only to tokens with push-level contents access.
-      # This isolated job checks release state without checking out or running repository code.
-      contents: write
+      contents: write # Inspect a draft release without checking out or running repository code.
 
     steps:
       - name: Require a matching draft GitHub release for publish mode
