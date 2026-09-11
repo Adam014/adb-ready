@@ -126,7 +126,7 @@ describe("inspect evidence", () => {
     );
   });
 
-  test("reports inaccessible or secure windows explicitly", async () => {
+  test("reports a continuously changing UI separately from inaccessible windows", async () => {
     const dependencies = fixture();
     dependencies.runner = async (request) => {
       const args = request.args ?? [];
@@ -144,7 +144,7 @@ describe("inspect evidence", () => {
     const execution = await runInspectUi({}, {}, dependencies);
     expect(execution.result).toMatchObject({
       ok: false,
-      problems: [{ code: "UI_HIERARCHY_UNAVAILABLE" }],
+      problems: [{ code: "UI_NOT_IDLE", category: "evidence.ui.busy" }],
     });
   });
 });

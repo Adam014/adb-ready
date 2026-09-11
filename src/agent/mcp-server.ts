@@ -131,6 +131,7 @@ function commandConfig(
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
     ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
     timeoutMs: values.timeoutMs,
+    uiTimeoutMs: loaded.provenance.timeoutMs?.source === "default" ? 15_000 : values.timeoutMs,
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),
     ...(bound?.transportId !== undefined
       ? { targetTransportId: bound.transportId }

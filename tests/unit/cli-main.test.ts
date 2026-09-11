@@ -96,7 +96,8 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
           adbPath: undefined,
           adbHost: undefined,
           adbPort: undefined,
-          timeoutMs: { source: "default" },
+          timeoutMs:
+            options?.cli?.timeoutMs === undefined ? { source: "default" } : { source: "cli" },
           color: undefined,
           unicode: undefined,
           animation: undefined,
@@ -848,6 +849,38 @@ describe("runCli", () => {
       },
     });
     expect(streams.error.value).toBe("");
+  });
+
+  test("gives UI acquisition a tolerant default while respecting an explicit timeout", async () => {
+    async function uiTimeout(args: string[]): Promise<number | undefined> {
+      const streams = io();
+      const fixture = dependencies(
+        "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
+      );
+      let timeoutMs: number | undefined;
+      const baseRunner = fixture.runner;
+      fixture.runner = async (request) => {
+        if (request.args?.includes("uiautomator")) {
+          timeoutMs = request.timeoutMs;
+          return result(
+            request,
+            '<?xml version="1.0"?><hierarchy><node text="Open" bounds="[1,2][30,40]" /></hierarchy>',
+          );
+        }
+        return baseRunner?.(request) ?? result(request, "");
+      };
+
+      const exitCode = await runCli(
+        ["inspect", "ui", "--json", "--non-interactive", ...args],
+        streams,
+        fixture,
+      );
+      expect(exitCode).toBe(ExitCode.Success);
+      return timeoutMs;
+    }
+
+    expect(await uiTimeout([])).toBe(15_000);
+    expect(await uiTimeout(["--timeout", "2s"])).toBe(2_000);
   });
 
   test("routes a safe UI action and emits structured verification", async () => {

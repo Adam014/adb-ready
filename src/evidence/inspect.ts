@@ -16,7 +16,12 @@ import {
   runLogs,
 } from "../app/commands.js";
 import type { Problem } from "../domain/contracts.js";
-import { parseUiHierarchy, type UiHierarchySnapshot } from "./ui-hierarchy.js";
+import {
+  classifyUiHierarchyFailure,
+  DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
+  parseUiHierarchy,
+  type UiHierarchySnapshot,
+} from "./ui-hierarchy.js";
 
 export interface InspectAppRequest {
   cwd: string;
@@ -173,21 +178,35 @@ export async function runInspectUi(
         maxNodes: 2_000,
       }),
     signal,
-    { maxBufferBytes: 8 * 1024 * 1024 },
+    {
+      maxBufferBytes: 8 * 1024 * 1024,
+      timeoutMs: config.uiTimeoutMs ?? config.timeoutMs ?? DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
+    },
   );
   if (!succeeded(hierarchy.process)) {
     problems.push(operationProblem("inspect-ui", hierarchy, current.commandId));
     return finish<InspectUiData>(current, null, problems);
   }
   if (hierarchy.value === undefined) {
+    const reason = classifyUiHierarchyFailure(
+      `${hierarchy.process.stdout}\n${hierarchy.process.stderr}`,
+    );
     problems.push(
-      problem(
-        "UI_HIERARCHY_UNAVAILABLE",
-        "evidence.ui",
-        "Android returned no readable UI hierarchy.",
-        "The current window may be secure, inaccessible, or unsupported by UI Automator.",
-        current.commandId,
-      ),
+      reason === "not-idle"
+        ? problem(
+            "UI_NOT_IDLE",
+            "evidence.ui.busy",
+            "Android UI did not become idle for hierarchy capture.",
+            "Continuous accessibility events or animation prevented the platform UI Automator dumper from returning a hierarchy. Pause the changing UI or navigate to a stable screen, then retry.",
+            current.commandId,
+          )
+        : problem(
+            "UI_HIERARCHY_UNAVAILABLE",
+            "evidence.ui",
+            "Android returned no readable UI hierarchy.",
+            "The current window may be secure, inaccessible, or unsupported by UI Automator.",
+            current.commandId,
+          ),
     );
     return finish<InspectUiData>(current, null, problems);
   }

@@ -76,6 +76,7 @@ export interface CommandConfig {
   adbHost?: string;
   adbPort?: number;
   timeoutMs?: number;
+  uiTimeoutMs?: number;
   targetSelector?: string;
   targetTransportId?: string;
   targetAliases?: Readonly<Record<string, string>>;

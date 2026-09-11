@@ -91,6 +91,13 @@ breaking changes.
   temporary state directory instead of polluting the user's session store.
 - Correct the public installation guide so its compatibility note no longer
   contradicts the documented split APK support.
+- Give accessibility hierarchy acquisition its own 15-second default deadline
+  in inspect and UI workflows while preserving an explicit global timeout.
+  This prevents ordinary slower OEM UI Automator dumps from failing at the
+  generic five-second ADB boundary.
+- Classify Android's successful-exit `could not get idle state` response as a
+  distinct `UI_NOT_IDLE` problem with a safe recovery instruction instead of
+  misreporting an inaccessible hierarchy.
 
 ## [0.2.0] - 2026-09-10
 

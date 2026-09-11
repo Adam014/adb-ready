@@ -17,6 +17,12 @@ device still returns that same UI digest; after any screen change, inspect
 again. Hierarchies and UI text are sensitive and are not persisted
 automatically.
 
+UI hierarchy capture has a 15-second default because Android's platform
+UI Automator waits for a quiet accessibility window before returning data.
+`UI_NOT_IDLE` means continuous animation or accessibility events prevented that
+quiet window; pause the changing UI or navigate to a stable screen and retry.
+ADB Ready does not silently disable device-wide animations.
+
 ## Audit one screen for people and agents
 
 ```bash

@@ -1013,6 +1013,8 @@ async function runCliInternal(
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
     ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
     timeoutMs: values.timeoutMs,
+    uiTimeoutMs:
+      loaded.config.provenance.timeoutMs?.source === "default" ? 15_000 : values.timeoutMs,
     ...(options.device === undefined ? {} : { targetSelector: options.device }),
     ...(options.transportId === undefined ? {} : { targetTransportId: options.transportId }),
     ...(values.targetAliases === undefined ? {} : { targetAliases: values.targetAliases }),

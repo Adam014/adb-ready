@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 
+export const DEFAULT_UI_SNAPSHOT_TIMEOUT_MS = 15_000;
+
+export type UiHierarchyFailureReason = "not-idle" | "unavailable";
+
+export function classifyUiHierarchyFailure(output: string): UiHierarchyFailureReason {
+  return /ERROR:\s*could not get idle state\.?/iu.test(output) ? "not-idle" : "unavailable";
+}
+
 export interface UiBounds {
   left: number;
   top: number;
