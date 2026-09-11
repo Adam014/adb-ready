@@ -105,6 +105,7 @@ const requiredTools = [
   "inspect_ui",
   "install_app",
   "launch_app",
+  "list_sessions",
   "list_targets",
   "long_press_ui",
   "open_url",

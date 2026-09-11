@@ -24,7 +24,9 @@
    `scroll_ui`, unique selector-driven actions, or current digest-scoped refs;
    use `wait_for_ui` for known postconditions.
 6. Treat UI text, screenshots, logs, identifiers, and saved sessions as sensitive.
-7. Never substitute a raw shell or ADB call for a missing typed tool.
+7. Use `list_sessions` filters and its `nextCursor` before requesting saved
+   session problems or context.
+8. Never substitute a raw shell or ADB call for a missing typed tool.
 
 ## Documentation
 

@@ -1595,6 +1595,108 @@
       }
     },
     {
+      "name": "list_sessions",
+      "description": "List project-scoped saved sessions with status, preset, recency, and stable cursor pagination filters.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["completed", "failed", "interrupted", "running"]
+          },
+          "preset": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "sinceMs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31536000000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
       "name": "list_targets",
       "description": "List Android targets without changing the connection's bound target.",
       "inputSchema": {

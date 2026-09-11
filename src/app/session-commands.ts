@@ -18,7 +18,12 @@ import {
 export type SessionCommandAction = "events" | "list" | "show";
 
 export type SessionCommandData =
-  | { action: "list"; sessions: SessionManifest[] }
+  | {
+      action: "list";
+      sessions: SessionManifest[];
+      total: number;
+      nextCursor?: string;
+    }
   | { action: "show"; session: SessionManifest }
   | { action: "events"; session: SessionManifest; events: AdbReadyEvent[] };
 
@@ -43,6 +48,7 @@ export interface SessionListFilter {
   preset?: string;
   sinceMs?: number;
   limit?: number;
+  cursor?: string;
 }
 
 export interface SessionCommandExecution<T> {
@@ -144,9 +150,41 @@ export async function runSessionCommand(
           .filter((session) => filter.preset === undefined || session.preset === filter.preset)
           .filter((session) => cutoff === undefined || Date.parse(session.updatedAt) >= cutoff)
       : [];
-    const sessions = filter.limit === undefined ? matching : matching.slice(0, filter.limit);
+    const cursorIndex =
+      filter.cursor === undefined
+        ? -1
+        : matching.findIndex(({ sessionId }) => sessionId === filter.cursor);
+    if (listed.ok && filter.cursor !== undefined && cursorIndex === -1) {
+      return execution<SessionCommandData>(
+        command,
+        null,
+        [
+          storageProblem(
+            "SESSION_CURSOR_INVALID",
+            "The session page cursor is no longer available.",
+            "Start a new listing without a cursor.",
+            "session-history",
+          ),
+        ],
+        dependencies,
+      );
+    }
+    const remaining = matching.slice(cursorIndex + 1);
+    const sessions = filter.limit === undefined ? remaining : remaining.slice(0, filter.limit);
+    const hasMore = sessions.length < remaining.length;
+    const nextCursor = hasMore ? sessions.at(-1)?.sessionId : undefined;
     return listed.ok
-      ? execution(command, { action, sessions }, [], dependencies)
+      ? execution(
+          command,
+          {
+            action,
+            sessions,
+            total: matching.length,
+            ...(nextCursor === undefined ? {} : { nextCursor }),
+          },
+          [],
+          dependencies,
+        )
       : execution<SessionCommandData>(
           command,
           null,

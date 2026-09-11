@@ -69,6 +69,34 @@ describe("session history commands", () => {
       expect(filtered.result.data).toMatchObject({
         sessions: [{ sessionId: "session-1", status: "failed" }],
       });
+      const firstPage = await runSessionCommand("list", undefined, store, dependencies, {
+        limit: 1,
+      });
+      expect(firstPage.result.data).toMatchObject({
+        action: "list",
+        total: 2,
+        nextCursor: "session-1",
+        sessions: [{ sessionId: "session-1" }],
+      });
+      const secondPage = await runSessionCommand("list", undefined, store, dependencies, {
+        limit: 1,
+        cursor: "session-1",
+      });
+      expect(secondPage.result.data).toEqual(
+        expect.objectContaining({
+          action: "list",
+          total: 2,
+          sessions: [expect.objectContaining({ sessionId: "session-0" })],
+        }),
+      );
+      expect(secondPage.result.data).not.toHaveProperty("nextCursor");
+      const expiredPage = await runSessionCommand("list", undefined, store, dependencies, {
+        cursor: "missing-session",
+      });
+      expect(expiredPage.result).toMatchObject({
+        ok: false,
+        problems: [{ code: "SESSION_CURSOR_INVALID" }],
+      });
       const shown = await runSessionCommand("show", undefined, store, dependencies);
       expect(shown.result.data).toMatchObject({
         action: "show",

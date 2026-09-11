@@ -158,7 +158,7 @@ or device mutations. Separate MCP connections remain independent.
 | App identity and lifecycle | `resolve_app`, `install_app`, `launch_app`, `restart_app`, `open_url` |
 | Current evidence | `inspect_app`, `inspect_ui`, `capture_screenshot` |
 | Safe UI queries and actions | `get_ui`, `find_ui`, `assert_ui`, `compare_ui`, `tap_ui`, `long_press_ui`, `scroll_ui`, `swipe_ui`, `fill_ui`, `clear_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui` |
-| Saved diagnostics | `get_session_problems`, `compile_debug_context` |
+| Saved diagnostics | `list_sessions`, `get_session_problems`, `compile_debug_context` |
 
 MCP resources keep larger read-only context outside tool calls:
 
@@ -179,6 +179,11 @@ The npm package also ships `schema/agent-tools-v1.json`, generated from the
 server's real `tools/list` response during every build. Integrations can inspect
 version-matched input and output schemas plus safety annotations without
 starting ADB.
+
+`list_sessions` is project-scoped by default and supports status, preset,
+recency, and result-count filters. When more matches remain, pass its opaque
+`nextCursor` back as `cursor`; an expired cursor fails explicitly instead of
+silently restarting the list.
 
 ## Safety boundary
 

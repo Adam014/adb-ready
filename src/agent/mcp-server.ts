@@ -1090,6 +1090,41 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     },
   );
   register(
+    "list_sessions",
+    "List project-scoped saved sessions with status, preset, recency, and stable cursor pagination filters.",
+    z.object({
+      status: z.enum(["completed", "failed", "interrupted", "running"]).optional(),
+      preset: z.string().min(1).max(64).optional(),
+      sinceMs: z
+        .number()
+        .int()
+        .min(1)
+        .max(365 * 24 * 60 * 60 * 1_000)
+        .optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      cursor: z.string().min(1).max(128).optional(),
+    }),
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ status, preset, sinceMs, limit, cursor }) =>
+      toolResult(
+        (
+          await runSessionCommand(
+            "list",
+            undefined,
+            sessionStore,
+            {},
+            {
+              ...(status === undefined ? {} : { status }),
+              ...(preset === undefined ? {} : { preset }),
+              ...(sinceMs === undefined ? {} : { sinceMs }),
+              limit: limit ?? 25,
+              ...(cursor === undefined ? {} : { cursor }),
+            },
+          )
+        ).result,
+      ),
+  );
+  register(
     "get_session_problems",
     "Read structured problems from one saved local development session.",
     z.object({ sessionId: z.string().min(1).optional() }),

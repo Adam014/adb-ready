@@ -56,6 +56,9 @@ breaking changes.
   workflows for CLI and MCP. Field replacement is capability-gated before
   mutation and verifies observable values instead of inferring success from
   input exit codes.
+- Add a project-scoped MCP session index with status, preset, recency, limit,
+  and stable cursor pagination so agents can locate relevant saved evidence
+  without scanning unrelated history.
 
 ### Changed
 
