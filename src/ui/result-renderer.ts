@@ -88,7 +88,7 @@ function isDevData(value: unknown): value is DevData {
   return (
     isRecord(value) &&
     typeof value.sessionId === "string" &&
-    isRecord(value.selected) &&
+    (isRecord(value.selected) || (value.status === "planned" && value.planScope === "offline")) &&
     isRecord(value.project) &&
     isRecord(value.command) &&
     isRecord(value.ports) &&
@@ -321,7 +321,11 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
           ? style.failure(glyphs.failure, capabilities)
           : style.success(glyphs.success, capabilities);
     lines.push(
-      `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      ...(data.selected === undefined
+        ? [`${style.dim(glyphs.pending, capabilities)} Target   resolved when this plan runs`]
+        : [
+            `${style.success(glyphs.success, capabilities)} Target   ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+          ]),
       `${style.success(glyphs.success, capabilities)} Project  ${clean(data.project.name ?? data.project.root)} · ${clean(data.preset)}`,
       `${style.success(glyphs.success, capabilities)} Ports    ${String(data.ports.requested.length)} ready · ${String(data.ports.created.length)} created · ${String(data.ports.reused.length)} reused`,
       `${style.success(glyphs.success, capabilities)} Command  ${clean(data.command.executable)} ${data.command.args.map(clean).join(" ")}`,
@@ -729,7 +733,12 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`session_id=${clean(result.data.sessionId)}\n`);
     sink.write(`status=${clean(result.data.status)}\n`);
     sink.write(`preset=${clean(result.data.preset)}\n`);
-    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    if (result.data.selected !== undefined) {
+      sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    }
+    if (result.data.planScope !== undefined) {
+      sink.write(`plan_scope=${clean(result.data.planScope)}\n`);
+    }
     sink.write(`project_root=${clean(result.data.project.root)}\n`);
     sink.write(`port_count=${String(result.data.ports.requested.length)}\n`);
     sink.write(`journal_event_count=${String(result.data.journal.events.length)}\n`);

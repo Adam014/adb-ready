@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { type CommandDependencies, runDev } from "../../src/app/commands.js";
+import { type CommandDependencies, runDev, runDevOfflinePlan } from "../../src/app/commands.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import { ProblemCode } from "../../src/domain/problems.js";
 import type {
@@ -64,6 +64,42 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
 }
 
 describe("runDev", () => {
+  test("builds an offline project plan without resolving ADB or a target", async () => {
+    let processCalled = false;
+    const deps = dependencies(async (request) => {
+      processCalled = true;
+      return result(request);
+    });
+    deps.locateAdb = async () => {
+      throw new Error("ADB must not be resolved for an offline plan");
+    };
+    const execution = await runDevOfflinePlan(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "node", args: ["server.mjs"] },
+        reversePorts: [{ device: 8081 }],
+      },
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(processCalled).toBeFalse();
+    expect(execution.result.data).toMatchObject({
+      status: "planned",
+      planScope: "offline",
+      plan: {
+        dryRun: true,
+        steps: [
+          { id: "acquire-target" },
+          { id: "reverse-1" },
+          { id: "start-child", executable: "node", args: ["server.mjs"] },
+        ],
+      },
+    });
+    expect(execution.result.data).not.toHaveProperty("selected");
+  });
+
   test("owns one target, streams a redacted journal, and cleans only its reverse mapping", async () => {
     const requests: ProcessRequest[] = [];
     const lines: string[] = [];

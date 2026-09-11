@@ -18,11 +18,13 @@ import {
   type CommandExecution,
   type DevData,
   type DevicesData,
+  type DevOptions,
   type LogsData,
   type PortsData,
   runConnect,
   runDev,
   runDevices,
+  runDevOfflinePlan,
   runDoctor,
   runLogs,
   runPair,
@@ -926,12 +928,19 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
+  const offlineDevPlan =
+    options.command === "dev" &&
+    options.dryRun &&
+    !options.select &&
+    options.device === undefined &&
+    options.transportId === undefined &&
+    !options.remembered;
   let preparedSelection: SelectedTarget | undefined;
   if (
     (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||
     options.command === "apps" ||
     options.command === "capture" ||
-    options.command === "dev" ||
+    (options.command === "dev" && !offlineDevPlan) ||
     options.command === "inspect" ||
     options.command === "logs" ||
     options.command === "open" ||
@@ -1406,79 +1415,77 @@ async function runCliInternal(
         signal,
       );
     } else if (options.command === "dev") {
-      execution = await runDev(
-        {
-          cwd: io.cwd,
-          ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
-          ...(values.packageManager === undefined ? {} : { packageManager: values.packageManager }),
-          ...(values.devCommand === undefined ? {} : { command: values.devCommand }),
-          ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
-          ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
-          ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
-          ...(values.devWatch === undefined ? {} : { watch: values.devWatch }),
-          recovery: {
-            ...(values.recoveryMaxAttempts === undefined
-              ? {}
-              : { maxAttempts: values.recoveryMaxAttempts }),
-            ...(values.recoveryInitialDelayMs === undefined
-              ? {}
-              : { initialDelayMs: values.recoveryInitialDelayMs }),
-            ...(values.recoveryMaxDelayMs === undefined
-              ? {}
-              : { maxDelayMs: values.recoveryMaxDelayMs }),
-            ...(values.recoveryTotalTimeoutMs === undefined
-              ? {}
-              : { totalTimeoutMs: values.recoveryTotalTimeoutMs }),
-          },
-          ...(values.devHooks === undefined ? {} : { hooks: values.devHooks }),
-          journal: {
-            ...(values.journalMaxEntries === undefined
-              ? {}
-              : { maxEntries: values.journalMaxEntries }),
-            ...(values.journalMaxBytes === undefined ? {} : { maxBytes: values.journalMaxBytes }),
-            ...(values.journalSources === undefined ? {} : { sources: values.journalSources }),
-            ...(values.journalMinimumSeverity === undefined
-              ? {}
-              : { minimumSeverity: values.journalMinimumSeverity }),
-            ...(values.journalRedactEnvironment === undefined
-              ? {}
-              : {
-                  redaction: {
-                    additionalLiterals: values.journalRedactEnvironment.flatMap((name) => {
-                      const value = io.env[name];
-                      return value === undefined || value === "" ? [] : [value];
-                    }),
-                  },
-                }),
-          },
-          childStdin: errorCapabilities.interactive ? "inherit" : "ignore",
-          sessionStore:
-            values.sessionPersist === false || dependencies.sessionStore === false
-              ? false
-              : (dependencies.sessionStore ?? {
-                  env: io.env,
-                  ...(values.sessionMaxSessions === undefined
-                    ? {}
-                    : { maxSessions: values.sessionMaxSessions }),
-                  ...(values.sessionMaxAgeDays === undefined
-                    ? {}
-                    : { maxAgeDays: values.sessionMaxAgeDays }),
-                  ...(values.sessionMaxBytes === undefined
-                    ? {}
-                    : { maxBytes: values.sessionMaxBytes }),
-                }),
-          ...(options.format === "human" && !options.quiet
-            ? {
-                onChildLine: (stream: "stderr" | "stdout", line: string) => {
-                  io.error.write(`${renderChildStreamLine(stream, line, errorCapabilities)}\n`);
-                },
-              }
-            : {}),
+      const devOptions = {
+        cwd: io.cwd,
+        ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
+        ...(values.packageManager === undefined ? {} : { packageManager: values.packageManager }),
+        ...(values.devCommand === undefined ? {} : { command: values.devCommand }),
+        ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
+        ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
+        ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
+        ...(values.devWatch === undefined ? {} : { watch: values.devWatch }),
+        recovery: {
+          ...(values.recoveryMaxAttempts === undefined
+            ? {}
+            : { maxAttempts: values.recoveryMaxAttempts }),
+          ...(values.recoveryInitialDelayMs === undefined
+            ? {}
+            : { initialDelayMs: values.recoveryInitialDelayMs }),
+          ...(values.recoveryMaxDelayMs === undefined
+            ? {}
+            : { maxDelayMs: values.recoveryMaxDelayMs }),
+          ...(values.recoveryTotalTimeoutMs === undefined
+            ? {}
+            : { totalTimeoutMs: values.recoveryTotalTimeoutMs }),
         },
-        config,
-        commandDependencies,
-        signal,
-      );
+        ...(values.devHooks === undefined ? {} : { hooks: values.devHooks }),
+        journal: {
+          ...(values.journalMaxEntries === undefined
+            ? {}
+            : { maxEntries: values.journalMaxEntries }),
+          ...(values.journalMaxBytes === undefined ? {} : { maxBytes: values.journalMaxBytes }),
+          ...(values.journalSources === undefined ? {} : { sources: values.journalSources }),
+          ...(values.journalMinimumSeverity === undefined
+            ? {}
+            : { minimumSeverity: values.journalMinimumSeverity }),
+          ...(values.journalRedactEnvironment === undefined
+            ? {}
+            : {
+                redaction: {
+                  additionalLiterals: values.journalRedactEnvironment.flatMap((name) => {
+                    const value = io.env[name];
+                    return value === undefined || value === "" ? [] : [value];
+                  }),
+                },
+              }),
+        },
+        childStdin: errorCapabilities.interactive ? ("inherit" as const) : ("ignore" as const),
+        sessionStore:
+          values.sessionPersist === false || dependencies.sessionStore === false
+            ? false
+            : (dependencies.sessionStore ?? {
+                env: io.env,
+                ...(values.sessionMaxSessions === undefined
+                  ? {}
+                  : { maxSessions: values.sessionMaxSessions }),
+                ...(values.sessionMaxAgeDays === undefined
+                  ? {}
+                  : { maxAgeDays: values.sessionMaxAgeDays }),
+                ...(values.sessionMaxBytes === undefined
+                  ? {}
+                  : { maxBytes: values.sessionMaxBytes }),
+              }),
+        ...(options.format === "human" && !options.quiet
+          ? {
+              onChildLine: (stream: "stderr" | "stdout", line: string) => {
+                io.error.write(`${renderChildStreamLine(stream, line, errorCapabilities)}\n`);
+              },
+            }
+          : {}),
+      } satisfies DevOptions;
+      execution = offlineDevPlan
+        ? await runDevOfflinePlan(devOptions, commandDependencies)
+        : await runDev(devOptions, config, commandDependencies, signal);
     } else if (options.command === "devices") {
       execution = await runDevices(config, commandDependencies, signal);
     } else if (options.command === "connect") {
@@ -1580,7 +1587,7 @@ async function runCliInternal(
       }
     } else if (options.command === "dev") {
       const data = execution.result.data as DevData | null;
-      if (data !== null) {
+      if (data?.selected !== undefined) {
         selectedTarget = {
           serial: data.selected.transport.serial,
           ...(data.selected.target.hardwareSerial === undefined

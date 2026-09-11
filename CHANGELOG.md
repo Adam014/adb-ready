@@ -17,6 +17,9 @@ breaking changes.
 - Add privacy-safe cross-process Android target leases with heartbeats, bounded
   expiry, stale-owner recovery, and ownership-checked cleanup for app, UI,
   port, recording, and development-session mutations.
+- Let `dev --dry-run` resolve and validate the project, command, ports, and
+  lifecycle hooks without requiring ADB or allocating an Android target. An
+  explicit target selector still produces the target-resolved plan.
 
 ### Fixed
 

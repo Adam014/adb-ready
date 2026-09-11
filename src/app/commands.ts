@@ -1913,8 +1913,9 @@ export interface DevOptions {
 export interface DevData {
   sessionId: string;
   status: "completed" | "failed" | "interrupted" | "planned";
-  adbPath: string;
-  selected: SelectedTarget;
+  adbPath?: string;
+  selected?: SelectedTarget;
+  planScope?: "offline" | "target";
   project: {
     root: string;
     name?: string;
@@ -2048,6 +2049,193 @@ function normalizeDevPorts(
   return { mappings, problems };
 }
 
+interface ResolvedDevDefinition {
+  project: ProjectDetection;
+  preset: DevPreset;
+  childCommand: DevCommand;
+  mappings: Array<{ device: string; host: string }>;
+}
+
+async function resolveDevDefinition(
+  options: DevOptions,
+  dependencies: CommandDependencies,
+  commandId: string,
+): Promise<{ definition?: ResolvedDevDefinition; problems: Problem[] }> {
+  const problems: Problem[] = [];
+  const project = await (dependencies.detectProject ?? detectProject)({
+    cwd: options.cwd,
+    ...(options.packageManager === undefined
+      ? {}
+      : { explicitPackageManager: options.packageManager }),
+  });
+  const preset = options.preset ?? (options.command === undefined ? project.preset : "custom");
+  if (preset === undefined) {
+    problems.push(
+      commandProblem(
+        ProblemCode.DevPresetNotFound,
+        "input.dev.preset",
+        "ADB Ready could not determine a development preset.",
+        "Choose --preset expo, react-native, gradle, or pass a custom command after --.",
+        commandId,
+      ),
+    );
+    return { problems };
+  }
+  if (
+    project.packageManager.conflicts.length > 0 &&
+    (preset === "expo" || preset === "react-native")
+  ) {
+    problems.push(
+      commandProblem(
+        ProblemCode.PackageManagerConflict,
+        "input.dev.package-manager",
+        "Multiple package-manager signals conflict.",
+        "Declare packageManager in package.json, use --package-manager, or remove stale metadata or lockfiles.",
+        commandId,
+        [{ source: "project", field: "candidates", value: project.packageManager.conflicts }],
+      ),
+    );
+    return { problems };
+  }
+  if (
+    (preset === "expo" || preset === "react-native") &&
+    (project.packageManager.name === undefined || project.packageManager.executable === undefined)
+  ) {
+    problems.push(
+      commandProblem(
+        ProblemCode.PackageManagerNotFound,
+        "environment.package-manager",
+        "The project's package manager is unavailable.",
+        "Install the declared package manager or select an available one with --package-manager.",
+        commandId,
+      ),
+    );
+    return { problems };
+  }
+  const childCommand = await resolveDevCommand(preset, project, options, dependencies);
+  if (childCommand === undefined || childCommand.executable.trim() === "") {
+    problems.push(
+      commandProblem(
+        ProblemCode.DevCommandNotFound,
+        "input.dev.command",
+        "No runnable development command was found.",
+        "Configure an executable and argument array or pass a custom command after --.",
+        commandId,
+      ),
+    );
+    return { problems };
+  }
+  const defaultPorts = preset === "expo" || preset === "react-native" ? [{ device: 8081 }] : [];
+  const normalized = normalizeDevPorts(options.reversePorts ?? defaultPorts, commandId);
+  problems.push(...normalized.problems);
+  return normalized.problems.length > 0
+    ? { problems }
+    : {
+        problems,
+        definition: { project, preset, childCommand, mappings: normalized.mappings },
+      };
+}
+
+export async function runDevOfflinePlan(
+  options: DevOptions,
+  dependencies: CommandDependencies = {},
+): Promise<CommandExecution<DevData>> {
+  const bus = dependencies.bus ?? new EventBus(dependencies.clock);
+  const idFactory = dependencies.idFactory ?? randomUUID;
+  const context = createContext("dev", { ...dependencies, bus, idFactory });
+  const sessionId = idFactory();
+  const journal = new EventJournal(bus, options.journal);
+  const resolved = await resolveDevDefinition(options, dependencies, context.commandId);
+  if (resolved.definition === undefined) {
+    const execution = finish<DevData>(context, null, resolved.problems);
+    journal.close();
+    return execution;
+  }
+  const { project, preset, childCommand, mappings } = resolved.definition;
+  const commandCwd = path.resolve(project.root, childCommand.cwd ?? ".");
+  const hookSteps = (event: DevHookEvent) =>
+    (options.hooks?.[event] ?? []).map((hook, index) => ({
+      id: `hook-${event}-${String(index + 1)}`,
+      title: `Run ${event} hook ${String(index + 1)}`,
+      risk: "open-world" as const,
+      executable: redactText(hook.run[0]).value,
+      args: hook.run.slice(1).map((argument) => redactText(argument).value),
+    }));
+  const steps = [
+    {
+      id: "acquire-target",
+      title: "Select and exclusively lease one ready Android target",
+      risk: "device-reversible" as const,
+    },
+    ...hookSteps("beforeDev"),
+    ...hookSteps("onTargetReady"),
+    ...mappings.map((mapping, index) => ({
+      id: `reverse-${String(index + 1)}`,
+      title: `Ensure device ${mapping.device} maps to host ${mapping.host}`,
+      risk: "device-reversible" as const,
+    })),
+    ...hookSteps("onPortsReady"),
+    {
+      id: "start-child",
+      title: `Start ${preset} development command`,
+      risk: "open-world" as const,
+      executable: redactedPath(childCommand.executable),
+      args: childCommand.args.map((argument) => redactText(argument).value),
+    },
+    ...hookSteps("onReady"),
+    ...hookSteps("onChildExit"),
+    ...hookSteps("finally"),
+  ];
+  bus.emit({
+    type: "session.planned",
+    source: "session",
+    severity: "info",
+    message: "Offline development session plan is ready",
+    correlation: { commandId: context.commandId, sessionId },
+  });
+  const snapshot = journal.close();
+  return finish<DevData>(
+    context,
+    {
+      sessionId,
+      status: "planned",
+      planScope: "offline",
+      project: {
+        root: redactedPath(project.root),
+        ...(project.packageJson?.name === undefined ? {} : { name: project.packageJson.name }),
+      },
+      preset,
+      ...(project.packageManager.name === undefined || project.packageManager.source === undefined
+        ? {}
+        : {
+            packageManager: {
+              name: project.packageManager.name,
+              source: project.packageManager.source,
+            },
+          }),
+      ports: { requested: mappings, created: [], reused: [], cleaned: false },
+      command: {
+        executable: redactedPath(childCommand.executable),
+        args: childCommand.args.map((argument) => redactText(argument).value),
+        cwd: redactedPath(commandCwd),
+        envKeys: [...new Set(["ANDROID_SERIAL", ...Object.keys(childCommand.env ?? {})])].sort(),
+      },
+      plan: { schemaVersion: SCHEMA_VERSION, dryRun: true, steps },
+      journal: snapshot,
+      hooks: { completed: 0, failed: 0 },
+      recovery: {
+        checks: 0,
+        degradations: 0,
+        recoveryAttempts: 0,
+        recoveries: 0,
+        targetChanges: 0,
+        failed: false,
+      },
+    },
+    resolved.problems,
+  );
+}
+
 function streamSeverity(
   priority: ReturnType<typeof parseLogcatThreadtimeLine>,
 ): "debug" | "error" | "info" | "warning" {
@@ -2143,7 +2331,7 @@ export async function runDev(
     if (execution.result.data !== null) execution.result.data.journal = snapshot;
     if (recorder !== undefined) {
       const targetIdentity =
-        data?.selected.target.hardwareSerial ?? data?.selected.transport.serial;
+        data?.selected?.target.hardwareSerial ?? data?.selected?.transport.serial;
       const persisted = await recorder.finish({
         status: execution.result.problems.some(
           ({ code }) => code === ProblemCode.OperationInterrupted,
@@ -2239,79 +2427,13 @@ export async function runDev(
     correlation: { ...correlation, targetId: selected.target.id },
     data: { serial: selected.transport.serial, reason: selected.reason },
   });
-  transition("preparing-ports", "target selected and project configuration resolved");
-
-  const project = await (dependencies.detectProject ?? detectProject)({
-    cwd: options.cwd,
-    ...(options.packageManager === undefined
-      ? {}
-      : { explicitPackageManager: options.packageManager }),
-  });
+  const resolved = await resolveDevDefinition(options, dependencies, context.commandId);
+  problems.push(...resolved.problems);
+  if (resolved.definition === undefined) return await complete(null);
+  const { project, preset, childCommand, mappings: requestedMappings } = resolved.definition;
   recorder?.addPrivateLiteral(project.root);
-  const preset = options.preset ?? (options.command === undefined ? project.preset : "custom");
-  if (preset === undefined) {
-    problems.push(
-      commandProblem(
-        ProblemCode.DevPresetNotFound,
-        "input.dev.preset",
-        "ADB Ready could not determine a development preset.",
-        "Choose --preset expo, react-native, gradle, or pass a custom command after --.",
-        context.commandId,
-      ),
-    );
-    return await complete(null);
-  }
-  if (
-    project.packageManager.conflicts.length > 0 &&
-    (preset === "expo" || preset === "react-native")
-  ) {
-    problems.push(
-      commandProblem(
-        ProblemCode.PackageManagerConflict,
-        "input.dev.package-manager",
-        "Multiple package-manager signals conflict.",
-        "Declare packageManager in package.json, use --package-manager, or remove stale metadata or lockfiles.",
-        context.commandId,
-        [{ source: "project", field: "candidates", value: project.packageManager.conflicts }],
-      ),
-    );
-    return await complete(null);
-  }
-  if (
-    (preset === "expo" || preset === "react-native") &&
-    (project.packageManager.name === undefined || project.packageManager.executable === undefined)
-  ) {
-    problems.push(
-      commandProblem(
-        ProblemCode.PackageManagerNotFound,
-        "environment.package-manager",
-        "The project's package manager is unavailable.",
-        "Install the declared package manager or select an available one with --package-manager.",
-        context.commandId,
-      ),
-    );
-    return await complete(null);
-  }
-  const childCommand = await resolveDevCommand(preset, project, options, dependencies);
-  if (childCommand === undefined || childCommand.executable.trim() === "") {
-    problems.push(
-      commandProblem(
-        ProblemCode.DevCommandNotFound,
-        "input.dev.command",
-        "No runnable development command was found.",
-        "Configure an executable and argument array or pass a custom command after --.",
-        context.commandId,
-      ),
-    );
-    return await complete(null);
-  }
-  const defaultPorts = preset === "expo" || preset === "react-native" ? [{ device: 8081 }] : [];
-  const normalizedPorts = normalizeDevPorts(
-    options.reversePorts ?? defaultPorts,
-    context.commandId,
-  );
-  problems.push(...normalizedPorts.problems);
-  if (normalizedPorts.problems.length > 0) return await complete(null);
+  transition("preparing-ports", "target selected and project configuration resolved");
+  const normalizedPorts = { mappings: requestedMappings };
 
   const targetCorrelation = { ...correlation, targetId: selected.target.id };
   const clientOptions = {
@@ -2501,6 +2623,7 @@ export async function runDev(
     return await complete({
       ...baseData(),
       status: "planned",
+      planScope: "target",
       ports: {
         requested: normalizedPorts.mappings,
         created,
