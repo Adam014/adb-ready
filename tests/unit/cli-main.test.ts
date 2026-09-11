@@ -148,10 +148,37 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
+  test("applies root presentation flags to the interactive home", async () => {
+    const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
+    streams.input.autoInput = "\u001B";
+    const exitCode = await runCli(["--no-animation", "--no-color"], streams, dependencies());
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.error.value).toContain("WHAT DO YOU WANT TO DO?");
+    expect(streams.error.value).not.toContain("\u001B[36m");
+  });
+
+  test("returns a structured product overview for a bare machine invocation", async () => {
+    const streams = io();
+    const exitCode = await runCli(["--json"], streams, {
+      loadConfig: async () => {
+        throw new Error("overview must not load configuration");
+      },
+    });
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      command: "overview",
+      ok: true,
+      data: { name: "ADB Ready", mcp: { transport: "stdio" } },
+    });
+    expect(streams.error.value).toBe("");
+  });
+
   test("keeps a bare interactive session open and returns to a compact menu", async () => {
     const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
     streams.env.ADB_READY_REDUCED_MOTION = "1";
-    streams.input.autoInputs = ["4\r", "1\r", "\u001B"];
+    streams.input.autoInputs = ["5\r", "1\r", "\u001B"];
     const exitCode = await runCli([], streams, dependencies());
 
     expect(exitCode).toBe(ExitCode.Success);

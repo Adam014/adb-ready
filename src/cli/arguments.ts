@@ -225,6 +225,34 @@ const BOOLEAN_OPTIONS = new Set([
   "--submit",
 ]);
 
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length] ?? Math.max(left.length, right.length);
+}
+
+function suggestion(value: string, candidates: Iterable<string>): string {
+  const ranked = [...candidates]
+    .map((candidate) => ({ candidate, distance: editDistance(value, candidate) }))
+    .sort(
+      (left, right) =>
+        left.distance - right.distance || left.candidate.localeCompare(right.candidate),
+    );
+  const best = ranked[0];
+  const threshold = value.length <= 4 ? 1 : 2;
+  return best !== undefined && best.distance <= threshold ? `Did you mean ${best.candidate}?` : "";
+}
+
 function failure(code: CliParseFailure["code"], message: string, option?: string): CliParseFailure {
   return { ok: false, code, message, ...(option === undefined ? {} : { option }) };
 }
@@ -353,7 +381,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     if (!argument.startsWith("-")) {
       if (command === undefined) {
         if (!COMMANDS.has(argument as CommandName)) {
-          return failure("CLI_USAGE", `Unknown command: ${argument}`);
+          const hint = suggestion(argument, COMMANDS);
+          return failure(
+            "CLI_USAGE",
+            `Unknown command: ${argument}${hint === "" ? "" : `. ${hint}`}`,
+          );
         }
         const candidate = argument as CommandName;
         command = candidate;
@@ -963,7 +995,48 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       profileName = value;
     } else {
-      return failure("CLI_INVALID_OPTION", `Unknown option: ${option}`, option);
+      const knownOptions = new Set([
+        ...BOOLEAN_OPTIONS,
+        "--format",
+        "--timeout",
+        "--adb",
+        "--adb-host",
+        "--adb-port",
+        "--config",
+        "--profile",
+        "--device",
+        "--serial",
+        "--transport-id",
+        "--preset",
+        "--package-manager",
+        "--port",
+        "--package",
+        "--pid",
+        "--tag",
+        "--exclude-tag",
+        "--buffer",
+        "--since",
+        "--only",
+        "--status",
+        "--limit",
+        "--tail",
+        "--level",
+        "--out",
+        "--duration",
+        "--state",
+        "--max-depth",
+        "--activity",
+        "--filter",
+        "--max-records",
+        "--budget",
+        "--run-timeout",
+      ]);
+      const hint = suggestion(option, knownOptions);
+      return failure(
+        "CLI_INVALID_OPTION",
+        `Unknown option: ${option}${hint === "" ? "" : `. ${hint}`}`,
+        option,
+      );
     }
   }
 

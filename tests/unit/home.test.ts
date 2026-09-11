@@ -88,7 +88,8 @@ describe("home screen", () => {
     expect(sink.value).toStartWith("\u001B[2J\u001B[H");
     expect(sink.value).toContain("ADB READY");
     expect(sink.value).toContain("Android sessions. Kept ready.");
-    expect(sink.value).toContain("RUN    one target and dev com...");
+    expect(sink.value).toContain("RUN    one target + project");
+    expect(sink.value).toContain("Test & automate");
     expect(sink.value).toContain("Device & app");
     expect(sink.value).toContain("Debug & evidence");
     expect(sink.value).toContain("Project & setup");
@@ -100,7 +101,7 @@ describe("home screen", () => {
   test("opens a focused section and supports its version shortcut", async () => {
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("4\r", "4\r"),
+      input: new AutoInput("5\r", "4\r"),
       sink: new MemorySink(),
       capabilities: { ...interactive, animation: false },
     });
@@ -112,7 +113,7 @@ describe("home screen", () => {
     const sink = new MemorySink();
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("3\r", "2\r"),
+      input: new AutoInput("4\r", "2\r"),
       sink,
       capabilities: { ...interactive, animation: false },
     });
@@ -127,7 +128,7 @@ describe("home screen", () => {
     const sink = new MemorySink();
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("2\r", "\u001B", "\u001B"),
+      input: new AutoInput("3\r", "\u001B", "\u001B"),
       sink,
       capabilities: { ...interactive, animation: false },
     });

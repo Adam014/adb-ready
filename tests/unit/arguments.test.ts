@@ -753,6 +753,17 @@ describe("parseArguments", () => {
     });
   });
 
+  test("suggests high-confidence command and option corrections", () => {
+    expect(parseArguments(["deev"])).toMatchObject({
+      ok: false,
+      message: "Unknown command: deev. Did you mean dev?",
+    });
+    expect(parseArguments(["devices", "--jsn"])).toMatchObject({
+      ok: false,
+      message: "Unknown option: --jsn. Did you mean --json?",
+    });
+  });
+
   test("rejects missing and invalid values", () => {
     expect(parseArguments(["doctor", "--timeout"])).toMatchObject({
       ok: false,

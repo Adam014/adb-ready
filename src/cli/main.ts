@@ -414,6 +414,33 @@ function inferredFormat(argv: readonly string[]): OutputFormat {
   return format;
 }
 
+function rootInvocation(argv: readonly string[]): boolean {
+  const valueOptions = new Set(["--format"]);
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === undefined) continue;
+    if (argument.startsWith("--format=")) continue;
+    if (valueOptions.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (
+      argument !== "--json" &&
+      argument !== "--quiet" &&
+      argument !== "--verbose" &&
+      argument !== "--color" &&
+      argument !== "--no-color" &&
+      argument !== "--unicode" &&
+      argument !== "--no-unicode" &&
+      argument !== "--animation" &&
+      argument !== "--no-animation"
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function capabilities(
   options: CliOptions | undefined,
   values: ConfigValues,
@@ -604,6 +631,7 @@ async function runInteractiveSession(
       connect: ["connect"],
       context: ["context"],
       dev: ["dev"],
+      "dev-plan": ["dev", "--dry-run"],
       devices: ["devices"],
       doctor: ["doctor"],
       help: ["help"],
@@ -612,6 +640,7 @@ async function runInteractiveSession(
       "inspect-ui": ["inspect", "ui", "--interactive-only"],
       logs: ["logs"],
       pair: ["pair"],
+      "run-help": ["help", "run"],
       sessions: ["sessions"],
       version: ["version"],
     };
@@ -724,17 +753,7 @@ async function runCliInternal(
   signal?: AbortSignal,
 ): Promise<number> {
   const fallbackFormat = inferredFormat(argv);
-  let effectiveArgv = argv;
-  if (argv.length === 0) {
-    const homeCapabilities = capabilities(undefined, {}, io, "error", "human");
-    if (homeCapabilities.interactive) {
-      return await runInteractiveSession(io, dependencies, homeCapabilities, signal);
-    } else {
-      effectiveArgv = ["help"];
-    }
-  }
-
-  const parsed = parseArguments(effectiveArgv);
+  const parsed = parseArguments(argv);
   if (!parsed.ok) {
     const failure = failureResult(
       "cli",
@@ -746,6 +765,33 @@ async function runCliInternal(
   }
 
   const options = parsed.options;
+  if (rootInvocation(argv)) {
+    const homeCapabilities = capabilities(options, cliConfig(options), io, "error", options.format);
+    if (options.format === "human" && homeCapabilities.interactive) {
+      return await runInteractiveSession(io, dependencies, homeCapabilities, signal);
+    }
+    if (options.format !== "human") {
+      const overview = failureResult("overview", [], dependencies);
+      const result = {
+        ...overview,
+        ok: true,
+        data: {
+          name: "ADB Ready",
+          version: VERSION,
+          purpose: "Prepare and operate one Android development target for humans, agents, and CI.",
+          entrypoints: ["dev", "run", "agent setup", "mcp"],
+          mcp: { transport: "stdio", toolSchema: "schema/agent-tools-v1.json" },
+        },
+      };
+      renderResult(result, {
+        format: options.format,
+        capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+        sink: io.output,
+        verbose: options.verbose,
+      });
+      return ExitCode.Success;
+    }
+  }
   if (options.command === "help") {
     io.output.write(options.helpTarget === undefined ? HELP : COMMAND_HELP[options.helpTarget]);
     return ExitCode.Success;

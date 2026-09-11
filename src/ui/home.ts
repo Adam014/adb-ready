@@ -11,6 +11,7 @@ export type HomeAction =
   | "connect"
   | "context"
   | "dev"
+  | "dev-plan"
   | "devices"
   | "doctor"
   | "exit"
@@ -20,9 +21,10 @@ export type HomeAction =
   | "inspect-ui"
   | "logs"
   | "pair"
+  | "run-help"
   | "sessions"
   | "version";
-type HomeSection = "debug" | "device" | "project";
+type HomeSection = "automation" | "debug" | "device" | "project";
 type HomeMenuValue = HomeAction | HomeSection;
 export type HomeResult =
   | { kind: "action"; action: HomeAction }
@@ -57,9 +59,9 @@ function productPanel(version: string, capabilities: TerminalCapabilities): stri
     "ADB READY",
     "Android sessions. Kept ready.",
     "",
-    "RUN    one target and dev command",
-    "WATCH  ports, target, and logs",
-    "SHARE  redacted AI context",
+    "RUN    one target + project",
+    "WATCH  target + ports + logs",
+    "PROVE  every run with evidence",
     "",
     `adb-ready  v${version}`,
   ];
@@ -164,6 +166,11 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
       recommended: true,
     },
     {
+      value: "automation" as const,
+      label: "Test & automate",
+      description: "Preview readiness, run bounded checks, and keep evidence.",
+    },
+    {
       value: "device" as const,
       label: "Device & app",
       description: "Find, connect, and manage the Android target used by this project.",
@@ -181,6 +188,28 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     { value: "exit" as const, label: "Exit", description: "Close ADB Ready." },
   ];
   const sectionOptions: Record<HomeSection, ReadonlyArray<SelectOption<HomeMenuValue>>> = {
+    automation: [
+      {
+        value: "dev-plan",
+        label: "Preview project plan",
+        description: "Resolve the development workflow without allocating a target.",
+      },
+      {
+        value: "run-help",
+        label: "Run a bounded verification",
+        description: "See how to gate a test on readiness and retain its evidence.",
+      },
+      {
+        value: "sessions",
+        label: "Review recent runs",
+        description: "Find completed, failed, or interrupted project sessions.",
+      },
+      {
+        value: "context",
+        label: "Create AI debug context",
+        description: "Compile the latest run into a compact redacted brief.",
+      },
+    ],
     device: [
       {
         value: "devices",
@@ -274,7 +303,7 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     const selection = await selectOne<HomeMenuValue>({
       title: atRoot
         ? "WHAT DO YOU WANT TO DO?"
-        : `HOME / ${section === "device" ? "DEVICE & APP" : section === "debug" ? "DEBUG & EVIDENCE" : "PROJECT & SETUP"}`,
+        : `HOME / ${section === "device" ? "DEVICE & APP" : section === "debug" ? "DEBUG & EVIDENCE" : section === "automation" ? "TEST & AUTOMATE" : "PROJECT & SETUP"}`,
       options: currentOptions,
       input: options.input,
       sink: options.sink,

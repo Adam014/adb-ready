@@ -53,6 +53,16 @@ breaking changes.
 
 - Compact repeated successful health checks in bounded AI context while
   preserving the complete redacted NDJSON timeline as source evidence.
+- Reorganize the interactive home around development, test automation, device,
+  debugging, and project tasks; preserve root presentation flags and use copy
+  that remains meaningful in narrow terminals.
+- Lead the public README with the agent outcome, immediate setup, and a concrete
+  first task before the implementation details.
+
+### Fixed
+
+- Return a structured capability overview for bare machine-mode invocation and
+  suggest high-confidence corrections for mistyped commands or options.
 
 ### Fixed
 

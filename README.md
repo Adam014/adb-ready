@@ -2,10 +2,10 @@
 
 # ADB Ready
 
-**Make Android development accessible to coding agents.**
+**The local Android runtime for coding agents.**
 
-An MCP-native, local-first CLI that gives agents and developers safe, typed
-control of Android targets, apps, UI, logs, evidence, and development sessions.
+Give any MCP-capable agent a safe way to start your Android project, operate a
+real app, verify what happened, and bring back evidence—not guesses.
 
 [![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
 [![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
@@ -15,11 +15,21 @@ control of Android targets, apps, UI, logs, evidence, and development sessions.
 [![Deno](https://img.shields.io/badge/Deno_2-tested-111827?logo=deno&logoColor=white)](https://deno.com/)
 [![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
 
-[Quick start](#quick-start) · [AI agents](#android-tools-built-for-ai-agents) · [Why ADB Ready](#why-adb-ready) ·
+[Quick start](#quick-start) · [AI agents](#built-for-agentic-android-development) · [Why ADB Ready](#why-adb-ready) ·
 [Workflows](#find-your-workflow) · [Documentation](#documentation) ·
 [Compatibility](#compatibility)
 
 </div>
+
+```bash
+npm install --save-dev adb-ready
+npx adb-ready agent setup codex
+```
+
+Then ask your agent:
+
+> Start this Expo app on my Android phone, wait until the login screen is
+> actually ready, verify the change I made, and keep the failure evidence.
 
 ```text
 $ adb-ready dev
@@ -30,27 +40,29 @@ $ adb-ready dev
 ● Session healthy               watching target, ports, and logs
 ```
 
-Stop rebuilding your Android setup every time a cable moves, Wi-Fi reconnects,
-or ADB picks the wrong device. ADB Ready turns scattered ADB operations into
-one deterministic workflow that developers, scripts, and AI agents can share.
+ADB Ready handles the state around ADB that agents cannot safely guess: which
+device belongs to the run, whether the app is truly ready, which ports and
+processes it owns, and what evidence survives after a failure. It works locally
+with Codex, Claude Code, Cursor, VS Code/Copilot, and any MCP client—without an
+ADB Ready account, hosted service, or model API key.
 
-```bash
-npx adb-ready dev
-```
+| Prepare | Operate | Prove |
+| --- | --- | --- |
+| Select one target, connect it, start the project, and keep ports healthy. | Inspect semantic UI, launch apps, act on elements, and capture the screen. | Gate tests on real readiness and return structured logs, context, and artifacts. |
 
-## Android tools built for AI agents
+## Built for agentic Android development
 
-ADB Ready turns coding agents from passive log readers into safe Android
-operators. Its local MCP server exposes **25 schema-validated tools** for target
-readiness, app lifecycle, UI inspection, evidence capture, and verified UI
-actions—without giving the model a generic shell or unrestricted ADB access.
+Most coding agents can edit an Android project but cannot verify the running
+app. ADB Ready closes that loop with a built-in local MCP server and typed tools
+for target readiness, development sessions, app lifecycle, semantic UI, logs,
+and visual evidence—without handing the model an unrestricted shell or raw ADB.
 
 ```bash
 # Connect the current project to your coding agent
 npx adb-ready agent setup codex
 ```
 
-Codex, Claude Code, Cursor, VS Code/Copilot, Windsurf, and other MCP clients can:
+Your agent can:
 
 - find and bind one deterministic Android target;
 - start, check, and stop a durable development session across agent reconnects;
@@ -59,9 +71,10 @@ Codex, Claude Code, Cursor, VS Code/Copilot, Windsurf, and other MCP clients can
 - capture screenshots and read bounded, redacted session evidence; and
 - verify actions against fresh device state instead of assuming they worked.
 
-Everything stays local unless your chosen AI client sends tool results to its
-model provider. Stale UI references are rejected, destructive app removal is
-not exposed to agents, and every tool returns structured evidence.
+Every action is bound to one verified target and checked against fresh device
+state. Stale UI references are rejected, destructive app removal is not exposed
+to agents, and every tool returns a schema-validated result. Everything stays
+local unless your chosen AI client sends tool results to its model provider.
 
 [Connect an AI agent in minutes →](./docs/agent-integration.md)
 

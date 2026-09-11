@@ -19,6 +19,14 @@ adb-ready logs --format ndjson --non-interactive
 | `ndjson` | one versioned event per line, followed by the command result where applicable; saved timelines end with an event-count summary instead of duplicating the full event array |
 | `markdown` | bounded diagnostic context; only valid for `context` |
 
+Calling the root with `--json` returns a small product/capability overview. It
+does not probe ADB or load project configuration, which makes it safe for an
+agent or integration to identify the installed CLI first:
+
+```bash
+adb-ready --json
+```
+
 Machine data is written to `stdout`. Human progress and diagnostics are written
 to `stderr`. `--quiet` hides successful human output without hiding failures.
 
