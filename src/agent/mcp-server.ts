@@ -22,11 +22,13 @@ import type { ResultEnvelope } from "../domain/contracts.js";
 import { runCapture } from "../evidence/capture.js";
 import { runInspectApp, runInspectUi } from "../evidence/inspect.js";
 import { runUiAction } from "../evidence/ui-actions.js";
+import { acquireTargetLease, type TargetLeaseOptions } from "../state/target-lease.js";
 import { selectTarget } from "../target/selection.js";
 import { SerialTaskQueue } from "./serial-task-queue.js";
 
 interface BoundTarget {
   serial: string;
+  identity: string;
   transportId?: string;
 }
 
@@ -34,6 +36,7 @@ export interface McpServerOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   dependencies?: CommandDependencies;
+  targetLease?: false | TargetLeaseOptions;
   version?: string;
 }
 
@@ -87,11 +90,22 @@ function commandConfig(
 function selectedTarget(data: unknown): BoundTarget | undefined {
   if (typeof data !== "object" || data === null || !("selected" in data)) return undefined;
   const selected = (
-    data as { selected?: { transport?: { serial?: unknown; transportId?: unknown } } }
+    data as {
+      selected?: {
+        target?: { id?: unknown; hardwareSerial?: unknown };
+        transport?: { serial?: unknown; transportId?: unknown };
+      };
+    }
   ).selected;
   if (typeof selected?.transport?.serial !== "string") return undefined;
   return {
     serial: selected.transport.serial,
+    identity:
+      typeof selected.target?.hardwareSerial === "string"
+        ? selected.target.hardwareSerial
+        : typeof selected.target?.id === "string"
+          ? selected.target.id
+          : selected.transport.serial,
     ...(typeof selected.transport.transportId === "string"
       ? { transportId: selected.transport.transportId }
       : {}),
@@ -148,7 +162,29 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
               loaded.errors.map(({ code, message }) => `${code}: ${message}`).join("; "),
             );
           }
-          return await handler(input, context.mcpReq.signal, loaded.config);
+          if (annotations.readOnlyHint || options.targetLease === false) {
+            return await handler(input, context.mcpReq.signal, loaded.config);
+          }
+          if (bound === undefined) {
+            return inputFailure(
+              "MCP_TARGET_NOT_BOUND",
+              "Call ensure_ready before a target-mutating tool.",
+            );
+          }
+          const acquired = await acquireTargetLease(
+            {
+              targetIdentity: bound.identity,
+              projectRoot: options.cwd,
+              purpose: `mcp:${name}`,
+            },
+            { env: options.env, ...(options.targetLease ?? {}) },
+          );
+          if (!acquired.ok) return inputFailure(acquired.code, acquired.message);
+          try {
+            return await handler(input, context.mcpReq.signal, loaded.config);
+          } finally {
+            await acquired.lease.release();
+          }
         }),
     );
   };
@@ -215,6 +251,10 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       }
       bound = {
         serial: selection.selection.transport.serial,
+        identity:
+          selection.selection.target.hardwareSerial ??
+          selection.selection.target.id ??
+          selection.selection.transport.serial,
         ...(selection.selection.transport.transportId === undefined
           ? {}
           : { transportId: selection.selection.transport.transportId }),

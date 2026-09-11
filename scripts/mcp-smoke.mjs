@@ -86,6 +86,7 @@ async function verifyRuntime(runtime) {
       ADB_READY_INTERACTIVE: "false",
       NO_COLOR: "1",
       XDG_CONFIG_HOME: path.join(temporary, "config"),
+      XDG_STATE_HOME: path.join(temporary, "state"),
     },
     shell: false,
     stdio: ["pipe", "pipe", "pipe"],

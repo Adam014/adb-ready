@@ -25,6 +25,8 @@ export const ProblemCode = {
   TargetUnauthorized: "TARGET_UNAUTHORIZED",
   TargetUnknownState: "TARGET_UNKNOWN_STATE",
   TargetNotFound: "TARGET_NOT_FOUND",
+  TargetBusy: "TARGET_BUSY",
+  TargetLeaseUnavailable: "TARGET_LEASE_UNAVAILABLE",
   InvalidEndpoint: "INVALID_ENDPOINT",
   InvalidPairingCode: "INVALID_PAIRING_CODE",
   WirelessEndpointNotFound: "WIRELESS_ENDPOINT_NOT_FOUND",

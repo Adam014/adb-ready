@@ -14,6 +14,9 @@ breaking changes.
 - Scope saved sessions, latest-problem lookup, AI context, and MCP session
   resources to the canonical current project by default, with an explicit
   `--all-projects` escape hatch for cross-project audits.
+- Add privacy-safe cross-process Android target leases with heartbeats, bounded
+  expiry, stale-owner recovery, and ownership-checked cleanup for app, UI,
+  port, recording, and development-session mutations.
 
 ### Fixed
 

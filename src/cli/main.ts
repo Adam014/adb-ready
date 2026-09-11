@@ -57,12 +57,18 @@ import { runUiAction, type UiActionData } from "../evidence/ui-actions.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
 import {
+  acquireTargetLease,
+  type TargetLeaseHandle,
+  type TargetLeaseOptions,
+} from "../state/target-lease.js";
+import {
   type RememberedTarget,
   readTargetState,
   rememberedTarget,
   writeRememberedTarget,
 } from "../state/target-state.js";
 import type { AndroidTarget } from "../target/model.js";
+import type { SelectedTarget } from "../target/selection.js";
 import { confirmAction } from "../ui/confirm.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
@@ -331,6 +337,18 @@ export interface CliDependencies extends CommandDependencies {
   readTargetState?: typeof readTargetState;
   writeRememberedTarget?: typeof writeRememberedTarget;
   sessionStore?: false | SessionStoreOptions;
+  targetLease?: false | TargetLeaseOptions;
+}
+
+function requiresTargetLease(options: CliOptions): boolean {
+  if (options.dryRun) return false;
+  if (options.command === "dev" || options.command === "open") return true;
+  if (options.command === "app") {
+    return options.appAction !== "info" && options.appAction !== "resolve";
+  }
+  if (options.command === "ports") return options.portAction !== "list";
+  if (options.command === "ui") return options.uiRequest?.action !== "wait";
+  return options.command === "capture" && options.captureKind === "screen-record";
 }
 
 function inferredFormat(argv: readonly string[]): OutputFormat {
@@ -908,6 +926,7 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
+  let preparedSelection: SelectedTarget | undefined;
   if (
     (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||
     options.command === "apps" ||
@@ -917,7 +936,7 @@ async function runCliInternal(
     options.command === "logs" ||
     options.command === "open" ||
     options.command === "ui" ||
-    (options.command === "ports" && options.select)
+    options.command === "ports"
   ) {
     let inventory = await runDevices(config, commandDependencies, signal);
     let selectable =
@@ -996,7 +1015,8 @@ async function runCliInternal(
         return selected.exitCode;
       }
     } else {
-      const transport = selected.result.data.selected.transport;
+      preparedSelection = selected.result.data.selected;
+      const transport = preparedSelection.transport;
       if (transport.transportId === undefined) {
         config.targetSelector = transport.serial;
       } else {
@@ -1137,6 +1157,68 @@ async function runCliInternal(
       return interrupted ? ExitCode.Interrupted : ExitCode.InvalidInput;
     }
     pairingCode = input.value;
+  }
+  let targetLease: TargetLeaseHandle | undefined;
+  if (
+    requiresTargetLease(options) &&
+    preparedSelection !== undefined &&
+    dependencies.targetLease !== false
+  ) {
+    const acquired = await acquireTargetLease(
+      {
+        targetIdentity:
+          preparedSelection.target.hardwareSerial ??
+          preparedSelection.target.id ??
+          preparedSelection.transport.serial,
+        projectRoot: io.cwd,
+        purpose:
+          options.command === "app" ? `app ${options.appAction ?? "mutation"}` : options.command,
+      },
+      { env: io.env, ...(dependencies.targetLease ?? {}) },
+    );
+    if (!acquired.ok) {
+      const failure = failureResult(
+        options.command,
+        [
+          {
+            code:
+              acquired.code === "TARGET_BUSY"
+                ? ProblemCode.TargetBusy
+                : ProblemCode.TargetLeaseUnavailable,
+            category: "target.lease",
+            severity: "error",
+            summary: acquired.message,
+            detail:
+              acquired.code === "TARGET_BUSY"
+                ? "Wait for the owning workflow to finish, or select another Android target. Expired leases are recovered automatically."
+                : "Check the per-user state directory permissions, then retry.",
+            retryable: true,
+            evidence:
+              acquired.owner === undefined
+                ? []
+                : [
+                    { source: "target.lease", field: "purpose", value: acquired.owner.purpose },
+                    {
+                      source: "target.lease",
+                      field: "projectFingerprint",
+                      value: acquired.owner.projectFingerprint,
+                    },
+                    {
+                      source: "target.lease",
+                      field: "expiresAt",
+                      value: acquired.owner.expiresAt,
+                    },
+                  ],
+            actions: [],
+            correlation: { commandId: "target-lease", targetId: preparedSelection.target.id },
+          },
+        ],
+        dependencies,
+      );
+      renderFailure(failure, options.format, io);
+      return ExitCode.Target;
+    }
+    targetLease = acquired.lease;
   }
   const progress =
     options.format === "human" && !options.quiet && options.command !== "logs"
@@ -1460,6 +1542,7 @@ async function runCliInternal(
   } finally {
     progress?.dispose();
     events?.dispose();
+    await targetLease?.release();
   }
 
   if (options.command === "devices" && options.select) {

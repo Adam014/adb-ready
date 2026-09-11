@@ -118,6 +118,7 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
     }),
     writeRememberedTarget: async () => ({ ok: true, path: "/state.json" }),
     sessionStore: false,
+    targetLease: false,
     runner: async (request) => {
       const args = request.args ?? [];
       if (args.includes("version")) {
