@@ -35,6 +35,7 @@ describe("parseArguments", () => {
         pairingCodeStdin: false,
         remembered: false,
         dryRun: false,
+        allProjects: false,
       },
     });
   });
@@ -220,6 +221,18 @@ describe("parseArguments", () => {
     expect(parseArguments(["sessions", "unknown"])).toMatchObject({
       ok: false,
       code: "CLI_USAGE",
+    });
+  });
+
+  test("requires an explicit session command for cross-project history", () => {
+    expect(parseArguments(["sessions", "list", "--all-projects", "--json"])).toMatchObject({
+      ok: true,
+      options: { command: "sessions", allProjects: true },
+    });
+    expect(parseArguments(["devices", "--all-projects"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+      option: "--all-projects",
     });
   });
 

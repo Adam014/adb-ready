@@ -9,6 +9,19 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Scope saved sessions, latest-problem lookup, AI context, and MCP session
+  resources to the canonical current project by default, with an explicit
+  `--all-projects` escape hatch for cross-project audits.
+
+### Fixed
+
+- Apply retention limits per project before the global safety cap so one noisy
+  project cannot evict another project's recent diagnostic history.
+- Keep packaged command-matrix development sessions inside an isolated
+  temporary state directory instead of polluting the user's session store.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added

@@ -2093,8 +2093,12 @@ export async function runDev(
           sessionId,
           command: "dev",
           startedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
+          projectRoot: options.cwd,
         },
-        options.sessionStore,
+        {
+          ...options.sessionStore,
+          projectRoot: options.sessionStore.projectRoot ?? options.cwd,
+        },
       );
     } catch {
       problems.push(
@@ -2151,7 +2155,6 @@ export async function runDev(
         finishedAt: (dependencies.clock ?? (() => new Date()))().toISOString(),
         problems: execution.result.problems,
         ...(targetIdentity === undefined ? {} : { targetIdentity }),
-        ...(data?.project.name === undefined ? {} : { projectName: data.project.name }),
         ...(data?.preset === undefined ? {} : { preset: data.preset }),
       });
       if (!persisted.ok) {

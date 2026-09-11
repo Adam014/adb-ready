@@ -4,6 +4,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -52,6 +53,11 @@ export interface SessionStoreOptions {
   maxSessions?: number;
   maxAgeDays?: number;
   maxBytes?: number;
+  maxTotalSessions?: number;
+  maxTotalBytes?: number;
+  projectRoot?: string;
+  projectId?: string;
+  allProjects?: boolean;
   redaction?: RedactionOptions;
 }
 
@@ -59,6 +65,8 @@ export interface SessionRecorderInput {
   sessionId: string;
   command: string;
   startedAt: string;
+  projectRoot?: string;
+  projectId?: string;
   privateLiterals?: readonly string[];
 }
 
@@ -67,7 +75,6 @@ export interface SessionFinishInput {
   finishedAt: string;
   problems?: readonly Problem[];
   targetIdentity?: string;
-  projectName?: string;
   preset?: string;
 }
 
@@ -83,6 +90,8 @@ export type SessionStoreResult<T> =
 const DEFAULT_MAX_SESSIONS = 30;
 const DEFAULT_MAX_AGE_DAYS = 14;
 const DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_SESSIONS = 150;
+const DEFAULT_MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
 function positiveInteger(value: number, field: string): void {
@@ -160,6 +169,32 @@ async function atomicJson(file: string, value: JsonValue): Promise<void> {
 
 function fingerprint(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex").slice(0, 16)}`;
+}
+
+async function canonicalProjectIdentity(
+  projectRoot: string | undefined,
+  projectId: string | undefined,
+): Promise<string | undefined> {
+  const explicit = projectId?.trim();
+  if (explicit !== undefined && explicit !== "") return `id:${explicit}`;
+  if (projectRoot === undefined || projectRoot.trim() === "") return undefined;
+  const absolute = path.resolve(projectRoot);
+  const canonical = await realpath(absolute).catch(() => absolute);
+  return `root:${process.platform === "win32" ? canonical.toLowerCase() : canonical}`;
+}
+
+export async function projectFingerprint(projectRoot: string, projectId?: string): Promise<string> {
+  const identity = await canonicalProjectIdentity(projectRoot, projectId);
+  if (identity === undefined) throw new RangeError("projectRoot must not be empty");
+  return fingerprint(identity);
+}
+
+async function requestedProjectFingerprint(
+  options: SessionStoreOptions,
+): Promise<string | undefined> {
+  if (options.allProjects === true) return undefined;
+  const identity = await canonicalProjectIdentity(options.projectRoot, options.projectId);
+  return identity === undefined ? undefined : fingerprint(identity);
 }
 
 function storedProblem(problem: Problem, options: RedactionOptions): StoredProblem {
@@ -255,39 +290,114 @@ function validManifest(value: unknown): value is SessionManifest {
   );
 }
 
+async function readAllSessions(
+  options: SessionStoreOptions,
+): Promise<SessionStoreResult<SessionManifest[]>> {
+  const directory = resolveDirectory(options);
+  let entries: string[];
+  try {
+    entries = await readdir(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ok: true, value: [], directory };
+    }
+    return {
+      ok: false,
+      code: "SESSION_UNREADABLE",
+      message: "ADB Ready could not read its session history.",
+      directory,
+    };
+  }
+  const manifests: SessionManifest[] = [];
+  for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
+    try {
+      const value: unknown = JSON.parse(await readFile(path.join(directory, entry), "utf8"));
+      if (validManifest(value) && entry === `${value.sessionId}.json`) manifests.push(value);
+    } catch {}
+  }
+  return {
+    ok: true,
+    value: manifests.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    directory,
+  };
+}
+
+async function removeSessionFiles(directory: string, manifest: SessionManifest): Promise<void> {
+  await Promise.all(
+    [manifestPath(directory, manifest.sessionId), eventPath(directory, manifest.sessionId)].map(
+      async (file) => await rm(file, { force: true }),
+    ),
+  );
+}
+
+async function sessionBytes(directory: string, manifest: SessionManifest): Promise<number> {
+  const files = [
+    manifestPath(directory, manifest.sessionId),
+    eventPath(directory, manifest.sessionId),
+  ];
+  const sizes = await Promise.all(
+    files.map(async (file) => (await stat(file).catch(() => undefined))?.size ?? 0),
+  );
+  return sizes.reduce((total, size) => total + size, 0);
+}
+
+async function pruneGroup(
+  directory: string,
+  manifests: readonly SessionManifest[],
+  maximumCount: number,
+  maximumBytes: number,
+  cutoff: number,
+): Promise<void> {
+  let retainedBytes = 0;
+  for (const [index, manifest] of manifests.entries()) {
+    const bytes = await sessionBytes(directory, manifest);
+    const expired = Date.parse(manifest.updatedAt) < cutoff;
+    const exceedsCount = index >= maximumCount;
+    const exceedsBytes = retainedBytes + bytes > maximumBytes;
+    if (expired || exceedsCount || exceedsBytes) await removeSessionFiles(directory, manifest);
+    else retainedBytes += bytes;
+  }
+}
+
 async function pruneSessions(options: SessionStoreOptions): Promise<void> {
   const directory = resolveDirectory(options);
   const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
   const maxAgeDays = options.maxAgeDays ?? DEFAULT_MAX_AGE_DAYS;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  const maxTotalSessions = options.maxTotalSessions ?? DEFAULT_MAX_TOTAL_SESSIONS;
+  const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   positiveInteger(maxSessions, "maxSessions");
   positiveInteger(maxAgeDays, "maxAgeDays");
   positiveInteger(maxBytes, "maxBytes");
-  const listed = await listSessions(options);
+  positiveInteger(maxTotalSessions, "maxTotalSessions");
+  positiveInteger(maxTotalBytes, "maxTotalBytes");
+  const listed = await readAllSessions(options);
   if (!listed.ok) return;
   const completed = listed.value
     .filter(({ status }) => status !== "running")
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1_000;
-  let retainedBytes = 0;
-  for (const [index, manifest] of completed.entries()) {
-    const files = [
-      manifestPath(directory, manifest.sessionId),
-      eventPath(directory, manifest.sessionId),
-    ];
-    const sizes = await Promise.all(
-      files.map(async (file) => (await stat(file).catch(() => undefined))?.size ?? 0),
-    );
-    const bytes = sizes.reduce((total, size) => total + size, 0);
-    const expired = Date.parse(manifest.updatedAt) < cutoff;
-    const exceedsCount = index >= maxSessions;
-    const exceedsBytes = retainedBytes + bytes > maxBytes;
-    if (expired || exceedsCount || exceedsBytes) {
-      await Promise.all(files.map(async (file) => await rm(file, { force: true })));
-    } else {
-      retainedBytes += bytes;
-    }
+  const groups = new Map<string, SessionManifest[]>();
+  for (const manifest of completed) {
+    const key = manifest.projectFingerprint ?? "legacy-unscoped";
+    const group = groups.get(key) ?? [];
+    group.push(manifest);
+    groups.set(key, group);
   }
+  for (const group of groups.values()) {
+    await pruneGroup(directory, group, maxSessions, maxBytes, cutoff);
+  }
+  const retained = await readAllSessions(options);
+  if (!retained.ok) return;
+  await pruneGroup(
+    directory,
+    retained.value
+      .filter(({ status }) => status !== "running")
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    maxTotalSessions,
+    maxTotalBytes,
+    cutoff,
+  );
 }
 
 export class SessionRecorder {
@@ -327,6 +437,10 @@ export class SessionRecorder {
     assertSessionId(input.sessionId);
     const directory = resolveDirectory(options);
     await mkdir(directory, { recursive: true, mode: 0o700 });
+    const identity = await canonicalProjectIdentity(
+      input.projectRoot ?? options.projectRoot,
+      input.projectId ?? options.projectId,
+    );
     const manifest: SessionManifest = {
       schemaVersion: 1,
       sessionId: input.sessionId,
@@ -337,6 +451,7 @@ export class SessionRecorder {
       eventFile: `${input.sessionId}.ndjson`,
       eventCount: 0,
       eventBytes: 0,
+      ...(identity === undefined ? {} : { projectFingerprint: fingerprint(identity) }),
       problems: [],
     };
     const events = eventPath(directory, input.sessionId);
@@ -393,9 +508,6 @@ export class SessionRecorder {
       ...(input.targetIdentity === undefined
         ? {}
         : { targetFingerprint: fingerprint(input.targetIdentity) }),
-      ...(input.projectName === undefined
-        ? {}
-        : { projectFingerprint: fingerprint(input.projectName) }),
       ...(input.preset === undefined ? {} : { preset: input.preset }),
       problems: (input.problems ?? []).map((problem) => storedProblem(problem, redaction)),
     };
@@ -434,32 +546,13 @@ export class SessionRecorder {
 export async function listSessions(
   options: SessionStoreOptions = {},
 ): Promise<SessionStoreResult<SessionManifest[]>> {
-  const directory = resolveDirectory(options);
-  let entries: string[];
-  try {
-    entries = await readdir(directory);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { ok: true, value: [], directory };
-    }
-    return {
-      ok: false,
-      code: "SESSION_UNREADABLE",
-      message: "ADB Ready could not read its session history.",
-      directory,
-    };
-  }
-  const manifests: SessionManifest[] = [];
-  for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
-    try {
-      const value: unknown = JSON.parse(await readFile(path.join(directory, entry), "utf8"));
-      if (validManifest(value) && entry === `${value.sessionId}.json`) manifests.push(value);
-    } catch {}
-  }
+  const all = await readAllSessions(options);
+  if (!all.ok || options.allProjects === true) return all;
+  const expected = await requestedProjectFingerprint(options);
+  if (expected === undefined) return all;
   return {
-    ok: true,
-    value: manifests.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
-    directory,
+    ...all,
+    value: all.value.filter(({ projectFingerprint }) => projectFingerprint === expected),
   };
 }
 
@@ -470,12 +563,23 @@ export async function readSession(
   const directory = resolveDirectory(options);
   try {
     const value: unknown = JSON.parse(await readFile(manifestPath(directory, sessionId), "utf8"));
-    return validManifest(value)
+    if (!validManifest(value)) {
+      return {
+        ok: false,
+        code: "SESSION_INVALID",
+        message: "The stored session manifest is invalid.",
+        directory,
+      };
+    }
+    const expected = await requestedProjectFingerprint(options);
+    return expected === undefined ||
+      options.allProjects === true ||
+      value.projectFingerprint === expected
       ? { ok: true, value, directory }
       : {
           ok: false,
-          code: "SESSION_INVALID",
-          message: "The stored session manifest is invalid.",
+          code: "SESSION_UNREADABLE",
+          message: "The requested session does not belong to this project.",
           directory,
         };
   } catch (error) {

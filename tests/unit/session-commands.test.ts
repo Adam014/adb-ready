@@ -35,7 +35,7 @@ describe("session history commands", () => {
         const recorder = await SessionRecorder.create(
           bus,
           { sessionId: `session-${String(index)}`, command: "dev", startedAt: timestamp },
-          { directory, maxAgeDays: 3650 },
+          { directory, maxAgeDays: 3650, projectRoot: "/workspace/current" },
         );
         bus.emit({
           type: "session.started",
@@ -55,29 +55,30 @@ describe("session history commands", () => {
         idFactory: () => "result-1",
         clock: () => new Date("2026-09-10T11:00:00.000Z"),
       };
-      const listed = await runSessionCommand("list", undefined, { directory }, dependencies);
+      const store = { directory, projectRoot: "/workspace/current" };
+      const listed = await runSessionCommand("list", undefined, store, dependencies);
       expect(listed.result.data).toMatchObject({
         action: "list",
         sessions: [{ sessionId: "session-1" }, { sessionId: "session-0" }],
       });
-      const shown = await runSessionCommand("show", undefined, { directory }, dependencies);
+      const shown = await runSessionCommand("show", undefined, store, dependencies);
       expect(shown.result.data).toMatchObject({
         action: "show",
         session: { sessionId: "session-1", status: "failed" },
       });
-      const events = await runSessionCommand("events", "session-0", { directory }, dependencies);
+      const events = await runSessionCommand("events", "session-0", store, dependencies);
       expect(events.result.data).toMatchObject({
         action: "events",
         session: { sessionId: "session-0" },
         events: [{ type: "session.started" }],
       });
-      const problems = await runProblemsCommand(undefined, { directory }, dependencies);
+      const problems = await runProblemsCommand(undefined, store, dependencies);
       expect(problems.result.data).toMatchObject({
         sessionId: "session-1",
         status: "failed",
         problems: [{ code: "TARGET_OFFLINE", retryable: true }],
       });
-      const context = await runContextCommand(undefined, 2_000, { directory }, dependencies);
+      const context = await runContextCommand(undefined, 2_000, store, dependencies);
       expect(context.result.data).toMatchObject({
         sessionId: "session-1",
         status: "failed",

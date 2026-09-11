@@ -120,7 +120,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     },
   );
   const load = async () => await loadConfig({ cwd: options.cwd, env: options.env });
-  const sessionStore = { env: options.env };
+  const sessionStore = { env: options.env, projectRoot: options.cwd };
   const register = <Shape extends z.ZodRawShape>(
     name: string,
     description: string,

@@ -196,6 +196,7 @@ Context options:
   --budget CHARACTERS    Maximum Markdown size (default: 12000, minimum: 1000)
   --since DURATION       Keep only the final window, such as 30s or 5m
   --only FILTERS         Keep comma-separated problems,recovery,logs,child,state,target,ports
+  --all-projects         Allow an explicit cross-project session lookup
   --format FORMAT        markdown (default), json, plain, or ndjson
 `,
   dev: `Usage: adb-ready dev [options] [-- EXECUTABLE ARG...]
@@ -294,7 +295,8 @@ an existing mapping. Use --dry-run to inspect the exact ADB plan.
   problems: `Usage: adb-ready problems [SESSION] [options]
 
 Shows structured problems from a saved session. The latest session is used
-when no ID is provided.
+when no ID is provided. History is scoped to the current project unless
+--all-projects is explicit.
 `,
   sessions: `Usage:
   adb-ready sessions list [options]
@@ -302,7 +304,8 @@ when no ID is provided.
   adb-ready sessions events [SESSION] [options]
 
 Inspects private, redacted development history. Show and events use the latest
-session when no ID is provided.
+session from the current project when no ID is provided. Use --all-projects for
+an explicit cross-project audit.
 `,
 } as const;
 
@@ -764,8 +767,12 @@ async function runCliInternal(
   ) {
     const storeOptions =
       dependencies.sessionStore === false
-        ? { env: io.env }
-        : (dependencies.sessionStore ?? { env: io.env });
+        ? { env: io.env, projectRoot: io.cwd, allProjects: options.allProjects }
+        : {
+            ...(dependencies.sessionStore ?? { env: io.env }),
+            projectRoot: dependencies.sessionStore?.projectRoot ?? io.cwd,
+            allProjects: options.allProjects,
+          };
     const execution =
       options.command === "context"
         ? await runContextCommand(

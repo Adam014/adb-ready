@@ -67,6 +67,7 @@ export interface CliOptions {
   pairingCodeStdin: boolean;
   remembered: boolean;
   dryRun: boolean;
+  allProjects: boolean;
   portDirection?: PortDirection;
   portAction?: PortAction;
   primaryPort?: string;
@@ -202,6 +203,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--user",
   "--system",
   "--all",
+  "--all-projects",
   "--interactive-only",
   "--submit",
 ]);
@@ -253,6 +255,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let pairingCodeStdin = false;
   let remembered = false;
   let dryRun = false;
+  let allProjects = false;
   let portDirection: PortDirection | undefined;
   let portAction: PortAction | undefined;
   let primaryPort: string | undefined;
@@ -592,6 +595,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       remembered = true;
     } else if (option === "--dry-run") {
       dryRun = true;
+    } else if (option === "--all-projects") {
+      allProjects = true;
     } else if (option === "--preset") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -897,6 +902,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
 
   command ??= "help";
+  if (allProjects && command !== "sessions" && command !== "problems" && command !== "context") {
+    return failure(
+      "CLI_USAGE",
+      "--all-projects can only be used with sessions, problems, or context.",
+      "--all-projects",
+    );
+  }
   if (packageOption !== undefined) {
     if (command === "logs") logPackage = packageOption;
     else if (
@@ -1225,6 +1237,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       pairingCodeStdin,
       remembered,
       dryRun,
+      allProjects,
       ...(portDirection === undefined ? {} : { portDirection }),
       ...(portAction === undefined ? {} : { portAction }),
       ...(primaryPort === undefined ? {} : { primaryPort }),

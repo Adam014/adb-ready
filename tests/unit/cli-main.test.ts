@@ -186,6 +186,7 @@ describe("runCli", () => {
           sessionId: "session-cli-1",
           command: "dev",
           startedAt: "2026-09-10T10:00:00.000Z",
+          projectRoot: "/project",
         },
         { directory, maxAgeDays: 3650 },
       );

@@ -144,6 +144,7 @@ try {
     ADB_READY_INTERACTIVE: "false",
     ADB_READY_FAKE_SCENARIO: "ready",
     XDG_CONFIG_HOME: path.join(temp, "config"),
+    XDG_STATE_HOME: path.join(temp, "state"),
     NO_COLOR: "1",
   };
   const profileConfig = path.join(consumer, "profile-config.json");
