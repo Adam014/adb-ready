@@ -214,6 +214,131 @@
       }
     },
     {
+      "name": "clear_ui",
+      "description": "Focus one semantic editable field, clear its value, and verify the observable value.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:class|desc|id|package|text)=.{1,256}$"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": ["class", "desc", "id", "package", "text"]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "match": {
+                    "type": "string",
+                    "enum": ["contains", "exact", "starts-with"]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "actionable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["field", "value"]
+              }
+            ]
+          },
+          "occurrence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": ["selector"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
       "name": "compare_ui",
       "description": "Compare the current UI with a complete digest returned by an earlier inspection or action.",
       "inputSchema": {
@@ -486,6 +611,139 @@
         "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
+      "name": "fill_ui",
+      "description": "Focus one semantic editable field, replace its value with conservative shell-safe text, and verify the observable value.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:class|desc|id|package|text)=.{1,256}$"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": ["class", "desc", "id", "package", "text"]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "match": {
+                    "type": "string",
+                    "enum": ["contains", "exact", "starts-with"]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "actionable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["field", "value"]
+              }
+            ]
+          },
+          "occurrence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "submit": {
+            "type": "boolean"
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": ["selector", "text"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
         "openWorldHint": false
       },
       "outputSchema": {
@@ -840,6 +1098,128 @@
       }
     },
     {
+      "name": "get_ui",
+      "description": "Read one unambiguous UI node with its current semantic, state, and bounds properties.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:class|desc|id|package|text)=.{1,256}$"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": ["class", "desc", "id", "package", "text"]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "match": {
+                    "type": "string",
+                    "enum": ["contains", "exact", "starts-with"]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "actionable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["field", "value"]
+              }
+            ]
+          },
+          "occurrence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": ["selector"]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
       "name": "inspect_app",
       "description": "Return bounded sensitive app, foreground, and classified-log evidence without a screenshot.",
       "inputSchema": {
@@ -1019,7 +1399,7 @@
     },
     {
       "name": "install_app",
-      "description": "Install one project-local APK and verify its package. Downloads and split APKs are rejected.",
+      "description": "Install one project-local APK or a complete split APK set and verify its package.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1033,6 +1413,15 @@
             "type": "string",
             "minLength": 1
           },
+          "paths": {
+            "minItems": 1,
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           "applicationId": {
             "type": "string",
             "minLength": 3
@@ -1043,8 +1432,7 @@
           "grantRuntimePermissions": {
             "type": "boolean"
           }
-        },
-        "required": ["path"]
+        }
       },
       "annotations": {
         "readOnlyHint": false,
@@ -1735,6 +2123,135 @@
         "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
+      "name": "scroll_ui",
+      "description": "Scroll the screen or one unique semantic scroll container in a display-relative direction, then compare UI state.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "targetHandle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["down", "left", "right", "up"]
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:class|desc|id|package|text)=.{1,256}$"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": ["class", "desc", "id", "package", "text"]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "match": {
+                    "type": "string",
+                    "enum": ["contains", "exact", "starts-with"]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "actionable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["field", "value"]
+              }
+            ]
+          },
+          "occurrence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": ["direction"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
         "openWorldHint": false
       },
       "outputSchema": {

@@ -147,7 +147,7 @@ Running `adb-ready` without a command opens the interactive workflow home.
 | install, inspect, launch, restart, or deep-link my app      | [App lifecycle](./docs/apps-and-evidence.md#app-lifecycle)                          |
 | save a verified screenshot or bounded screen recording      | [Evidence capture](./docs/apps-and-evidence.md#evidence-capture)                    |
 | give a developer or agent one bounded app/UI snapshot       | [Structured inspection](./docs/apps-and-evidence.md#structured-inspection)          |
-| safely tap, type, swipe, press keys, or wait for Android UI | [Safe UI automation](./docs/ui-automation.md)                                       |
+| find, read, fill, scroll, and verify the Android UI        | [Safe UI automation](./docs/ui-automation.md)                                       |
 | see only the Android logs that matter                       | [Focused logcat](./docs/logs-and-context.md#focused-logcat)                         |
 | understand why the last session failed                      | [Session problems](./docs/logs-and-context.md#session-history)                      |
 | prepare safe evidence for an AI assistant                   | [Diagnostic context](./docs/logs-and-context.md#diagnostic-context)                 |

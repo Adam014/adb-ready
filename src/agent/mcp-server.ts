@@ -677,6 +677,32 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       ),
   );
   register(
+    "get_ui",
+    "Read one unambiguous UI node with its current semantic, state, and bounds properties.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+    }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ selector, occurrence }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "get", selector, ...(occurrence === undefined ? {} : { occurrence }) },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
     "assert_ui",
     "Assert that a semantic UI selector is visible or gone in the current hierarchy.",
     z.object({
@@ -848,6 +874,40 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     },
   );
   register(
+    "scroll_ui",
+    "Scroll the screen or one unique semantic scroll container in a display-relative direction, then compare UI state.",
+    z.object({
+      ...targetHandleShape,
+      direction: z.enum(["down", "left", "right", "up"]),
+      selector: uiSelectorSchema.optional(),
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
+    async ({ direction, selector, occurrence, dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "scroll",
+              direction,
+              ...(selector === undefined ? {} : { selector }),
+              ...(occurrence === undefined ? {} : { occurrence }),
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
     "type_text_ui",
     "Type conservative shell-safe text into the focused Android field and optionally press enter.",
     z.object({
@@ -876,6 +936,74 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       );
       return toolResult(execution.result);
     },
+  );
+  register(
+    "fill_ui",
+    "Focus one semantic editable field, replace its value with conservative shell-safe text, and verify the observable value.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+      text: z.string().min(1).max(256),
+      submit: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
+    async ({ selector, occurrence, text, submit, dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "fill",
+              selector,
+              text,
+              ...(occurrence === undefined ? {} : { occurrence }),
+              ...(submit === undefined ? {} : { submit }),
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "clear_ui",
+    "Focus one semantic editable field, clear its value, and verify the observable value.",
+    z.object({
+      ...targetHandleShape,
+      selector: uiSelectorSchema,
+      occurrence: z.number().int().min(1).max(10_000).optional(),
+      dryRun: z.boolean().optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
+    async ({ selector, occurrence, dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "clear",
+              selector,
+              ...(occurrence === undefined ? {} : { occurrence }),
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
   );
   register(
     "press_key_ui",

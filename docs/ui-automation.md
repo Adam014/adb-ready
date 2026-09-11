@@ -46,17 +46,45 @@ adb-ready ui long-press 540 1200
 ADB Ready rejects stale, disabled, non-actionable, missing-bounds, and
 out-of-display targets before input is sent.
 
-## Swipe, type, and keys
+## Read and fill a specific field
+
+Agents do not need to infer state from a large hierarchy or depend on whatever
+field happens to be focused:
+
+```bash
+adb-ready ui get 'id=com.example:id/email' --json
+adb-ready ui fill 'id=com.example:id/email' 'person@example.com'
+adb-ready ui fill 'id=com.example:id/search' 'pixel' --submit
+adb-ready ui clear 'id=com.example:id/search'
+```
+
+`get` requires one unambiguous match and returns its semantic values, state,
+and bounds. `fill` and `clear` focus that exact enabled field, select its
+existing value, replace it, then inspect the hierarchy again. A visible normal
+field is successful only when its post-action value matches. Password and
+custom fields can accept input without exposing their value; those calls stay
+successful but report `verified: false` and `text-not-observable`, so the next
+screen state should be asserted explicitly.
+
+Safe replacement requires the target's Android `input keycombination`
+capability. ADB Ready checks it before touching the screen and returns a
+structured unsupported-capability problem on older targets rather than
+appending to an unknown value.
+
+## Scroll, swipe, type, and keys
 
 ```bash
 adb-ready ui swipe up
 adb-ready ui swipe 900 1200 180 1200
+adb-ready ui scroll up 'id=com.example:id/results'
 adb-ready ui type "person@example.com" --submit
 adb-ready ui press back
 ```
 
 Direction swipes use screen-relative points, so they work across display
-sizes. Supported keys are `back`, `home`, `enter`, `menu`, `volume-up`, and
+sizes. `scroll` can constrain that gesture to one enabled accessibility node
+whose `scrollable` property is true; without a selector it uses the screen.
+Supported keys are `back`, `home`, `enter`, `menu`, `volume-up`, and
 `volume-down`.
 
 Android's text-input command passes through a device shell. ADB Ready therefore
@@ -114,9 +142,12 @@ the next state is known.
 
 ## AI agents
 
-The MCP server additionally exposes `find_ui`, `assert_ui`, and `compare_ui`.
+The MCP server exposes the same intent-level workflow through `get_ui`,
+`find_ui`, `fill_ui`, `clear_ui`, `scroll_ui`, `assert_ui`, and `compare_ui`.
 Its structured selectors can match exact values, prefixes, or substrings and
-qualify enabled/actionable state. Arguments are schema-validated, each MCP
-connection stays bound to one target, and no raw ADB or shell tool is exposed.
+qualify enabled/actionable state. An optional one-based occurrence is accepted
+only when repeated nodes are intentional. Arguments are schema-validated, each
+MCP connection stays bound to one target, and no raw ADB or shell tool is
+exposed.
 
 [Connect an agent →](./agent-integration.md)

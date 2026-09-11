@@ -52,6 +52,10 @@ breaking changes.
   and `install-multiple` workflows in both CLI and MCP.
 - Detect and run Flutter and Capacitor Android projects on the exact selected
   target, with boot readiness and no invented default port mappings.
+- Add intent-level UI read, field fill/clear, and container-scoped scroll
+  workflows for CLI and MCP. Field replacement is capability-gated before
+  mutation and verifies observable values instead of inferring success from
+  input exit codes.
 
 ### Changed
 

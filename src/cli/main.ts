@@ -257,10 +257,14 @@ context implicitly.
   adb-ready ui tap SELECTOR [--dry-run]
   adb-ready ui long-press REF|X Y [--dry-run]
   adb-ready ui find SELECTOR
+  adb-ready ui get SELECTOR
   adb-ready ui assert SELECTOR [--state visible|gone]
   adb-ready ui compare DIGEST
+  adb-ready ui scroll up|down|left|right [SELECTOR] [--dry-run]
   adb-ready ui swipe up|down|left|right [--dry-run]
   adb-ready ui swipe X1 Y1 X2 Y2 [--dry-run]
+  adb-ready ui fill SELECTOR TEXT [--submit] [--dry-run]
+  adb-ready ui clear SELECTOR [--dry-run]
   adb-ready ui type TEXT [--submit] [--dry-run]
   adb-ready ui press back|home|enter|menu|volume-up|volume-down [--dry-run]
   adb-ready ui wait SELECTOR [--state visible|gone] [--timeout 5s]
@@ -269,7 +273,8 @@ Uses fresh UI evidence before every mutation. A ui:* reference is accepted only
 while its snapshot digest still matches. Compact selectors use exact class=,
 id=, text=, desc=, or package= values; MCP additionally supports structured
 contains and prefix matching with state qualifiers. Typed text uses a
-conservative shell-safe character set.
+conservative shell-safe character set. fill and clear require Android's safe
+key-combination capability and verify the observable field value afterward.
 `,
   devices: `Usage: adb-ready devices [options]
 

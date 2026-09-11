@@ -550,6 +550,10 @@ describe("parseArguments", () => {
         uiRequest: { action: "find", selector: "class=android.widget.Button" },
       },
     });
+    expect(parseArguments(["ui", "get", "id=com.example:id/email"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "get", selector: "id=com.example:id/email" } },
+    });
     expect(parseArguments(["ui", "assert", "text=Done", "--state", "gone"])).toMatchObject({
       ok: true,
       options: { uiRequest: { action: "assert", selector: "text=Done", state: "gone" } },
@@ -565,6 +569,33 @@ describe("parseArguments", () => {
     expect(parseArguments(["ui", "swipe", "10", "20", "30", "40"])).toMatchObject({
       ok: true,
       options: { uiRequest: { action: "swipe", x1: 10, y1: 20, x2: 30, y2: 40 } },
+    });
+    expect(parseArguments(["ui", "scroll", "up", "id=com.example:id/list"])).toMatchObject({
+      ok: true,
+      options: {
+        uiRequest: {
+          action: "scroll",
+          direction: "up",
+          selector: "id=com.example:id/list",
+        },
+      },
+    });
+    expect(
+      parseArguments(["ui", "fill", "id=com.example:id/email", "person@example.com", "--submit"]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        uiRequest: {
+          action: "fill",
+          selector: "id=com.example:id/email",
+          text: "person@example.com",
+          submit: true,
+        },
+      },
+    });
+    expect(parseArguments(["ui", "clear", "id=com.example:id/email"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "clear", selector: "id=com.example:id/email" } },
     });
     expect(parseArguments(["ui", "type", "hello world", "--submit"])).toMatchObject({
       ok: true,

@@ -13,10 +13,14 @@ import { parseUiHierarchy, type UiHierarchySnapshot, type UiNode } from "./ui-hi
 
 export type UiAction =
   | "assert"
+  | "clear"
   | "compare"
+  | "fill"
   | "find"
+  | "get"
   | "long-press"
   | "press"
+  | "scroll"
   | "swipe"
   | "tap"
   | "type"
@@ -43,8 +47,25 @@ export type UiActionRequest =
   | { action: "swipe"; direction: UiDirection; dryRun?: boolean }
   | { action: "swipe"; x1: number; y1: number; x2: number; y2: number; dryRun?: boolean }
   | { action: "type"; text: string; submit?: boolean; dryRun?: boolean }
+  | {
+      action: "fill";
+      selector: UiSelector;
+      occurrence?: number;
+      text: string;
+      submit?: boolean;
+      dryRun?: boolean;
+    }
+  | { action: "clear"; selector: UiSelector; occurrence?: number; dryRun?: boolean }
   | { action: "press"; key: UiKey; dryRun?: boolean }
   | { action: "find"; selector: UiSelector; limit?: number }
+  | { action: "get"; selector: UiSelector; occurrence?: number }
+  | {
+      action: "scroll";
+      direction: UiDirection;
+      selector?: UiSelector;
+      occurrence?: number;
+      dryRun?: boolean;
+    }
   | { action: "assert"; selector: UiSelector; state?: UiWaitState }
   | { action: "compare"; digest: string }
   | { action: "wait"; selector: UiSelector; state?: UiWaitState; timeoutMs?: number };
@@ -66,10 +87,18 @@ export interface UiActionData {
   after?: UiSnapshotSummary;
   input: Record<string, boolean | number | string>;
   resolved?: { ref?: string; x: number; y: number };
-  verification: "planned" | "query-completed" | "selector-matched" | "ui-changed" | "ui-unchanged";
-  verificationGap?: "ui-unchanged";
-  matched?: Pick<UiNode, "className" | "contentDescription" | "ref" | "resourceId" | "text">;
-  matches?: Array<Pick<UiNode, "className" | "contentDescription" | "ref" | "resourceId" | "text">>;
+  verification:
+    | "planned"
+    | "query-completed"
+    | "selector-matched"
+    | "text-cleared"
+    | "text-matched"
+    | "text-mismatch"
+    | "ui-changed"
+    | "ui-unchanged";
+  verificationGap?: "text-mismatch" | "text-not-observable" | "ui-unchanged";
+  matched?: UiNode;
+  matches?: UiNode[];
   matchCount?: number;
   plan?: OperationPlan;
 }
@@ -166,6 +195,39 @@ async function screenSize(
   return observation.value;
 }
 
+async function supportsKeyCombination(
+  ready: Ready,
+  commandId: string,
+  problems: Problem[],
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const observation = await ready.client.targetCommand(
+    ready.target,
+    "ui-input-capabilities",
+    "Checking Android text input capabilities",
+    ["shell", "input", "help"],
+    (output) => /\bkeycombination\b/u.test(output),
+    signal,
+  );
+  if (!succeeded(observation.process)) {
+    problems.push(operationProblem("ui-input-capabilities", observation, commandId));
+    return false;
+  }
+  if (observation.value !== true) {
+    problems.push(
+      problem(
+        "UI_CLEAR_UNSUPPORTED",
+        "capability.ui.input",
+        "This Android target cannot safely replace existing field text through ADB.",
+        "Use ui tap followed by ui type to append text, or upgrade the target Android version.",
+        commandId,
+      ),
+    );
+    return false;
+  }
+  return true;
+}
+
 function validatePoint(
   point: { x: number; y: number },
   size: { width: number; height: number },
@@ -258,6 +320,41 @@ function resolveSelector(
   commandId: string,
   problems: Problem[],
 ): { ref: string; x: number; y: number; matched: UiNode } | undefined {
+  const node = selectUniqueNode(selector, occurrence, snapshot, commandId, problems);
+  if (node === undefined) return undefined;
+  const applicable =
+    node.enabled &&
+    (action === "long-press" ? node.longClickable : node.clickable || node.checkable) &&
+    node.bounds !== undefined &&
+    node.bounds.right > node.bounds.left &&
+    node.bounds.bottom > node.bounds.top;
+  if (!applicable || node.bounds === undefined) {
+    problems.push(
+      problem(
+        "UI_SELECTOR_NOT_ACTIONABLE",
+        "input.ui.selector",
+        `The selected UI node is not ${action === "tap" ? "clickable" : "long-clickable"}.`,
+        "Match an enabled actionable node or inspect the hierarchy for a better selector.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  return {
+    ref: node.ref,
+    x: Math.floor((node.bounds.left + node.bounds.right) / 2),
+    y: Math.floor((node.bounds.top + node.bounds.bottom) / 2),
+    matched: node,
+  };
+}
+
+function selectUniqueNode(
+  selector: UiSelector,
+  occurrence: number | undefined,
+  snapshot: UiHierarchySnapshot,
+  commandId: string,
+  problems: Problem[],
+): UiNode | undefined {
   const matches = snapshot.nodes.filter((node) => selectorMatch(selector, node));
   if (matches.length === 0) {
     problems.push(
@@ -306,32 +403,49 @@ function resolveSelector(
         commandId,
       ),
     );
-    return undefined;
   }
-  const applicable =
-    node.enabled &&
-    (action === "long-press" ? node.longClickable : node.clickable || node.checkable) &&
-    node.bounds !== undefined &&
-    node.bounds.right > node.bounds.left &&
-    node.bounds.bottom > node.bounds.top;
-  if (!applicable || node.bounds === undefined) {
-    problems.push(
-      problem(
-        "UI_SELECTOR_NOT_ACTIONABLE",
-        "input.ui.selector",
-        `The selected UI node is not ${action === "tap" ? "clickable" : "long-clickable"}.`,
-        "Match an enabled actionable node or inspect the hierarchy for a better selector.",
-        commandId,
-      ),
-    );
+  return node;
+}
+
+function nodeCenter(node: UiNode): { ref: string; x: number; y: number } | undefined {
+  const bounds = node.bounds;
+  if (bounds === undefined || bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
     return undefined;
   }
   return {
     ref: node.ref,
-    x: Math.floor((node.bounds.left + node.bounds.right) / 2),
-    y: Math.floor((node.bounds.top + node.bounds.bottom) / 2),
-    matched: node,
+    x: Math.floor((bounds.left + bounds.right) / 2),
+    y: Math.floor((bounds.top + bounds.bottom) / 2),
   };
+}
+
+function directionalPoints(
+  direction: UiDirection,
+  bounds: { left: number; top: number; right: number; bottom: number },
+): { x1: number; y1: number; x2: number; y2: number } {
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+  const point = (x: number, y: number): { x: number; y: number } => ({
+    x: Math.floor(bounds.left + width * x),
+    y: Math.floor(bounds.top + height * y),
+  });
+  const start =
+    direction === "up"
+      ? point(0.5, 0.8)
+      : direction === "down"
+        ? point(0.5, 0.2)
+        : direction === "left"
+          ? point(0.8, 0.5)
+          : point(0.2, 0.5);
+  const end =
+    direction === "up"
+      ? point(0.5, 0.2)
+      : direction === "down"
+        ? point(0.5, 0.8)
+        : direction === "left"
+          ? point(0.2, 0.5)
+          : point(0.8, 0.5);
+  return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
 }
 
 function remoteArgs(ready: Ready, config: CommandConfig, args: string[]): string[] {
@@ -426,13 +540,41 @@ async function delay(
 function compactNode(node: UiNode): NonNullable<UiActionData["matched"]> {
   return {
     ref: node.ref,
+    depth: node.depth,
     ...(node.resourceId === undefined ? {} : { resourceId: node.resourceId }),
     ...(node.text === undefined ? {} : { text: node.text }),
     ...(node.contentDescription === undefined
       ? {}
       : { contentDescription: node.contentDescription }),
     ...(node.className === undefined ? {} : { className: node.className }),
+    ...(node.packageName === undefined ? {} : { packageName: node.packageName }),
+    ...(node.bounds === undefined ? {} : { bounds: node.bounds }),
+    clickable: node.clickable,
+    checkable: node.checkable,
+    checked: node.checked,
+    enabled: node.enabled,
+    focusable: node.focusable,
+    focused: node.focused,
+    longClickable: node.longClickable,
+    password: node.password,
+    scrollable: node.scrollable,
+    selected: node.selected,
   };
+}
+
+function correspondingNode(node: UiNode, snapshot: UiHierarchySnapshot): UiNode | undefined {
+  if (node.resourceId !== undefined) {
+    const candidates = snapshot.nodes.filter(({ resourceId }) => resourceId === node.resourceId);
+    if (candidates.length === 1) return candidates[0];
+  }
+  return snapshot.nodes.find(
+    (candidate) =>
+      candidate.className === node.className &&
+      candidate.bounds?.left === node.bounds?.left &&
+      candidate.bounds?.top === node.bounds?.top &&
+      candidate.bounds?.right === node.bounds?.right &&
+      candidate.bounds?.bottom === node.bounds?.bottom,
+  );
 }
 
 export async function runUiAction(
@@ -446,19 +588,52 @@ export async function runUiAction(
   const ready = await readyTarget(current, config, dependencies, problems, signal);
   if (ready === undefined) return finish<UiActionData>(current, null, problems);
 
-  if (request.action === "find" || request.action === "assert" || request.action === "wait") {
-    if (normalizeSelector(request.selector) === undefined) {
+  const requestSelector = "selector" in request ? request.selector : undefined;
+  if (requestSelector !== undefined) {
+    if (normalizeSelector(requestSelector) === undefined) {
       problems.push(
         problem(
           "UI_SELECTOR_INVALID",
           "input.ui.selector",
-          `Invalid UI selector: ${selectorLabel(request.selector)}.`,
+          `Invalid UI selector: ${selectorLabel(requestSelector)}.`,
           "Use a bounded selector for id, text, description, class, or package.",
           current.commandId,
         ),
       );
       return finish<UiActionData>(current, null, problems);
     }
+  }
+
+  if (request.action === "get") {
+    const snapshot = await hierarchy(ready, current.commandId, problems, signal);
+    if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
+    const node = selectUniqueNode(
+      request.selector,
+      request.occurrence,
+      snapshot,
+      current.commandId,
+      problems,
+    );
+    if (node === undefined) return finish<UiActionData>(current, null, problems);
+    return finish(
+      current,
+      {
+        action: "get",
+        selected: ready.selected,
+        status: "matched",
+        verified: true,
+        attempts: 1,
+        after: summary(snapshot),
+        input: {
+          selector: selectorLabel(request.selector),
+          ...(request.occurrence === undefined ? {} : { occurrence: request.occurrence }),
+        },
+        verification: "selector-matched",
+        matchCount: 1,
+        matched: compactNode(node),
+      },
+      problems,
+    );
   }
 
   if (request.action === "find" || request.action === "assert") {
@@ -624,6 +799,8 @@ export async function runUiAction(
   let input: UiActionData["input"];
   let resolved: UiActionData["resolved"];
   let matched: UiActionData["matched"];
+  let matchedNode: UiNode | undefined;
+  const followingSteps: Array<{ id: string; title: string; args: string[] }> = [];
 
   if (request.action === "tap" || request.action === "long-press") {
     const size = await screenSize(ready, current.commandId, problems, signal);
@@ -643,6 +820,7 @@ export async function runUiAction(
       resolved =
         selected === undefined ? undefined : { ref: selected.ref, x: selected.x, y: selected.y };
       matched = selected === undefined ? undefined : compactNode(selected.matched);
+      matchedNode = selected?.matched;
       input = {
         selector: selectorLabel(request.selector),
         ...(request.occurrence === undefined ? {} : { occurrence: request.occurrence }),
@@ -667,26 +845,53 @@ export async function runUiAction(
             String(resolved.y),
             "750",
           ];
-  } else if (request.action === "swipe") {
+  } else if (request.action === "swipe" || request.action === "scroll") {
     const size = await screenSize(ready, current.commandId, problems, signal);
     if (size === undefined) return finish<UiActionData>(current, null, problems);
+    if (request.action === "scroll" && request.selector !== undefined) {
+      matchedNode = selectUniqueNode(
+        request.selector,
+        request.occurrence,
+        before,
+        current.commandId,
+        problems,
+      );
+      if (matchedNode === undefined) return finish<UiActionData>(current, null, problems);
+      if (!matchedNode.enabled || !matchedNode.scrollable || matchedNode.bounds === undefined) {
+        problems.push(
+          problem(
+            "UI_SELECTOR_NOT_SCROLLABLE",
+            "input.ui.selector",
+            "The selected UI node is not an enabled scroll container with valid bounds.",
+            "Inspect the hierarchy and select a node whose scrollable property is true.",
+            current.commandId,
+          ),
+        );
+        return finish<UiActionData>(current, null, problems);
+      }
+      matched = compactNode(matchedNode);
+    }
     const points =
-      "direction" in request
-        ? request.direction === "up"
-          ? { x1: 0.5, y1: 0.8, x2: 0.5, y2: 0.2 }
-          : request.direction === "down"
-            ? { x1: 0.5, y1: 0.2, x2: 0.5, y2: 0.8 }
-            : request.direction === "left"
-              ? { x1: 0.8, y1: 0.5, x2: 0.2, y2: 0.5 }
-              : { x1: 0.2, y1: 0.5, x2: 0.8, y2: 0.5 }
-        : request;
+      request.action === "scroll"
+        ? directionalPoints(
+            request.direction,
+            matchedNode?.bounds ?? { left: 0, top: 0, right: size.width, bottom: size.height },
+          )
+        : "direction" in request
+          ? directionalPoints(request.direction, {
+              left: 0,
+              top: 0,
+              right: size.width,
+              bottom: size.height,
+            })
+          : request;
     const startPoint = {
-      x: "direction" in request ? Math.floor(size.width * points.x1) : points.x1,
-      y: "direction" in request ? Math.floor(size.height * points.y1) : points.y1,
+      x: points.x1,
+      y: points.y1,
     };
     const endPoint = {
-      x: "direction" in request ? Math.floor(size.width * points.x2) : points.x2,
-      y: "direction" in request ? Math.floor(size.height * points.y2) : points.y2,
+      x: points.x2,
+      y: points.y2,
     };
     if (
       !validatePoint(startPoint, size, current.commandId, problems) ||
@@ -695,9 +900,17 @@ export async function runUiAction(
       return finish<UiActionData>(current, null, problems);
     }
     input =
-      "direction" in request
-        ? { direction: request.direction }
-        : { x1: request.x1, y1: request.y1, x2: request.x2, y2: request.y2 };
+      request.action === "scroll"
+        ? {
+            direction: request.direction,
+            ...(request.selector === undefined
+              ? {}
+              : { selector: selectorLabel(request.selector) }),
+            ...(request.occurrence === undefined ? {} : { occurrence: request.occurrence }),
+          }
+        : "direction" in request
+          ? { direction: request.direction }
+          : { x1: request.x1, y1: request.y1, x2: request.x2, y2: request.y2 };
     args = [
       "shell",
       "input",
@@ -708,6 +921,85 @@ export async function runUiAction(
       String(endPoint.y),
       "350",
     ];
+  } else if (request.action === "fill" || request.action === "clear") {
+    matchedNode = selectUniqueNode(
+      request.selector,
+      request.occurrence,
+      before,
+      current.commandId,
+      problems,
+    );
+    if (matchedNode === undefined) return finish<UiActionData>(current, null, problems);
+    resolved = nodeCenter(matchedNode);
+    const size = await screenSize(ready, current.commandId, problems, signal);
+    if (size === undefined) return finish<UiActionData>(current, null, problems);
+    if (!matchedNode.enabled || !matchedNode.focusable || resolved === undefined) {
+      problems.push(
+        problem(
+          "UI_SELECTOR_NOT_EDITABLE",
+          "input.ui.selector",
+          "The selected UI node is not an enabled focusable field with valid bounds.",
+          "Inspect the hierarchy and select the editable input node rather than its label.",
+          current.commandId,
+        ),
+      );
+      return finish<UiActionData>(current, null, problems);
+    }
+    if (!validatePoint(resolved, size, current.commandId, problems)) {
+      return finish<UiActionData>(current, null, problems);
+    }
+    if (request.action === "fill" && !SAFE_TEXT_PATTERN.test(request.text)) {
+      problems.push(
+        problem(
+          "UI_TEXT_UNSUPPORTED",
+          "input.ui.text",
+          "Text contains characters that cannot be typed safely through Android input.",
+          "Use 1-256 ASCII letters, numbers, spaces, or ._@+,:/- characters.",
+          current.commandId,
+        ),
+      );
+      return finish<UiActionData>(current, null, problems);
+    }
+    if (
+      request.dryRun !== true &&
+      config.dryRun !== true &&
+      !(await supportsKeyCombination(ready, current.commandId, problems, signal))
+    ) {
+      return finish<UiActionData>(current, null, problems);
+    }
+    matched = compactNode(matchedNode);
+    input = {
+      selector: selectorLabel(request.selector),
+      ...(request.occurrence === undefined ? {} : { occurrence: request.occurrence }),
+      ...(request.action === "fill" ? { text: request.text, submit: request.submit === true } : {}),
+    };
+    args = ["shell", "input", "tap", String(resolved.x), String(resolved.y)];
+    followingSteps.push(
+      {
+        id: "select-text",
+        title: "Select existing Android field text",
+        args: ["shell", "input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A"],
+      },
+      {
+        id: "clear-text",
+        title: "Clear selected Android field text",
+        args: ["shell", "input", "keyevent", "KEYCODE_DEL"],
+      },
+    );
+    if (request.action === "fill") {
+      followingSteps.push({
+        id: "type-text",
+        title: "Type Android field text",
+        args: ["shell", "input", "text", request.text.replaceAll(" ", "%s")],
+      });
+      if (request.submit === true) {
+        followingSteps.push({
+          id: "submit",
+          title: "Press Android enter key",
+          args: ["shell", "input", "keyevent", "KEYCODE_ENTER"],
+        });
+      }
+    }
   } else if (request.action === "type") {
     if (!SAFE_TEXT_PATTERN.test(request.text)) {
       problems.push(
@@ -724,6 +1016,13 @@ export async function runUiAction(
     const encoded = request.text.replaceAll(" ", "%s");
     input = { text: request.text, submit: request.submit === true };
     args = ["shell", "input", "text", encoded];
+    if (request.submit === true) {
+      followingSteps.push({
+        id: "submit",
+        title: "Press Android enter key",
+        args: ["shell", "input", "keyevent", "KEYCODE_ENTER"],
+      });
+    }
   } else if (request.action === "press") {
     input = { key: request.key };
     args = ["shell", "input", "keyevent", String(KEYCODES[request.key])];
@@ -740,17 +1039,13 @@ export async function runUiAction(
       executable: ready.adbPath,
       args: remoteArgs(ready, config, args),
     },
-    ...(request.action === "type" && request.submit === true
-      ? [
-          {
-            id: "submit",
-            title: "Press Android enter key",
-            risk: "device-reversible" as const,
-            executable: ready.adbPath,
-            args: remoteArgs(ready, config, ["shell", "input", "keyevent", "66"]),
-          },
-        ]
-      : []),
+    ...followingSteps.map((step) => ({
+      id: step.id,
+      title: step.title,
+      risk: "device-reversible" as const,
+      executable: ready.adbPath,
+      args: remoteArgs(ready, config, step.args),
+    })),
   ];
   if (request.dryRun === true || config.dryRun === true) {
     return finish(
@@ -772,49 +1067,90 @@ export async function runUiAction(
     );
   }
 
-  for (const [index, stepArgs] of [
-    args,
-    ...(request.action === "type" && request.submit === true
-      ? [["shell", "input", "keyevent", "66"]]
-      : []),
-  ].entries()) {
+  const commands = [
+    { id: `ui-${request.action}`, title: `Sending Android UI ${request.action}`, args },
+    ...followingSteps.map((step) => ({
+      id: `ui-${step.id}`,
+      title: step.title,
+      args: step.args,
+    })),
+  ];
+  for (const command of commands) {
     const operation = await ready.client.targetCommand(
       ready.target,
-      index === 0 ? `ui-${request.action}` : "ui-submit",
-      index === 0 ? `Sending Android UI ${request.action}` : "Submitting Android text input",
-      stepArgs,
+      command.id,
+      command.title,
+      command.args,
       () => undefined,
       signal,
     );
     if (!succeeded(operation.process)) {
-      problems.push(
-        operationProblem(
-          index === 0 ? `ui-${request.action}` : "ui-submit",
-          operation,
-          current.commandId,
-        ),
-      );
+      problems.push(operationProblem(command.id, operation, current.commandId));
       return finish<UiActionData>(current, null, problems);
     }
   }
   const after = await hierarchy(ready, current.commandId, problems, signal);
   if (after === undefined) return finish<UiActionData>(current, null, problems);
   const changed = before.digest !== after.digest;
+  const resultingNode =
+    matchedNode === undefined ? undefined : correspondingNode(matchedNode, after);
+  const textObservable =
+    (request.action === "fill" || request.action === "clear") &&
+    resultingNode !== undefined &&
+    !resultingNode.password;
+  const textVerified =
+    request.action === "fill" && textObservable
+      ? resultingNode.text === request.text
+      : request.action === "clear" && textObservable
+        ? resultingNode.text === undefined || resultingNode.text === ""
+        : undefined;
+  if (textVerified === false) {
+    problems.push(
+      problem(
+        "UI_TEXT_POSTCONDITION_FAILED",
+        "ui.text",
+        `Android accepted the ${request.action} input sequence, but the field value did not match afterward.`,
+        "Inspect the current hierarchy; the app or input method may have transformed or rejected the value.",
+        current.commandId,
+      ),
+    );
+  }
+  const verified =
+    request.action === "fill" || request.action === "clear" ? textVerified === true : changed;
+  const verification =
+    request.action === "fill" && textVerified === true
+      ? "text-matched"
+      : request.action === "clear" && textVerified === true
+        ? "text-cleared"
+        : textVerified === false
+          ? "text-mismatch"
+          : changed
+            ? "ui-changed"
+            : "ui-unchanged";
   return finish(
     current,
     {
       action: request.action,
       selected: ready.selected,
       status: "completed",
-      verified: changed,
+      verified,
       attempts: 1,
       before: summary(before),
       after: summary(after),
       input,
       ...(resolved === undefined ? {} : { resolved }),
       ...(matched === undefined ? {} : { matched }),
-      verification: changed ? "ui-changed" : "ui-unchanged",
-      ...(changed ? {} : { verificationGap: "ui-unchanged" as const }),
+      verification,
+      ...(verified
+        ? {}
+        : {
+            verificationGap:
+              textVerified === false
+                ? ("text-mismatch" as const)
+                : request.action === "fill" || request.action === "clear"
+                  ? ("text-not-observable" as const)
+                  : ("ui-unchanged" as const),
+          }),
     },
     problems,
   );

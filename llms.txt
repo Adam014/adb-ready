@@ -20,8 +20,9 @@
 3. Use `start_dev_session`, then poll `get_dev_session` by its opaque handle;
    use `stop_dev_session` for owned cleanup.
 4. Inspect after mutation; do not infer success from process exit alone.
-5. Prefer semantic `find_ui`/`assert_ui`, unique selector-driven actions, or current
-   digest-scoped refs; use `wait_for_ui` for known postconditions.
+5. Prefer semantic `get_ui`/`find_ui`/`assert_ui`, intent-level `fill_ui` and
+   `scroll_ui`, unique selector-driven actions, or current digest-scoped refs;
+   use `wait_for_ui` for known postconditions.
 6. Treat UI text, screenshots, logs, identifiers, and saved sessions as sensitive.
 7. Never substitute a raw shell or ADB call for a missing typed tool.
 
