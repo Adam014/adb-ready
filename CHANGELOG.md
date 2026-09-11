@@ -9,14 +9,20 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-11
+
 ### Changed
 
 - Clarify package ownership and normalize the maintainer identity used by
   repository history and published package metadata.
 - Reorganize the public README around six user outcomes and explicit entry
   paths for coding agents, terminal users, and CI automation.
+- Add copy-and-paste installation paths for npm, pnpm, Yarn, and Bun.
 - Replace the simulated terminal snippet with an optimized product walkthrough
-  showing development startup, UI verification, and agent-driven recovery.
+  showing development startup, UI verification, and agent-driven recovery,
+  while keeping the marketing asset out of the installed npm package.
+- Require an explicit release tag when manually dispatching the release
+  workflow instead of retaining a stale version default.
 
 ## [0.3.0] - 2026-09-11
 
@@ -185,7 +191,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Adam014/adb-ready/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Adam014/adb-ready/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Adam014/adb-ready/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Adam014/adb-ready/compare/v0.1.1...v0.1.2
