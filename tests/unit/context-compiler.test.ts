@@ -108,6 +108,25 @@ describe("compileSessionContext", () => {
     expect(compiled.markdown).not.toContain("old target");
   });
 
+  test("compacts repeated routine health evidence without hiding warnings", () => {
+    const health = Array.from({ length: 8 }, (_, index) => ({
+      ...event(index + 1, "debug", "Android target is healthy"),
+      source: "target",
+      type: "target.health",
+    }));
+    const warnings = [
+      event(9, "warning", "Target briefly disappeared"),
+      event(10, "warning", "Target briefly disappeared"),
+    ];
+
+    const compiled = compileSessionContext(manifest, [...health, ...warnings]);
+
+    expect(compiled).toMatchObject({ includedEvents: 3, compactedEvents: 7 });
+    expect(compiled.markdown.match(/Android target is healthy/gu)).toHaveLength(1);
+    expect(compiled.markdown).toContain('"repeatedCount":8');
+    expect(compiled.markdown.match(/Target briefly disappeared/gu)).toHaveLength(2);
+  });
+
   test("rejects budgets too small for a useful diagnostic artifact", () => {
     expect(() => compileSessionContext(manifest, [], { characterBudget: 999 })).toThrow(
       "at least 1000",

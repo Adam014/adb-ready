@@ -38,6 +38,13 @@ export interface SessionCommandDependencies {
   idFactory?: () => string;
 }
 
+export interface SessionListFilter {
+  status?: SessionManifest["status"];
+  preset?: string;
+  sinceMs?: number;
+  limit?: number;
+}
+
 export interface SessionCommandExecution<T> {
   result: ResultEnvelope<T>;
   exitCode: number;
@@ -124,12 +131,22 @@ export async function runSessionCommand(
   sessionId: string | undefined,
   options: SessionStoreOptions = {},
   dependencies: SessionCommandDependencies = {},
+  filter: SessionListFilter = {},
 ): Promise<SessionCommandExecution<SessionCommandData>> {
   const command = `sessions ${action}`;
   if (action === "list") {
     const listed = await listSessions(options);
+    const now = (dependencies.clock ?? (() => new Date()))().getTime();
+    const cutoff = filter.sinceMs === undefined ? undefined : now - filter.sinceMs;
+    const matching = listed.ok
+      ? listed.value
+          .filter((session) => filter.status === undefined || session.status === filter.status)
+          .filter((session) => filter.preset === undefined || session.preset === filter.preset)
+          .filter((session) => cutoff === undefined || Date.parse(session.updatedAt) >= cutoff)
+      : [];
+    const sessions = filter.limit === undefined ? matching : matching.slice(0, filter.limit);
     return listed.ok
-      ? execution(command, { action, sessions: listed.value }, [], dependencies)
+      ? execution(command, { action, sessions }, [], dependencies)
       : execution<SessionCommandData>(
           command,
           null,

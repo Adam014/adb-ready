@@ -46,6 +46,13 @@ breaking changes.
   sessions continue outside one tool call, survive client reconnects, report
   heartbeats and terminal exit state, and stop only their verified owned
   process group.
+- Add status, recency, preset, and count filters to project-scoped session
+  history.
+
+### Changed
+
+- Compact repeated successful health checks in bounded AI context while
+  preserving the complete redacted NDJSON timeline as source evidence.
 
 ### Fixed
 

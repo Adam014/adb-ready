@@ -269,6 +269,35 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses bounded session history filters", () => {
+    expect(
+      parseArguments([
+        "sessions",
+        "list",
+        "--status",
+        "failed",
+        "--since",
+        "2h",
+        "--preset",
+        "expo",
+        "--limit",
+        "5",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        sessionStatus: "failed",
+        sessionSinceMs: 7_200_000,
+        preset: "expo",
+        sessionLimit: 5,
+      },
+    });
+    expect(parseArguments(["sessions", "show", "--limit", "5"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("parses targeted logcat filters", () => {
     expect(
       parseArguments([

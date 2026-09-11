@@ -141,6 +141,7 @@ Running `adb-ready` without a command opens the interactive workflow home.
 | connect Codex, Claude Code, Cursor, Copilot, or Windsurf    | [`adb-ready agent setup`](./docs/agent-integration.md#connect-an-agent)             |
 | share project settings without a custom shell script        | [Configuration](./docs/configuration.md)                                            |
 | use ADB Ready from CI or another tool                       | [Automation contract](./docs/automation.md)                                         |
+| run one smoke test and keep its logs, result, and report    | [`adb-ready run`](./docs/automation.md#run-one-bounded-verification)                 |
 | fix a known setup or target problem                         | [Troubleshooting](./docs/troubleshooting.md)                                        |
 
 ## What happens in `adb-ready dev`?
@@ -180,6 +181,7 @@ separate deterministic contract:
 adb-ready devices --json --non-interactive
 adb-ready logs --package com.example.app --format ndjson
 adb-ready context --since 5m --only problems,recovery,logs
+adb-ready sessions list --status failed --since 24h --limit 5
 ```
 
 - machine data on `stdout`, human diagnostics on `stderr`;

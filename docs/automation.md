@@ -117,6 +117,33 @@ adb-ready dev --port 8081 --dry-run --json
 Plan steps declare their risk. A dry run performs no pairing, connection,
 mapping, hook, or child-process mutation.
 
+## Run one bounded verification
+
+Use `run` when CI or an agent must prove a workflow and then exit instead of
+leaving a development server open:
+
+```bash
+adb-ready run --preset expo --run-timeout 10m -- \
+  maestro test .maestro/smoke.yaml
+```
+
+ADB Ready selects and exclusively leases one target, prepares the configured
+ports and development command, waits for every readiness assertion, runs the
+exact command after `--`, and cleans only the resources it created. It never
+retries a failed product assertion as if it were an infrastructure failure.
+
+Every executed run prints the path to a project-local evidence directory under
+`.adb-ready/artifacts/`. Its manifest references the structured result,
+timeline, problems, focused logcat, bounded AI context, JUnit XML, and a concise
+GitHub Actions summary. The evidence remains available when readiness or the
+verification command fails.
+
+Preview the complete project plan before a device is allocated:
+
+```bash
+adb-ready run --preset expo --dry-run --json -- npm run test:e2e
+```
+
 ## CI example
 
 ```yaml

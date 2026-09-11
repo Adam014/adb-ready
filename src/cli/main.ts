@@ -333,6 +333,12 @@ when no ID is provided. History is scoped to the current project unless
 Inspects private, redacted development history. Show and events use the latest
 session from the current project when no ID is provided. Use --all-projects for
 an explicit cross-project audit.
+
+List filters:
+  --status STATUS        running, completed, failed, or interrupted
+  --since DURATION       Keep sessions updated in the final window
+  --preset NAME          Keep sessions using one development preset
+  --limit COUNT          Return at most 1-100 sessions
 `,
 } as const;
 
@@ -834,6 +840,14 @@ async function runCliInternal(
               options.sessionId,
               storeOptions,
               dependencies,
+              {
+                ...(options.sessionStatus === undefined ? {} : { status: options.sessionStatus }),
+                ...(options.sessionSinceMs === undefined
+                  ? {}
+                  : { sinceMs: options.sessionSinceMs }),
+                ...(options.preset === undefined ? {} : { preset: options.preset }),
+                ...(options.sessionLimit === undefined ? {} : { limit: options.sessionLimit }),
+              },
             )
           : await runProblemsCommand(options.sessionId, storeOptions, dependencies);
     renderResult(execution.result, {

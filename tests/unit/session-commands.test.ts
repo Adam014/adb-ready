@@ -61,6 +61,14 @@ describe("session history commands", () => {
         action: "list",
         sessions: [{ sessionId: "session-1" }, { sessionId: "session-0" }],
       });
+      const filtered = await runSessionCommand("list", undefined, store, dependencies, {
+        status: "failed",
+        sinceMs: 3_600_000,
+        limit: 1,
+      });
+      expect(filtered.result.data).toMatchObject({
+        sessions: [{ sessionId: "session-1", status: "failed" }],
+      });
       const shown = await runSessionCommand("show", undefined, store, dependencies);
       expect(shown.result.data).toMatchObject({
         action: "show",

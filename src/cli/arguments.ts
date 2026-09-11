@@ -83,6 +83,9 @@ export interface CliOptions {
   runTimeoutMs?: number;
   sessionAction?: "events" | "list" | "show";
   sessionId?: string;
+  sessionStatus?: "completed" | "failed" | "interrupted" | "running";
+  sessionSinceMs?: number;
+  sessionLimit?: number;
   logPackage?: string;
   logPid?: number;
   logTags?: string[];
@@ -284,6 +287,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let runTimeoutMs: number | undefined;
   let sessionAction: CliOptions["sessionAction"];
   let sessionId: string | undefined;
+  let sessionStatus: CliOptions["sessionStatus"];
+  let sessionSinceMs: number | undefined;
+  let sessionLimit: number | undefined;
   let logPackage: string | undefined;
   let logPid: number | undefined;
   const logTags: string[] = [];
@@ -703,15 +709,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     } else if (option === "--since") {
       const value = readValue();
       if (typeof value !== "string") return value;
-      if (command === "context") {
-        contextSinceMs = parseDuration(value);
-        if (contextSinceMs === undefined) {
+      if (command === "context" || command === "sessions") {
+        const parsed = parseDuration(value);
+        if (parsed === undefined) {
           return failure(
             "CLI_INVALID_VALUE",
-            `Invalid context duration: ${value}. Use a value such as 30s, 5m, or 1h.`,
+            `Invalid duration: ${value}. Use a value such as 30s, 5m, or 1h.`,
             option,
           );
         }
+        if (command === "context") contextSinceMs = parsed;
+        else sessionSinceMs = parsed;
       } else if (!/^[0-9][0-9 .:-]{0,63}$/u.test(value)) {
         return failure(
           "CLI_INVALID_VALUE",
@@ -721,6 +729,38 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       } else {
         logSince = value;
       }
+    } else if (option === "--status") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (
+        command !== "sessions" ||
+        !new Set(["completed", "failed", "interrupted", "running"]).has(value)
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid session status: ${value}. Expected running, completed, failed, or interrupted.`,
+          option,
+        );
+      }
+      sessionStatus = value as NonNullable<CliOptions["sessionStatus"]>;
+    } else if (option === "--limit") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (
+        command !== "sessions" ||
+        !/^\d+$/u.test(value) ||
+        !Number.isSafeInteger(parsed) ||
+        parsed < 1 ||
+        parsed > 100
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid session limit: ${value}. Expected an integer from 1 to 100.`,
+          option,
+        );
+      }
+      sessionLimit = parsed;
     } else if (option === "--only") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -957,6 +997,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (command === "config") configAction ??= "validate";
   if (command === "context" && format === "human") format = "markdown";
   if (command === "sessions") sessionAction ??= "list";
+  if (
+    command === "sessions" &&
+    sessionAction !== "list" &&
+    (sessionStatus !== undefined || sessionSinceMs !== undefined || sessionLimit !== undefined)
+  ) {
+    return failure("CLI_USAGE", "--status, --since, and --limit apply only to sessions list.");
+  }
   const targetCommand =
     command === "app" ||
     command === "apps" ||
@@ -1234,7 +1281,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command !== "dev" &&
     command !== "run" &&
     command !== "init" &&
-    (preset !== undefined ||
+    ((preset !== undefined && command !== "sessions") ||
       packageManager !== undefined ||
       reversePorts.length > 0 ||
       logs !== undefined ||
@@ -1329,6 +1376,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
       ...(sessionAction === undefined ? {} : { sessionAction }),
       ...(sessionId === undefined ? {} : { sessionId }),
+      ...(sessionStatus === undefined ? {} : { sessionStatus }),
+      ...(sessionSinceMs === undefined ? {} : { sessionSinceMs }),
+      ...(sessionLimit === undefined ? {} : { sessionLimit }),
       ...(logPackage === undefined ? {} : { logPackage }),
       ...(logPid === undefined ? {} : { logPid }),
       ...(logTags.length === 0 ? {} : { logTags }),
