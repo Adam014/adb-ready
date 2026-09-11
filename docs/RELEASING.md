@@ -79,12 +79,14 @@ Do not create or move the final tag until this rehearsal is green.
 
 1. Create a draft GitHub release for the exact `vVERSION` tag on the audited
    release commit.
-2. Dispatch the workflow itself from that immutable tag. Publish mode rejects a
-   branch-based workflow run even if its checkout input points to a tag:
+2. Dispatch the audited workflow from protected `main` while selecting the
+   immutable tag as the release target. Publish mode rejects every other branch,
+   requires the checkout to resolve to that exact tag commit, and also permits a
+   self-contained dispatch from the matching tag:
 
    ```bash
    gh workflow run release.yml \
-     --ref vVERSION \
+     --ref main \
      -f mode=publish \
      -f release_tag=vVERSION \
      -f ref=vVERSION

@@ -17,6 +17,8 @@ breaking changes.
   has a matching draft GitHub release.
 - Isolate the push-level permission needed to inspect that draft release in a
   preflight job that never checks out or executes repository code.
+- Allow the audited workflow on protected `main` to promote an exact immutable
+  release tag, so release-infrastructure fixes never require moving that tag.
 - Document Deno's 24-hour minimum dependency age and the explicit override
   reserved for immediate post-publish verification.
 - Enforce 90% LCOV line and function coverage floors in the authoritative
