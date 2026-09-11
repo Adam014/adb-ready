@@ -83,6 +83,15 @@ jobs:
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/tests/fixtures/setup-node-auth.npmrc
         run: bun run verify
 
+      - name: Preserve coverage report
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-coverage
+          path: coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 14
+
   node-compatibility:
     name: Node.js ${{ matrix.node }} artifact
     runs-on: ubuntu-latest

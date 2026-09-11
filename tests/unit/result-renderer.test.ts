@@ -306,4 +306,288 @@ describe("result renderer", () => {
     expect(sink.value).toContain("Interrupted safely in 10ms");
     expect(sink.value).not.toContain("Failed in");
   });
+
+  test("renders every public result family in both human and stable plain output", () => {
+    const target = {
+      id: "target-1",
+      name: "Pixel 9",
+      serial: "USB-1",
+      state: "device",
+      transports: [{ serial: "USB-1", state: "device", kind: "usb", stable: true }],
+    };
+    const selected = { target, transport: { serial: "USB-1", transportId: "7" } };
+    const session = {
+      sessionId: "session-1",
+      status: "completed",
+      planScope: "target",
+      selected,
+      project: { root: "/workspace/app", name: "demo" },
+      preset: "expo",
+      ports: { requested: [], created: [], reused: [] },
+      command: { executable: "npm", args: ["run", "start"] },
+      child: { exitCode: 0, signal: null },
+      readiness: { ready: true, assertions: [{ status: "passed" }] },
+      verification: { passed: true, timedOut: false, exitCode: 0 },
+      journal: { events: [], dropped: 0 },
+      recovery: { failed: false, recoveries: 0 },
+    };
+    const fixtures: Array<{ command: string; data: unknown; expected: string }> = [
+      {
+        command: "doctor",
+        data: {
+          runtime: { name: "node", version: "22", platform: "linux", architecture: "x64" },
+          adb: { path: "/sdk/adb", version: { platformToolsVersion: "37" }, hostFeatures: [] },
+          devices: [],
+          targets: [],
+          discovery: { mdns: { services: [] } },
+        },
+        expected: "Runtime",
+      },
+      {
+        command: "connect",
+        data: {
+          endpoint: "10.0.0.2:4000",
+          serial: "10.0.0.2:4000",
+          state: "device",
+          hardwareSerial: "PHONE-1",
+        },
+        expected: "Connected",
+      },
+      { command: "dev", data: session, expected: "Session" },
+      {
+        command: "run",
+        data: { outcome: "success", evidence: { path: ".adb-ready/evidence.json" }, session },
+        expected: "Outcome",
+      },
+      {
+        command: "logs",
+        data: {
+          selected,
+          filters: ["*:W"],
+          packageName: "com.example",
+          uid: 10_001,
+          pid: 123,
+          buffers: ["main"],
+          records: [{ raw: "W/App: warning" }],
+          dropped: 1,
+          findings: [{ code: "ANDROID_CRASH", summary: "Crash found" }],
+        },
+        expected: "Findings",
+      },
+      {
+        command: "apps list",
+        data: { selected, scope: "user", filter: "example", packages: [{ name: "com.example" }] },
+        expected: "Packages",
+      },
+      {
+        command: "app resolve",
+        data: {
+          action: "resolve",
+          resolution: {
+            kind: "resolved",
+            applicationId: "com.example",
+            provenance: { source: "config", location: "adb-ready.json" },
+          },
+        },
+        expected: "Source",
+      },
+      {
+        command: "app info",
+        data: {
+          action: "info",
+          selected,
+          applicationId: "com.example",
+          package: {
+            applicationId: "com.example",
+            installed: true,
+            versionName: "1.0",
+            debuggable: true,
+          },
+          foreground: { applicationId: "com.example", activity: ".MainActivity" },
+        },
+        expected: "Foreground",
+      },
+      {
+        command: "app launch",
+        data: {
+          action: "launch",
+          selected,
+          applicationId: "com.example",
+          status: "completed",
+          verified: true,
+          activity: ".MainActivity",
+        },
+        expected: "verified",
+      },
+      {
+        command: "open",
+        data: { selected, url: "demo://ready", status: "planned", verified: false },
+        expected: "no changes made",
+      },
+      {
+        command: "capture screenshot",
+        data: {
+          kind: "screenshot",
+          selected,
+          evidence: {
+            path: "screen.png",
+            mediaType: "image/png",
+            bytes: 100,
+            sha256: "a".repeat(64),
+          },
+        },
+        expected: "SHA-256",
+      },
+      {
+        command: "inspect app",
+        data: {
+          kind: "app",
+          selected,
+          app: {
+            package: { applicationId: "com.example", versionName: "1.0" },
+            foreground: { applicationId: "com.example", activity: ".MainActivity" },
+          },
+          logs: { available: true, records: [], findings: [] },
+        },
+        expected: "Privacy",
+      },
+      {
+        command: "inspect ui",
+        data: {
+          kind: "ui",
+          selected,
+          snapshot: {
+            digest: "b".repeat(64),
+            complete: true,
+            returnedNodes: 1,
+            totalNodes: 1,
+            truncated: false,
+            nodes: [{ ref: "ui:bbbbbbbbbbbb:1", text: "Ready" }],
+          },
+        },
+        expected: "Nodes",
+      },
+      {
+        command: "ui tap",
+        data: {
+          action: "tap",
+          selected,
+          status: "completed",
+          verified: true,
+          verification: "ui-changed",
+          attempts: 1,
+          resolved: { ref: "ui:aaaaaaaaaaaa:1", x: 10, y: 20 },
+          before: { digest: "a".repeat(64) },
+          after: { digest: "b".repeat(64) },
+        },
+        expected: "UI digest",
+      },
+      {
+        command: "sessions list",
+        data: {
+          action: "list",
+          sessions: [
+            {
+              sessionId: "session-1",
+              status: "completed",
+              updatedAt: "2026-09-10",
+              preset: "expo",
+              projectFingerprint: "project",
+            },
+          ],
+        },
+        expected: "Sessions (1)",
+      },
+      {
+        command: "sessions show",
+        data: {
+          action: "show",
+          session: {
+            sessionId: "session-1",
+            status: "completed",
+            startedAt: "2026-09-10",
+            eventCount: 0,
+            eventBytes: 0,
+          },
+        },
+        expected: "Started",
+      },
+      {
+        command: "problems",
+        data: { sessionId: "session-1", status: "completed", problems: [] },
+        expected: "No recorded problems",
+      },
+      {
+        command: "context",
+        data: {
+          sessionId: "session-1",
+          status: "completed",
+          markdown: "# Context\n",
+          characterCount: 10,
+          includedEvents: 1,
+          omittedEvents: 2,
+          filteredEvents: 3,
+        },
+        expected: "Privacy",
+      },
+      {
+        command: "init",
+        data: { status: "created", path: "adb-ready.json", document: {}, detectedPreset: "expo" },
+        expected: "Preset",
+      },
+      {
+        command: "agent setup",
+        data: {
+          client: "codex",
+          status: "created",
+          path: ".codex/config.toml",
+          format: "toml",
+          scope: "project",
+          content: "[mcp_servers.adb_ready]\n",
+          next: "Restart Codex",
+        },
+        expected: "Next:",
+      },
+      {
+        command: "config explain",
+        data: {
+          action: "explain",
+          valid: true,
+          files: { project: "adb-ready.json", user: "/user/config.json" },
+          values: [{ key: "preset", value: "expo", source: "project", location: "adb-ready.json" }],
+        },
+        expected: "Resolved values (1)",
+      },
+      {
+        command: "pair",
+        data: { paired: true, endpoint: "10.0.0.2:4001" },
+        expected: "Paired",
+      },
+    ];
+
+    for (const item of fixtures) {
+      const envelope: ResultEnvelope<unknown> = {
+        ...result,
+        command: item.command,
+        data: item.data,
+      };
+      const human = new MemorySink();
+      const plain = new MemorySink();
+      renderResult(envelope, { format: "human", capabilities, sink: human });
+      renderResult(envelope, { format: "plain", capabilities, sink: plain });
+      expect(human.value).toContain(item.expected);
+      expect(plain.value).toContain(`command=${item.command}`);
+    }
+
+    const markdown = new MemorySink();
+    renderResult(
+      {
+        ...result,
+        command: "context",
+        data: fixtures.find(({ command }) => command === "context")?.data,
+      },
+      { format: "markdown", capabilities, sink: markdown },
+    );
+    expect(markdown.value).toBe("# Context\n");
+  });
 });

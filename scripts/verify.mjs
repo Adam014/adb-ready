@@ -23,7 +23,7 @@ const steps = [
   ["public documentation", "bun", ["run", "scripts/docs-check.mjs"]],
   ["TypeScript", "bun", ["run", "typecheck"]],
   ["Biome", "bun", ["run", "lint"]],
-  ["unit and integration tests", "bun", ["test"]],
+  ["unit and integration coverage", "bun", ["run", "test:coverage"]],
   ["production build", "bun", ["run", "build"]],
   ["MCP stdio protocol", "node", ["scripts/mcp-smoke.mjs"]],
   ["static UI scenarios", "bun", ["run", "scripts/ui-playground.ts", "--all", "--non-interactive"]],

@@ -35,6 +35,7 @@ function fixture(
     idFactory: () => `id-${String(++id)}`,
     clock: () => new Date("2026-09-10T10:00:00.000Z"),
     locateAdb: async () => "/sdk/adb",
+    sleep: async () => false,
     detectProject: async () => ({
       root: "/project",
       presetEvidence: [],
@@ -80,6 +81,199 @@ function fixture(
 }
 
 describe("app commands", () => {
+  test("plans every app mutation with exact target-scoped ADB arguments", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-app-plans-"));
+    await writeFile(path.join(root, "base.apk"), "apk");
+    await writeFile(path.join(root, "config.apk"), "apk");
+    try {
+      const planned = await Promise.all([
+        runApp(
+          {
+            action: "install",
+            cwd: root,
+            artifactPaths: ["base.apk", "config.apk"],
+            applicationId: "com.example.app",
+            replace: true,
+            grantRuntimePermissions: true,
+          },
+          { dryRun: true, adbHost: "127.0.0.2", adbPort: 5038 },
+          fixture(),
+        ),
+        runApp(
+          { action: "launch", cwd: root, applicationId: "com.example.app" },
+          { dryRun: true },
+          fixture(),
+        ),
+        runApp(
+          {
+            action: "restart",
+            cwd: root,
+            applicationId: "com.example.app",
+            activity: ".MainActivity",
+          },
+          { dryRun: true },
+          fixture(),
+        ),
+        runApp(
+          { action: "stop", cwd: root, applicationId: "com.example.app" },
+          { dryRun: true },
+          fixture(),
+        ),
+        runApp(
+          { action: "clear-data", cwd: root, applicationId: "com.example.app" },
+          { dryRun: true },
+          fixture(),
+        ),
+        runApp(
+          { action: "uninstall", cwd: root, applicationId: "com.example.app" },
+          { dryRun: true },
+          fixture(),
+        ),
+      ]);
+      for (const execution of planned) {
+        expect(execution.result).toMatchObject({ ok: true, data: { status: "planned" } });
+        expect(execution.result.data).toHaveProperty("plan.dryRun", true);
+      }
+      expect(planned[0]?.result.data).toMatchObject({
+        plan: { steps: [{ id: "install-split-apks" }, { id: "verify-installed-package" }] },
+      });
+      expect(planned[2]?.result.data).toMatchObject({
+        plan: {
+          steps: [
+            { id: "stop-app" },
+            { id: "verify-app-stopped" },
+            { id: "launch-app" },
+            { id: "verify-app-foreground" },
+          ],
+        },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects missing, unreadable, and unverifiable install artifacts before mutation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-app-invalid-"));
+    try {
+      const invalid = await runApp(
+        { action: "install", cwd: root, artifactPath: "bundle.aab" },
+        {},
+        fixture(),
+      );
+      expect(invalid.result.problems[0]?.code).toBe("APP_ARTIFACT_INVALID");
+
+      const missing = await runApp(
+        { action: "install", cwd: root, artifactPath: "missing.apk" },
+        {},
+        fixture(),
+      );
+      expect(missing.result.problems[0]?.code).toBe("APP_ARTIFACT_NOT_FOUND");
+
+      await writeFile(path.join(root, "app.apk"), "apk");
+      const unresolved = await runApp(
+        { action: "install", cwd: root, artifactPath: "app.apk" },
+        { dryRun: true },
+        fixture(),
+      );
+      expect(unresolved.result.problems[0]?.code).toBe("APP_ID_NOT_FOUND");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reports package, activity, stop, launch, and URL postcondition failures", async () => {
+    const packageFailure = await runApps(
+      "system",
+      "example",
+      {},
+      fixture((request) =>
+        request.args?.includes("packages") ? result(request, "", 1) : undefined,
+      ),
+    );
+    expect(packageFailure.result.problems[0]?.code).toBeDefined();
+
+    const noActivity = await runApp(
+      { action: "launch", cwd: "/project", applicationId: "com.example.app" },
+      {},
+      fixture((request) =>
+        request.args?.includes("resolve-activity") ? result(request, "", 1) : undefined,
+      ),
+    );
+    expect(noActivity.result.problems[0]?.code).toBe("APP_ACTIVITY_NOT_FOUND");
+
+    const stopFailed = await runApp(
+      { action: "stop", cwd: "/project", applicationId: "com.example.app" },
+      {},
+      fixture((request) =>
+        request.args?.includes("force-stop") ? result(request, "", 1) : undefined,
+      ),
+    );
+    expect(stopFailed.result.ok).toBeFalse();
+
+    const stopUnverified = await runApp(
+      { action: "stop", cwd: "/project", applicationId: "com.example.app" },
+      {},
+      fixture((request) =>
+        request.args?.includes("pidof") ? result(request, "321\n") : undefined,
+      ),
+    );
+    expect(stopUnverified.result.problems[0]?.code).toBe("APP_STOP_UNVERIFIED");
+
+    const launchUnverified = await runApp(
+      {
+        action: "launch",
+        cwd: "/project",
+        applicationId: "com.example.app",
+        activity: ".MainActivity",
+      },
+      {},
+      fixture((request) =>
+        request.args?.includes("activities")
+          ? result(request, "mResumedActivity: ActivityRecord{42 u0 com.other/.MainActivity t12}\n")
+          : undefined,
+      ),
+    );
+    expect(launchUnverified.result.problems[0]?.code).toBe("APP_LAUNCH_UNVERIFIED");
+
+    expect((await runOpen("not a URL", undefined, {}, fixture())).result.problems[0]?.code).toBe(
+      "APP_URL_INVALID",
+    );
+    const openUnverified = await runOpen(
+      "https://example.com",
+      "com.example.app",
+      {},
+      fixture((request) =>
+        request.args?.includes("activities")
+          ? result(request, "mResumedActivity: ActivityRecord{42 u0 com.other/.Main t12}\n")
+          : undefined,
+      ),
+    );
+    expect(openUnverified.result.problems[0]?.code).toBe("APP_OPEN_UNVERIFIED");
+  });
+
+  test("plans URLs with and without an explicit verified handler", async () => {
+    const generic = await runOpen(
+      "https://example.com/path",
+      undefined,
+      { dryRun: true },
+      fixture(),
+    );
+    const explicit = await runOpen(
+      "myapp://orders/42",
+      "com.example.app",
+      { dryRun: true },
+      fixture(),
+    );
+    expect(generic.result.data).toMatchObject({
+      status: "planned",
+      plan: { steps: [{ id: "open-url" }] },
+    });
+    expect(explicit.result.data).toMatchObject({
+      status: "planned",
+      plan: { steps: [{ id: "open-url" }, { id: "verify-app-foreground" }] },
+    });
+  });
+
   test("lists bounded user packages on one deterministic target", async () => {
     const execution = await runApps("user", undefined, {}, fixture());
     expect(execution.exitCode).toBe(ExitCode.Success);

@@ -207,4 +207,88 @@ describe("target selection", () => {
       selection: { transport: { transportId: "9" } },
     });
   });
+
+  test("fails closed across transport, target-id, and remembered-identity edge cases", () => {
+    const ready = buildTargetInventory([
+      {
+        device: device("USB-1", { transportId: "7" }),
+        hardwareSerial: "PHONE-1",
+      },
+    ]).targets[0];
+    const offline = buildTargetInventory([
+      {
+        device: device("USB-2", { state: "offline", transportId: "8" }),
+        hardwareSerial: "PHONE-2",
+      },
+    ]).targets[0];
+    expect(ready).toBeDefined();
+    expect(offline).toBeDefined();
+    if (ready === undefined || offline === undefined) throw new Error("Expected target fixtures");
+
+    expect(selectTarget([offline], { transportId: "8" })).toMatchObject({ kind: "unavailable" });
+    expect(selectTarget([ready], { transportId: "missing" })).toEqual({
+      kind: "not-found",
+      selector: "missing",
+    });
+    expect(selectTarget([ready], { selector: ready.id })).toMatchObject({
+      kind: "selected",
+      selection: { reason: "explicit" },
+    });
+    expect(selectTarget([offline], { selector: offline.id })).toMatchObject({
+      kind: "unavailable",
+    });
+
+    const duplicate = buildTargetInventory([
+      { device: device("USB-3", { transportId: "11" }) },
+      { device: device("USB-3", { transportId: "12" }) },
+    ]).targets;
+    expect(selectTarget(duplicate, { rememberedSerial: "USB-3" })).toMatchObject({
+      kind: "duplicate",
+    });
+    const duplicateTarget = duplicate[0];
+    expect(duplicateTarget).toBeDefined();
+    if (duplicateTarget === undefined) throw new Error("Expected duplicate target fixture");
+    expect(selectTarget(duplicate, { selector: duplicateTarget.id })).toMatchObject({
+      kind: "duplicate",
+    });
+
+    const sameIdentity = [
+      { ...ready, id: "ready-copy", serial: "USB-4" },
+      { ...ready, id: "ready-copy-2", serial: "USB-5" },
+    ];
+    expect(
+      selectTarget(sameIdentity, {
+        rememberedSerial: "missing",
+        rememberedHardwareSerial: "PHONE-1",
+      }),
+    ).toMatchObject({ kind: "ambiguous" });
+    expect(selectTarget(sameIdentity, { rememberedHardwareSerial: "PHONE-1" })).toMatchObject({
+      kind: "ambiguous",
+    });
+
+    expect(
+      selectTarget([offline], {
+        rememberedSerial: "missing",
+        rememberedHardwareSerial: "PHONE-2",
+        rememberedOnly: true,
+      }),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(
+      selectTarget([offline], { rememberedSerial: "USB-2", rememberedOnly: true }),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(selectTarget([ready], { rememberedHardwareSerial: "PHONE-1" })).toMatchObject({
+      kind: "selected",
+      selection: { reason: "remembered-identity" },
+    });
+    expect(
+      selectTarget([offline], { rememberedHardwareSerial: "PHONE-2", rememberedOnly: true }),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(
+      selectTarget([ready], { rememberedHardwareSerial: "missing", rememberedOnly: true }),
+    ).toEqual({ kind: "not-found", selector: "remembered target" });
+    expect(selectTarget([ready])).toMatchObject({
+      kind: "selected",
+      selection: { reason: "only-ready" },
+    });
+  });
 });

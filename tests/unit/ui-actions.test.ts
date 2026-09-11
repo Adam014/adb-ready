@@ -10,6 +10,9 @@ const FIELD = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><
 const FILLED_FIELD = FIELD.replace('text="old"', 'text="person@example.com"');
 const SCROLLER = `<?xml version="1.0"?><hierarchy><node resource-id="com.example:id/list" scrollable="true" enabled="true" bounds="[100,400][900,2000]" /></hierarchy>`;
 const AUDIT = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Save" resource-id="com.example:id/save" clickable="true" enabled="true" bounds="[20,100][220,200]" /><node class="android.widget.ImageButton" clickable="true" enabled="true" bounds="[240,100][440,200]" /></node></hierarchy>`;
+const DUPLICATE = `<?xml version="1.0"?><hierarchy><node><node text="Same" clickable="true" enabled="true" bounds="[10,10][100,100]" /><node text="Same" clickable="true" enabled="true" bounds="[110,10][200,100]" /></node></hierarchy>`;
+const NON_ACTIONABLE = `<?xml version="1.0"?><hierarchy><node text="Label" enabled="true" bounds="[10,10][100,100]" /></hierarchy>`;
+const NOT_EDITABLE = `<?xml version="1.0"?><hierarchy><node text="Label" resource-id="com.example:id/label" clickable="true" enabled="true" bounds="[10,10][100,100]" /></hierarchy>`;
 
 function processResult(request: ProcessRequest, stdout = "", exitCode = 0): ProcessResult {
   return {
@@ -36,7 +39,7 @@ function fixture(
   requests: string[][] = [],
   sleep: CommandDependencies["sleep"] = async () => false,
   keyCombination = true,
-): CommandDependencies {
+): CommandDependencies & { runner: NonNullable<CommandDependencies["runner"]> } {
   let id = 0;
   let snapshot = 0;
   return {
@@ -370,5 +373,239 @@ describe("safe UI actions", () => {
       },
     });
     expect(requests.some((args) => args.includes("swipe"))).toBe(false);
+  });
+
+  test("rejects malformed selectors, limits, digests, and wait bounds", async () => {
+    const fixtures = [
+      {
+        request: { action: "find" as const, selector: "missing-separator" },
+        code: "UI_SELECTOR_INVALID",
+      },
+      {
+        request: { action: "find" as const, selector: "text=Open", limit: 101 },
+        code: "UI_FIND_LIMIT_INVALID",
+      },
+      { request: { action: "compare" as const, digest: "short" }, code: "UI_DIGEST_INVALID" },
+      {
+        request: { action: "wait" as const, selector: "text=Open", timeoutMs: 99 },
+        code: "UI_WAIT_TIMEOUT_INVALID",
+      },
+    ];
+    for (const item of fixtures) {
+      const execution = await runUiAction(item.request, {}, fixture([BEFORE]));
+      expect(execution.result).toMatchObject({ ok: false, problems: [{ code: item.code }] });
+    }
+  });
+
+  test("reports missing, ambiguous, invalid, and unavailable selector occurrences", async () => {
+    const fixtures = [
+      {
+        request: { action: "get" as const, selector: "text=Missing" },
+        code: "UI_SELECTOR_NOT_FOUND",
+      },
+      { request: { action: "get" as const, selector: "text=Same" }, code: "UI_SELECTOR_AMBIGUOUS" },
+      {
+        request: { action: "get" as const, selector: "text=Same", occurrence: 0 },
+        code: "UI_SELECTOR_OCCURRENCE_INVALID",
+      },
+      {
+        request: { action: "get" as const, selector: "text=Same", occurrence: 3 },
+        code: "UI_SELECTOR_OCCURRENCE_MISSING",
+      },
+    ];
+    for (const item of fixtures) {
+      const execution = await runUiAction(item.request, {}, fixture([DUPLICATE]));
+      expect(execution.result).toMatchObject({ ok: false, problems: [{ code: item.code }] });
+    }
+  });
+
+  test("validates references, actionability, editability, and display coordinates", async () => {
+    const currentRef = parseUiHierarchy(NON_ACTIONABLE)?.nodes[0]?.ref ?? "";
+    const fixtures = [
+      { request: { action: "tap" as const, ref: "invalid" }, xml: BEFORE, code: "UI_REF_INVALID" },
+      {
+        request: { action: "tap" as const, ref: currentRef },
+        xml: NON_ACTIONABLE,
+        code: "UI_REF_NOT_ACTIONABLE",
+      },
+      {
+        request: { action: "tap" as const, selector: "text=Label" },
+        xml: NON_ACTIONABLE,
+        code: "UI_SELECTOR_NOT_ACTIONABLE",
+      },
+      {
+        request: { action: "fill" as const, selector: "id=com.example:id/label", text: "value" },
+        xml: NOT_EDITABLE,
+        code: "UI_SELECTOR_NOT_EDITABLE",
+      },
+      {
+        request: { action: "tap" as const, x: 1080, y: 20 },
+        xml: BEFORE,
+        code: "UI_COORDINATE_INVALID",
+      },
+      {
+        request: { action: "swipe" as const, x1: -1, y1: 0, x2: 20, y2: 30 },
+        xml: BEFORE,
+        code: "UI_COORDINATE_INVALID",
+      },
+    ];
+    for (const item of fixtures) {
+      const execution = await runUiAction(item.request, { dryRun: true }, fixture([item.xml]));
+      expect(execution.result).toMatchObject({ ok: false, problems: [{ code: item.code }] });
+    }
+  });
+
+  test("rejects non-scrollable targets and unsafe replacement text", async () => {
+    const notScrollable = await runUiAction(
+      { action: "scroll", direction: "down", selector: "text=Label" },
+      {},
+      fixture([NON_ACTIONABLE]),
+    );
+    expect(notScrollable.result).toMatchObject({
+      ok: false,
+      problems: [{ code: "UI_SELECTOR_NOT_SCROLLABLE" }],
+    });
+
+    const unsafe = await runUiAction(
+      { action: "fill", selector: "id=com.example:id/email", text: "unsafe$(value)" },
+      {},
+      fixture([FIELD]),
+    );
+    expect(unsafe.result).toMatchObject({ ok: false, problems: [{ code: "UI_TEXT_UNSUPPORTED" }] });
+  });
+
+  test("plans long press, explicit swipe, typed submit, clear, and filled submit exactly", async () => {
+    const ref = parseUiHierarchy(BEFORE)?.nodes[1]?.ref ?? "";
+    const fixtures = [
+      {
+        request: { action: "long-press" as const, ref, dryRun: true },
+        xml: BEFORE,
+        ids: ["long-press"],
+      },
+      {
+        request: { action: "swipe" as const, x1: 10, y1: 20, x2: 300, y2: 400, dryRun: true },
+        xml: BEFORE,
+        ids: ["swipe"],
+      },
+      {
+        request: { action: "type" as const, text: "hello world", submit: true, dryRun: true },
+        xml: BEFORE,
+        ids: ["type", "submit"],
+      },
+      {
+        request: { action: "clear" as const, selector: "id=com.example:id/email", dryRun: true },
+        xml: FIELD,
+        ids: ["clear", "select-text", "clear-text"],
+      },
+      {
+        request: {
+          action: "fill" as const,
+          selector: "id=com.example:id/email",
+          text: "new",
+          submit: true,
+          dryRun: true,
+        },
+        xml: FIELD,
+        ids: ["fill", "select-text", "clear-text", "type-text", "submit"],
+      },
+    ];
+    for (const item of fixtures) {
+      const execution = await runUiAction(item.request, {}, fixture([item.xml]));
+      expect(execution.result.data?.plan?.steps.map(({ id }) => id)).toEqual(item.ids);
+    }
+  });
+
+  test("supports gone assertions and bounded wait timeouts", async () => {
+    const gone = await runUiAction(
+      { action: "assert", selector: "text=Missing", state: "gone" },
+      {},
+      fixture([BEFORE]),
+    );
+    expect(gone.result).toMatchObject({ ok: true, data: { verified: true, status: "matched" } });
+
+    const timedOut = await runUiAction(
+      { action: "wait", selector: "text=Missing", state: "visible", timeoutMs: 100 },
+      {},
+      fixture([BEFORE], [], async () => false),
+    );
+    expect(timedOut.result).toMatchObject({
+      ok: false,
+      data: { status: "timed-out", verified: false, attempts: 1 },
+      problems: [{ code: "UI_WAIT_TIMEOUT" }],
+    });
+  });
+
+  test("classifies hierarchy acquisition failures without attempting input", async () => {
+    for (const item of [
+      { output: "ERROR: could not get idle state.", exitCode: 0, code: "UI_NOT_IDLE" },
+      { output: "secure window", exitCode: 0, code: "UI_HIERARCHY_UNAVAILABLE" },
+      { output: "", exitCode: 1, code: "ADB_COMMAND_FAILED" },
+    ]) {
+      const deps = fixture([BEFORE]);
+      const base = deps.runner;
+      deps.runner = async (request) =>
+        request.args?.includes("uiautomator")
+          ? processResult(request, item.output, item.exitCode)
+          : await base(request);
+      const execution = await runUiAction({ action: "audit" }, {}, deps);
+      expect(execution.result).toMatchObject({ ok: false, problems: [{ code: item.code }] });
+    }
+  });
+
+  test("surfaces display probing, input capability, and mutation failures", async () => {
+    const display = fixture([BEFORE]);
+    const displayBase = display.runner;
+    display.runner = async (request) =>
+      request.args?.includes("wm")
+        ? processResult(request, "unknown size")
+        : await displayBase(request);
+    expect((await runUiAction({ action: "tap", x: 10, y: 10 }, {}, display)).result.ok).toBeFalse();
+
+    const capability = fixture([FIELD]);
+    const capabilityBase = capability.runner;
+    capability.runner = async (request) =>
+      request.args?.includes("help")
+        ? processResult(request, "", 1)
+        : await capabilityBase(request);
+    expect(
+      (await runUiAction({ action: "clear", selector: "id=com.example:id/email" }, {}, capability))
+        .result.ok,
+    ).toBeFalse();
+
+    const mutation = fixture([BEFORE]);
+    const mutationBase = mutation.runner;
+    mutation.runner = async (request) =>
+      request.args?.includes("tap") ? processResult(request, "", 1) : await mutationBase(request);
+    expect((await runUiAction({ action: "tap", x: 10, y: 10 }, {}, mutation)).result).toMatchObject(
+      {
+        ok: false,
+        problems: [{ code: "ADB_COMMAND_FAILED" }],
+      },
+    );
+  });
+
+  test("reports observable replacement mismatches and protected field verification gaps", async () => {
+    const mismatch = await runUiAction(
+      { action: "fill", selector: "id=com.example:id/email", text: "expected" },
+      {},
+      fixture([FIELD, FIELD]),
+    );
+    expect(mismatch.result).toMatchObject({
+      ok: false,
+      data: { verified: false, verification: "text-mismatch", verificationGap: "text-mismatch" },
+      problems: [{ code: "UI_TEXT_POSTCONDITION_FAILED" }],
+    });
+
+    const password = FIELD.replace('focusable="true"', 'focusable="true" password="true"');
+    const changedPassword = password.replace('text="old"', 'text="secret"');
+    const protectedResult = await runUiAction(
+      { action: "fill", selector: "id=com.example:id/email", text: "secret" },
+      {},
+      fixture([password, changedPassword]),
+    );
+    expect(protectedResult.result).toMatchObject({
+      ok: true,
+      data: { verified: false, verificationGap: "text-not-observable" },
+    });
   });
 });

@@ -9,6 +9,17 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-11
+
+### Changed
+
+- Fail closed before npm publishing unless the immutable release tag already
+  has a matching draft GitHub release.
+- Document Deno's 24-hour minimum dependency age and the explicit override
+  reserved for immediate post-publish verification.
+- Enforce 90% LCOV line and function coverage floors in the authoritative
+  verification gate and preserve its LCOV report in CI.
+
 ## [0.3.2] - 2026-09-11
 
 ### Fixed
@@ -207,7 +218,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Adam014/adb-ready/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Adam014/adb-ready/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Adam014/adb-ready/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Adam014/adb-ready/compare/v0.2.0...v0.3.0

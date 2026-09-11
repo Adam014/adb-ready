@@ -56,6 +56,64 @@ function dependencies(requests: ProcessRequest[], packagePid = "321\n"): Command
 }
 
 describe("runLogs", () => {
+  test("fails safely across setup, selection, validation, interruption, and logcat exit", async () => {
+    const missing = await runLogs({}, {}, { locateAdb: async () => undefined });
+    expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);
+
+    const inventory = dependencies([]);
+    inventory.runner = async (request) =>
+      request.args?.includes("devices") ? result(request, "", 1) : result(request);
+    expect((await runLogs({}, {}, inventory)).result.ok).toBeFalse();
+
+    const noTarget = dependencies([]);
+    noTarget.runner = async (request) =>
+      request.args?.includes("devices")
+        ? result(request, "List of devices attached\n")
+        : result(request);
+    expect((await runLogs({}, {}, noTarget)).exitCode).toBe(ExitCode.Target);
+
+    for (const options of [
+      { tail: 0 },
+      { tail: 1, since: "09-11 10:00:00.000" },
+      { maxRecords: 0 },
+    ]) {
+      const execution = await runLogs(options, {}, dependencies([]));
+      expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.LogcatFailed);
+    }
+
+    const interruptedController = new AbortController();
+    interruptedController.abort();
+    const interrupted = dependencies([]);
+    const interruptedBase = interrupted.runner;
+    interrupted.runner = async (request) => {
+      if (request.args?.includes("logcat")) {
+        return {
+          ...result(request),
+          exitCode: null,
+          signal: "SIGTERM",
+          aborted: true,
+        };
+      }
+      if (interruptedBase === undefined) throw new Error("fixture runner missing");
+      return await interruptedBase(request);
+    };
+    expect(
+      (await runLogs({}, {}, interrupted, interruptedController.signal)).result.problems.at(-1)
+        ?.code,
+    ).toBe(ProblemCode.OperationInterrupted);
+
+    const failed = dependencies([]);
+    const failedBase = failed.runner;
+    failed.runner = async (request) => {
+      if (request.args?.includes("logcat")) return result(request, "", 2);
+      if (failedBase === undefined) throw new Error("fixture runner missing");
+      return await failedBase(request);
+    };
+    expect((await runLogs({}, {}, failed)).result.problems.at(-1)?.code).toBe(
+      ProblemCode.LogcatFailed,
+    );
+  });
+
   test("follows from now by default without replaying the device buffer", async () => {
     const requests: ProcessRequest[] = [];
     await runLogs({}, {}, dependencies(requests));
