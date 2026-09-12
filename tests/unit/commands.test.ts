@@ -480,7 +480,7 @@ describe("runDevices", () => {
         { serial: "10.0.1.66:43949", kind: "tls", stable: true },
         {
           serial: "adb-RFCT802R8WJ-7ZLXqa._adb-tls-connect._tcp",
-          kind: "unknown",
+          kind: "tls",
           stable: false,
         },
       ],
