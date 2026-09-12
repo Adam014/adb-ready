@@ -40,9 +40,16 @@ try {
       const codes = payload.problems?.map(problemCode).join(", ") || "unknown failure";
       throw new Error(`${command} failed its read-only real ADB check: ${codes}`);
     }
-    const deviceCount = payload.data?.devices?.length ?? 0;
+    /** @type {{ state?: unknown }[]} */
+    const devices = payload.data?.devices ?? [];
+    /** @type {unknown[]} */
+    const targets = payload.data?.targets ?? [];
+    const unknownDevices = devices.filter(({ state }) => state === "unknown");
+    if (unknownDevices.length > 0) {
+      throw new Error(`${command} returned ${String(unknownDevices.length)} unknown ADB state(s)`);
+    }
     process.stdout.write(
-      `✓ ${command}: ${String(deviceCount)} target(s), no mutations performed\n`,
+      `✓ ${command}: ${String(targets.length)} logical target(s), ${String(devices.length)} transport(s), no mutations performed\n`,
     );
   }
 } finally {

@@ -125,6 +125,7 @@ describe("target inventory", () => {
       "192.0.2.42:37199",
       "adb-EXAMPLE-random (2)._adb-tls-connect._tcp",
     ]);
+    expect(inventory.targets[0]?.transports.map(({ kind }) => kind)).toEqual(["tls", "tls"]);
   });
 
   test("never treats mDNS service names or unspecified addresses as stable serials", () => {
