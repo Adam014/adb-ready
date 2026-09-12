@@ -65,6 +65,109 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
 }
 
 describe("runDev", () => {
+  test("fails safely at every target and reverse-port preflight boundary", async () => {
+    const options = {
+      cwd: "/workspace/app",
+      preset: "custom" as const,
+      command: { executable: "dev-server", args: [] },
+      reversePorts: [{ device: 8081 }],
+      logs: false,
+    };
+    const missingDependencies = dependencies(async (request) => result(request));
+    missingDependencies.locateAdb = async () => undefined;
+    const missing = await runDev(options, {}, missingDependencies);
+    expect(missing.exitCode).toBe(ExitCode.Environment);
+    expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);
+
+    const devices = await runDev(
+      options,
+      {},
+      dependencies(async (request) =>
+        request.args?.includes("devices")
+          ? result(request, { exitCode: 1, stderr: "server unavailable" })
+          : result(request),
+      ),
+    );
+    expect(devices.exitCode).toBe(ExitCode.AdbOperation);
+
+    const interrupted = await runDev(
+      options,
+      {},
+      dependencies(async (request) => {
+        if (request.args?.includes("devices")) {
+          return result(request, {
+            stdout: "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+          });
+        }
+        if (request.args?.includes("mdns")) {
+          return result(request, { exitCode: null, signal: "SIGTERM", aborted: true });
+        }
+        if (request.args?.includes("ro.serialno")) return result(request, { stdout: "PHONE-1\n" });
+        if (request.args?.includes("host-features"))
+          return result(request, { stdout: "shell_v2\n" });
+        return result(request);
+      }),
+    );
+    expect(interrupted.exitCode).toBe(ExitCode.Interrupted);
+
+    const noTarget = await runDev(
+      options,
+      {},
+      dependencies(async (request) =>
+        request.args?.includes("devices")
+          ? result(request, { stdout: "List of devices attached\n" })
+          : result(request, {
+              stdout: request.args?.includes("mdns") ? "List of discovered mdns services\n" : "",
+            }),
+      ),
+    );
+    expect(noTarget.exitCode).toBe(ExitCode.Target);
+
+    const reverse = await runDev(
+      options,
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        return request.args?.includes("--list")
+          ? result(request, { exitCode: 1, stderr: "reverse unavailable" })
+          : result(request);
+      }),
+    );
+    expect(reverse.exitCode).toBe(ExitCode.AdbOperation);
+    expect(reverse.result.problems.at(-1)?.code).toBe(ProblemCode.AdbCommandFailed);
+  });
+
+  test("continues when optional session persistence cannot be initialized", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-session-unavailable-"));
+    try {
+      const blocked = path.join(root, "not-a-directory");
+      await writeFile(blocked, "fixture");
+      const execution = await runDev(
+        {
+          cwd: "/workspace/app",
+          preset: "custom",
+          command: { executable: "dev-server", args: [] },
+          reversePorts: [],
+          logs: false,
+          watch: false,
+          sessionStore: { directory: path.join(blocked, "sessions") },
+        },
+        {},
+        dependencies(async (request) => targetProbe(request) ?? result(request)),
+      );
+      expect(execution.result.data?.status).toBe("completed");
+      expect(execution.result.problems).toContainEqual(
+        expect.objectContaining({
+          code: ProblemCode.SessionPersistenceFailed,
+          severity: "warning",
+        }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("builds an offline project plan without resolving ADB or a target", async () => {
     let processCalled = false;
     const deps = dependencies(async (request) => {
@@ -234,8 +337,53 @@ describe("runDev", () => {
     expect(events.indexOf("readiness.passed")).toBeLessThan(events.indexOf("child.exited"));
   });
 
+  test("fails with structured evidence when a required readiness capability is unsupported", async () => {
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-service", args: [] },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+        readiness: {
+          all: [{ kind: "ui", selector: "text=Ready" }],
+          timeoutMs: 100,
+          pollIntervalMs: 10,
+        },
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.args?.includes("uiautomator")) {
+          return result(request, { stdout: "UI hierarchy unavailable" });
+        }
+        if (request.executable === "dev-service") {
+          return await new Promise<ProcessResult>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+              { once: true },
+            );
+          });
+        }
+        return result(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.AdbOperation);
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.ReadinessUnsupported }),
+    );
+    expect(execution.result.data?.readiness?.assertions).toMatchObject([
+      { assertion: { kind: "ui", selector: "text=Ready" }, status: "unsupported" },
+    ]);
+  });
+
   test("runs one bounded verification command and intentionally stops the development service", async () => {
     let verificationRequest: ProcessRequest | undefined;
+    const verificationLines: string[] = [];
     const execution = await runDev(
       {
         cwd: "/workspace/app",
@@ -252,6 +400,7 @@ describe("runDev", () => {
         reversePorts: [],
         logs: false,
         watch: false,
+        onChildLine: (stream, line) => verificationLines.push(`${stream}:${line}`),
       },
       {},
       dependencies(async (request) => {
@@ -268,6 +417,8 @@ describe("runDev", () => {
         }
         if (request.executable === "smoke-test") {
           verificationRequest = request;
+          request.onStdoutChunk?.(new TextEncoder().encode("assertion passed\n"));
+          request.onStderrChunk?.(new TextEncoder().encode("diagnostic warning\n"));
           return result(request);
         }
         return result(request);
@@ -289,6 +440,7 @@ describe("runDev", () => {
       args: ["--device=USB-1", "--ci"],
       env: { ADB_READY_TARGET_SERIAL: "USB-1", ANDROID_SERIAL: "USB-1" },
     });
+    expect(verificationLines).toEqual(["stdout:assertion passed", "stderr:diagnostic warning"]);
   });
 
   test("preserves a failed bounded verification command exit code", async () => {
@@ -373,6 +525,9 @@ describe("runDev", () => {
         preset: "custom",
         command: { executable: "node", args: ["server.mjs"] },
         reversePorts: [{ device: 8081 }, { device: 3000, host: 4000 }],
+        verification: {
+          command: { executable: "smoke-test", args: ["--device={target.serial}"] },
+        },
       },
       { dryRun: true },
       dependencies(async (request) => {
@@ -389,6 +544,7 @@ describe("runDev", () => {
           { args: ["-t", "7", "reverse", "--no-rebind", "tcp:8081", "tcp:8081"] },
           { args: ["-t", "7", "reverse", "--no-rebind", "tcp:3000", "tcp:4000"] },
           { id: "start-child", executable: "node", args: ["server.mjs"] },
+          { id: "run-verification", executable: "smoke-test", args: ["--device=USB-1"] },
         ],
       },
     });
@@ -1112,6 +1268,158 @@ describe("runDev", () => {
     expect(execution.result.problems).not.toContainEqual(
       expect.objectContaining({ code: ProblemCode.ChildProcessFailed }),
     );
+  });
+
+  test("fails bounded recovery when a lost target has no safe reconnect endpoint", async () => {
+    let deviceLists = 0;
+    let childStarted = false;
+    const deps = dependencies(async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        deviceLists += 1;
+        return result(request, {
+          stdout:
+            deviceLists === 1
+              ? "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n"
+              : "List of devices attached\n",
+        });
+      }
+      if (args.includes("ro.serialno")) return result(request, { stdout: "PHONE-1\n" });
+      if (args.includes("host-features")) return result(request, { stdout: "shell_v2\n" });
+      if (args.includes("mdns")) {
+        return result(request, { stdout: "List of discovered mdns services\n" });
+      }
+      if (args.includes("get-state")) {
+        return result(request, { stdout: childStarted ? "offline\n" : "device\n" });
+      }
+      if (args.includes("--list")) return result(request);
+      if (request.executable === "long-running") {
+        childStarted = true;
+        return await new Promise<ProcessResult>((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+            { once: true },
+          );
+        });
+      }
+      return result(request);
+    });
+    deps.sleep = async () => true;
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "long-running", args: [] },
+        reversePorts: [],
+        logs: false,
+        watchIntervalMs: 1,
+        recovery: { maxAttempts: 1, initialDelayMs: 1, maxDelayMs: 1 },
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.AdbOperation);
+    expect(execution.result.data?.recovery).toMatchObject({
+      degradations: 1,
+      recoveryAttempts: 1,
+      recoveries: 0,
+      failed: true,
+    });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.SessionRecoveryFailed }),
+    );
+  });
+
+  test("reconnects the same physical target after its wireless transport changes", async () => {
+    const endpoint = "192.168.1.20:37123";
+    let deviceLists = 0;
+    let childStarted = false;
+    let reconnected = false;
+    let healthyChecks = 0;
+    let sleepCalls = 0;
+    let resolveChild: ((value: ProcessResult) => void) | undefined;
+    const deps = dependencies(async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        deviceLists += 1;
+        const stdout =
+          deviceLists === 1
+            ? "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n"
+            : deviceLists === 2
+              ? "List of devices attached\n"
+              : `List of devices attached\n${endpoint} device model:Pixel_9 transport_id:9\n`;
+        return result(request, { stdout });
+      }
+      if (args.includes("host-features")) return result(request, { stdout: "shell_v2\n" });
+      if (args.includes("mdns")) {
+        return result(request, {
+          stdout: `List of discovered mdns services\nadb-PHONE-1-x _adb-tls-connect._tcp ${endpoint}\n`,
+        });
+      }
+      if (args.includes("connect")) {
+        reconnected = true;
+        return result(request, { stdout: `connected to ${endpoint}\n` });
+      }
+      if (args.includes("get-state")) {
+        if (args.includes(endpoint)) return result(request, { stdout: "device\n" });
+        return result(request, { stdout: childStarted ? "offline\n" : "device\n" });
+      }
+      if (args.includes("ro.serialno")) return result(request, { stdout: "PHONE-1\n" });
+      if (args.includes("--list")) {
+        if (reconnected) {
+          healthyChecks += 1;
+          if (healthyChecks >= 2) {
+            queueMicrotask(() => resolveChild?.(result({ executable: "long-running", args: [] })));
+          }
+        }
+        return result(request);
+      }
+      if (request.executable === "long-running") {
+        childStarted = true;
+        return await new Promise<ProcessResult>((resolve) => {
+          resolveChild = resolve;
+          request.signal?.addEventListener(
+            "abort",
+            () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+            { once: true },
+          );
+        });
+      }
+      return result(request);
+    });
+    deps.sleep = async (_milliseconds, watchSignal) => {
+      sleepCalls += 1;
+      if (sleepCalls <= 3) return true;
+      if (watchSignal.aborted) return false;
+      return await new Promise<boolean>((resolve) => {
+        watchSignal.addEventListener("abort", () => resolve(false), { once: true });
+      });
+    };
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "long-running", args: [] },
+        reversePorts: [],
+        logs: false,
+        watchIntervalMs: 1,
+        recovery: { maxAttempts: 1, initialDelayMs: 1, maxDelayMs: 1 },
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(reconnected).toBeTrue();
+    expect(execution.result.data).toMatchObject({
+      status: "completed",
+      selected: { transport: { serial: endpoint } },
+      recovery: { recoveryAttempts: 1, recoveries: 1, targetChanges: 1, failed: false },
+    });
   });
 
   test("fails visibly when an owned reverse mapping cannot be cleaned", async () => {

@@ -33,6 +33,12 @@ class AutoInput implements SelectInput {
   off(): void {}
 }
 
+class EndingInput extends AutoInput {
+  once(_event: "end", listener: () => void): void {
+    queueMicrotask(listener);
+  }
+}
+
 const interactive: TerminalCapabilities = {
   interactive: true,
   color: false,
@@ -93,5 +99,88 @@ describe("pairing code input", () => {
 
     expect(result).toEqual({ kind: "cancelled", reason: "interrupt" });
     expect(input.isRaw).toBe(false);
+  });
+
+  test("handles editing, escape, EOF, and pre-aborted input explicitly", async () => {
+    const edited = new AutoInput(["12\u007F3\r"]);
+    const editedSink = new MemorySink();
+    await expect(
+      readPairingCode({
+        input: edited,
+        sink: editedSink,
+        capabilities: { ...interactive, unicode: false },
+        fromStdin: false,
+      }),
+    ).resolves.toEqual({ kind: "submitted", value: "13" });
+    expect(editedSink.value).toContain("\b \b");
+
+    await expect(
+      readPairingCode({
+        input: new AutoInput(["\u001B"]),
+        sink: new MemorySink(),
+        capabilities: interactive,
+        fromStdin: false,
+      }),
+    ).resolves.toEqual({ kind: "cancelled", reason: "escape" });
+
+    await expect(
+      readPairingCode({
+        input: new EndingInput([]),
+        sink: new MemorySink(),
+        capabilities: { ...interactive, interactive: false },
+        fromStdin: true,
+      }),
+    ).resolves.toEqual({ kind: "cancelled", reason: "eof" });
+    await expect(
+      readPairingCode({
+        input: new EndingInput(["123456"]),
+        sink: new MemorySink(),
+        capabilities: { ...interactive, interactive: false },
+        fromStdin: true,
+      }),
+    ).resolves.toEqual({ kind: "submitted", value: "123456" });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      readPairingCode({
+        input: new AutoInput([]),
+        sink: new MemorySink(),
+        capabilities: interactive,
+        fromStdin: false,
+        signal: controller.signal,
+      }),
+    ).resolves.toEqual({ kind: "cancelled", reason: "signal" });
+  });
+
+  test("reports unavailable terminal capabilities and setup failures", async () => {
+    const withoutRawMode: SelectInput = {
+      isRaw: false,
+      resume() {},
+      pause() {},
+      on() {},
+      off() {},
+    };
+    await expect(
+      readPairingCode({
+        input: withoutRawMode,
+        sink: new MemorySink(),
+        capabilities: interactive,
+        fromStdin: false,
+      }),
+    ).resolves.toEqual({ kind: "unavailable" });
+
+    const broken = new AutoInput([]);
+    broken.resume = () => {
+      throw new Error("terminal unavailable");
+    };
+    await expect(
+      readPairingCode({
+        input: broken,
+        sink: new MemorySink(),
+        capabilities: interactive,
+        fromStdin: false,
+      }),
+    ).resolves.toEqual({ kind: "unavailable" });
   });
 });

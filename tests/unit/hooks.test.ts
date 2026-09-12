@@ -49,6 +49,7 @@ describe("runHooks", () => {
       runner: async (request) => {
         requests.push(request);
         request.onStdoutChunk?.(new TextEncoder().encode("token=secret-value\n"));
+        request.onStderrChunk?.(new TextEncoder().encode("password=another-secret\n"));
         return result(request);
       },
     });

@@ -137,6 +137,24 @@ describe("terminal safety", () => {
     expect(sink.value).toBe("✓ Discovering\n");
     expect(sink.value).not.toContain("\u001B");
   });
+
+  test("supports the production timer and every terminal completion state", async () => {
+    const animated = new MemorySink();
+    const spinner = new Spinner(animated, interactiveCapabilities);
+    spinner.start("Working");
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    spinner.warn("Needs attention");
+    expect(animated.value).toContain("! Needs attention\n");
+
+    const staticSink = new MemorySink();
+    const staticSpinner = new Spinner(staticSink, {
+      ...interactiveCapabilities,
+      animation: false,
+    });
+    staticSpinner.fail("Failed safely");
+    staticSpinner.dispose();
+    expect(staticSink.value).toBe("✕ Failed safely\n");
+  });
 });
 
 describe("ProgressRenderer", () => {

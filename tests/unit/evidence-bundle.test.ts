@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CommandExecution, DevData } from "../../src/app/commands.js";
@@ -47,6 +47,20 @@ function execution(): CommandExecution<DevData> {
           stdoutTruncated: false,
           stderrTruncated: false,
         },
+        readiness: {
+          ready: false,
+          attempts: 1,
+          durationMs: 10,
+          timedOut: true,
+          assertions: [
+            {
+              assertion: { kind: "ui", selector: "text=Ready" },
+              status: "failed",
+              detail: "Ready was not visible.",
+              durationMs: 5,
+            },
+          ],
+        },
         journal: {
           dropped: 0,
           bytes: 10,
@@ -59,6 +73,16 @@ function execution(): CommandExecution<DevData> {
               source: "verification.stderr",
               severity: "error",
               message: "failed on serial-secret token=very-secret",
+              correlation: { commandId: "command-1", sessionId: "session-1" },
+            },
+            {
+              schemaVersion: 1,
+              sequence: 2,
+              timestamp: "2026-09-11T10:00:00.600Z",
+              type: "logcat.line",
+              source: "logcat",
+              severity: "warning",
+              message: "Android warning",
               correlation: { commandId: "command-1", sessionId: "session-1" },
             },
           ],
@@ -128,6 +152,76 @@ describe("writeEvidenceBundle", () => {
       expect(await readFile(path.join(written.artifactPath, "junit.xml"), "utf8")).toContain(
         'failures="1"',
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("classifies every automation outcome and writes a bounded GitHub summary", async () => {
+    const cases = [
+      { code: "OPERATION_INTERRUPTED", severity: "error", expected: "cancelled" },
+      { code: "READINESS_FAILED", severity: "error", expected: "product-not-ready" },
+      { code: "ADB_NOT_FOUND", severity: "error", expected: "infrastructure-failure" },
+      { code: "NOTICE", severity: "warning", expected: "success" },
+    ] as const;
+
+    for (const [index, item] of cases.entries()) {
+      const root = await mkdtemp(path.join(tmpdir(), "adb-ready-evidence-outcome-"));
+      try {
+        const current = execution();
+        const sourceProblem = current.result.problems[0];
+        if (sourceProblem === undefined) throw new Error("Missing problem fixture");
+        current.result.problems = [
+          {
+            ...sourceProblem,
+            code: item.code,
+            severity: item.severity,
+            summary: "A <problem> & its details.",
+          },
+        ];
+        current.result.data = null;
+        current.result.ok = item.expected === "success";
+        const summary = path.join(root, "summary.md");
+        if (index === 3) await mkdir(summary);
+        else await writeFile(summary, "Existing summary\n");
+
+        const written = await writeEvidenceBundle(current, {
+          cwd: root,
+          idFactory: () => `outcome-${String(index)}`,
+          maxContextCharacters: 160,
+          githubStepSummaryPath: summary,
+        });
+
+        expect(written.execution.result.data?.outcome).toBe(item.expected);
+        if (index !== 3) {
+          expect(await readFile(summary, "utf8")).toContain(`Outcome | **${item.expected}**`);
+        }
+        expect(await readFile(path.join(written.artifactPath, "context.md"), "utf8")).toContain(
+          "[context truncated]",
+        );
+        expect(await readFile(path.join(written.artifactPath, "junit.xml"), "utf8")).toContain(
+          item.expected === "success" ? 'failures="0"' : 'failures="1"',
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("cleans an incomplete temporary bundle when atomic publication fails", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-evidence-collision-"));
+    const collision = path.join(root, ".adb-ready", "artifacts", "run-collision");
+    try {
+      await mkdir(collision, { recursive: true });
+      await writeFile(path.join(collision, "owned.txt"), "existing artifact");
+
+      await expect(
+        writeEvidenceBundle(execution(), {
+          cwd: root,
+          idFactory: () => "run-collision",
+        }),
+      ).rejects.toThrow();
+      expect(await readFile(path.join(collision, "owned.txt"), "utf8")).toBe("existing artifact");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

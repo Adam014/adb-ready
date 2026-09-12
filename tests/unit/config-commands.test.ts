@@ -81,6 +81,30 @@ describe("project configuration commands", () => {
     }
   });
 
+  test("returns a stable failure when the detected project root cannot be written", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-config-unwritable-"));
+    const blocker = path.join(root, "not-a-directory");
+    await writeFile(blocker, "fixture");
+    try {
+      const execution = await runInit(
+        { cwd: root },
+        {
+          detectProject: async () => ({
+            root: path.join(blocker, "project"),
+            presetEvidence: [],
+            packageManager: { conflicts: [] },
+          }),
+        },
+      );
+      expect(execution.result).toMatchObject({
+        ok: false,
+        problems: [{ code: "CONFIG_WRITE_FAILED" }],
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("produces a mutation-free init plan", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-init-"));
     try {

@@ -3,7 +3,11 @@ import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { canSpawnWithoutShell, locateAdb } from "../../src/platform/executable.js";
+import {
+  canSpawnWithoutShell,
+  locateAdb,
+  locateExecutable,
+} from "../../src/platform/executable.js";
 import { runProcess } from "../../src/platform/process-runner.js";
 import { detectRuntime } from "../../src/platform/runtime.js";
 
@@ -222,6 +226,53 @@ describe("runProcess", () => {
 });
 
 describe("locateAdb", () => {
+  test("returns no executable when PATH is absent or contains only empty entries", async () => {
+    expect(await locateExecutable("adb", { env: {}, platform: "linux" })).toBeUndefined();
+    expect(
+      await locateExecutable("adb", { env: { PATH: "::" }, platform: "linux" }),
+    ).toBeUndefined();
+  });
+
+  test("resolves a named explicit executable and quoted PATH entry without a shell", async () => {
+    const directory = await temporaryDirectory();
+    const name = process.platform === "win32" ? "custom-adb.exe" : "custom-adb";
+    const executable = path.join(directory, name);
+    await writeFile(executable, "fixture", { mode: 0o755 });
+    const env = { PATH: `"${directory}"` };
+    expect(await locateExecutable(name, { env, platform: process.platform })).toBe(executable);
+    expect(await locateAdb({ explicitPath: name, env, platform: process.platform })).toBe(
+      executable,
+    );
+    expect(
+      await locateAdb({ explicitPath: "   ", env, platform: process.platform }),
+    ).toBeUndefined();
+  });
+
+  test("falls back to the conventional SDK directory for the active platform", async () => {
+    const directory = await temporaryDirectory();
+    const sdkRoot =
+      process.platform === "darwin"
+        ? path.join(directory, "Library", "Android", "sdk")
+        : path.join(directory, "Android", "Sdk");
+    const platformTools = path.join(sdkRoot, "platform-tools");
+    const executable = path.join(platformTools, process.platform === "win32" ? "adb.exe" : "adb");
+    await mkdir(platformTools, { recursive: true });
+    await writeFile(executable, "fixture", { mode: 0o755 });
+    const env = process.platform === "win32" ? { PATH: "", LOCALAPPDATA: directory } : { PATH: "" };
+    expect(await locateAdb({ env, homeDirectory: directory, platform: process.platform })).toBe(
+      executable,
+    );
+  });
+
+  test("honors only directly spawnable Windows executable extensions", async () => {
+    await expect(
+      locateExecutable("adb", {
+        env: { Path: "C:\\missing", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+        platform: "win32",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   test("never resolves Windows command shims that require an implicit shell", () => {
     expect(canSpawnWithoutShell("adb.exe", "win32")).toBe(true);
     expect(canSpawnWithoutShell("adb.COM", "win32")).toBe(true);

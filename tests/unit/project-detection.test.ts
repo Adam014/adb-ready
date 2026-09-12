@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { detectProject, packageScriptCommand } from "../../src/dev/project.js";
 
@@ -163,6 +165,29 @@ describe("project detection", () => {
         })
       ).preset,
     ).toBe("capacitor");
+  });
+
+  test("finds the nearest package through the production filesystem adapters", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-project-detection-"));
+    const nested = path.join(root, "packages", "mobile");
+    try {
+      await mkdir(nested, { recursive: true });
+      await writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({ packageManager: "npm@11.0.0", dependencies: { expo: "latest" } }),
+      );
+      const detected = await detectProject({
+        cwd: nested,
+        locate: async () => undefined,
+      });
+      expect(detected).toMatchObject({
+        root,
+        preset: "expo",
+        packageManager: { name: "npm", source: "package-json" },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

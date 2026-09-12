@@ -605,6 +605,305 @@ describe("loadConfig", () => {
       errors: [{ path: "profiles.second.extends" }],
     });
   });
+
+  test("accepts every supported readiness assertion and normalizes optional fields", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "readiness.json");
+    await writeJson(projectFile, {
+      version: 1,
+      dev: {
+        ready: {
+          timeoutMs: 30_000,
+          pollIntervalMs: 250,
+          all: [
+            { kind: "boot" },
+            { kind: "unlocked" },
+            { kind: "foreground", package: "com.example.app" },
+            { kind: "process", package: "com.example.worker" },
+            { kind: "activity", value: "com.example.app/.MainActivity" },
+            { kind: "host-port", host: "127.0.0.1", port: 8081 },
+            { kind: "http", url: "https://localhost:8081/health", status: [200, 204] },
+            { kind: "log", contains: "Application started", absent: false },
+            { kind: "ui", selector: "text=Ready", state: "visible" },
+            { kind: "ui", selector: "id=com.example:id/spinner", state: "gone" },
+          ],
+        },
+      },
+    });
+
+    const loaded = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(loaded).toMatchObject({
+      ok: true,
+      config: {
+        values: {
+          devReadiness: {
+            timeoutMs: 30_000,
+            pollIntervalMs: 250,
+            all: [
+              { kind: "boot" },
+              { kind: "unlocked" },
+              { kind: "foreground", package: "com.example.app" },
+              { kind: "process", package: "com.example.worker" },
+              { kind: "activity", value: "com.example.app/.MainActivity" },
+              { kind: "host-port", host: "127.0.0.1", port: 8081 },
+              { kind: "http", url: "https://localhost:8081/health", status: [200, 204] },
+              { kind: "log", contains: "Application started", absent: false },
+              { kind: "ui", selector: "text=Ready", state: "visible" },
+              { kind: "ui", selector: "id=com.example:id/spinner", state: "gone" },
+            ],
+          },
+        },
+      },
+    });
+  });
+
+  test("reports every malformed readiness assertion and timing field", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "invalid-readiness.json");
+    await writeJson(projectFile, {
+      version: 1,
+      dev: {
+        ready: {
+          typo: true,
+          timeoutMs: 0,
+          pollIntervalMs: -1,
+          all: [
+            null,
+            { kind: "foreground", package: "invalid" },
+            { kind: "activity", value: "" },
+            { kind: "host-port", host: "", port: 70_000 },
+            { kind: "http", url: "ftp://example.com", status: [] },
+            { kind: "log", contains: "", absent: "no" },
+            { kind: "ui", selector: "unsupported=Ready", state: "maybe" },
+            { kind: "unknown", extra: true },
+          ],
+        },
+      },
+    });
+
+    const loaded = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(loaded.ok).toBeFalse();
+    if (!loaded.ok) {
+      const paths = loaded.errors.map(({ path: errorPath }) => errorPath);
+      expect(paths).toContainAllValues([
+        "dev.ready.typo",
+        "dev.ready.timeoutMs",
+        "dev.ready.pollIntervalMs",
+        "dev.ready.all.0",
+        "dev.ready.all.1",
+        "dev.ready.all.2",
+        "dev.ready.all.3",
+        "dev.ready.all.4",
+        "dev.ready.all.5",
+        "dev.ready.all.6",
+        "dev.ready.all.7.extra",
+        "dev.ready.all.7",
+      ]);
+    }
+  });
+
+  test("rejects malformed nested sections without throwing", async () => {
+    const directory = await temporaryDirectory();
+    const documents = [
+      { version: 1, adb: [] },
+      { version: 1, output: "human" },
+      { version: 1, targets: [] },
+      { version: 1, targets: { aliases: [] } },
+      { version: 1, app: [] },
+      { version: 1, app: { android: [] } },
+      { version: 1, dev: [] },
+      { version: 1, dev: { command: [] } },
+      { version: 1, dev: { reversePorts: "8081" } },
+      { version: 1, dev: { ready: [] } },
+      { version: 1, dev: { recovery: [] } },
+      { version: 1, dev: { session: [] } },
+      { version: 1, dev: { journal: [] } },
+      { version: 1, dev: { hooks: [] } },
+      { version: 1, profiles: [] },
+    ];
+
+    for (const [index, document] of documents.entries()) {
+      const projectFile = path.join(directory, `invalid-section-${String(index)}.json`);
+      await writeJson(projectFile, document);
+      const loaded = await loadConfig({
+        cwd: directory,
+        env: {},
+        homeDirectory: directory,
+        userConfigPath: path.join(directory, "missing-user.json"),
+        projectConfigPath: projectFile,
+        explicitProjectConfig: true,
+      });
+      expect(loaded.ok).toBeFalse();
+      if (!loaded.ok) expect(loaded.errors).toBeArrayOfSize(1);
+    }
+  });
+
+  test("validates all environment overrides and accepts their supported forms", async () => {
+    const directory = await temporaryDirectory();
+    const base = {
+      cwd: directory,
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+    };
+    const valid = await loadConfig({
+      ...base,
+      env: {
+        ADB_READY_ADB_PATH: "/sdk/adb",
+        ADB_READY_ADB_HOST: "localhost",
+        ADB_READY_APP_PACKAGE: "com.example.app",
+        ADB_READY_PRESET: "flutter",
+        ADB_READY_PACKAGE_MANAGER: "yarn",
+        ADB_READY_JOURNAL_MINIMUM_SEVERITY: "warning",
+        ADB_READY_REVERSE_PORTS: "8081, 3000",
+        ADB_READY_JOURNAL_REDACT_ENVIRONMENT: "TOKEN,TOKEN,API_KEY",
+        ADB_READY_ADB_PORT: "5037",
+        ADB_READY_TIMEOUT_MS: "9000",
+        ADB_READY_JOURNAL_MAX_ENTRIES: "100",
+        ADB_READY_JOURNAL_MAX_BYTES: "10000",
+        ADB_READY_RECOVERY_MAX_ATTEMPTS: "3",
+        ADB_READY_RECOVERY_INITIAL_DELAY_MS: "100",
+        ADB_READY_RECOVERY_MAX_DELAY_MS: "1000",
+        ADB_READY_RECOVERY_TOTAL_TIMEOUT_MS: "5000",
+        ADB_READY_SESSION_MAX_SESSIONS: "10",
+        ADB_READY_SESSION_MAX_AGE_DAYS: "14",
+        ADB_READY_SESSION_MAX_BYTES: "100000",
+        ADB_READY_COLOR: "yes",
+        ADB_READY_UNICODE: "1",
+        ADB_READY_ANIMATION: "on",
+        ADB_READY_INTERACTIVE: "true",
+        ADB_READY_DEV_LOGS: "no",
+        ADB_READY_CLEANUP_PORTS: "0",
+        ADB_READY_DEV_WATCH: "off",
+        ADB_READY_SESSION_PERSIST: "false",
+      },
+    });
+    expect(valid).toMatchObject({
+      ok: true,
+      config: {
+        values: {
+          adbPath: "/sdk/adb",
+          adbHost: "localhost",
+          appPackage: "com.example.app",
+          devPreset: "flutter",
+          packageManager: "yarn",
+          journalMinimumSeverity: "warning",
+          devReversePorts: [{ device: 8081 }, { device: 3000 }],
+          journalRedactEnvironment: ["TOKEN", "API_KEY"],
+          adbPort: 5037,
+          timeoutMs: 9000,
+          color: true,
+          devLogs: false,
+          sessionPersist: false,
+        },
+      },
+    });
+
+    const invalid = await loadConfig({
+      ...base,
+      env: {
+        ADB_READY_ADB_PATH: " ",
+        ADB_READY_ADB_HOST: "",
+        ADB_READY_APP_PACKAGE: "invalid",
+        ADB_READY_PRESET: "cordova",
+        ADB_READY_PACKAGE_MANAGER: "other",
+        ADB_READY_JOURNAL_MINIMUM_SEVERITY: "fatal",
+        ADB_READY_REVERSE_PORTS: "8081,",
+        ADB_READY_JOURNAL_REDACT_ENVIRONMENT: "VALID,NOT-VALID",
+        ADB_READY_JOURNAL_MAX_ENTRIES: "0",
+        ADB_READY_RECOVERY_MAX_ATTEMPTS: "1.5",
+        ADB_READY_SESSION_MAX_BYTES: "Infinity",
+        ADB_READY_INTERACTIVE: "sometimes",
+      },
+    });
+    expect(invalid.ok).toBeFalse();
+    if (!invalid.ok) {
+      expect(invalid.errors.map(({ path: errorPath }) => errorPath)).toContainAllValues([
+        "ADB_READY_ADB_PATH",
+        "ADB_READY_ADB_HOST",
+        "ADB_READY_APP_PACKAGE",
+        "ADB_READY_PRESET",
+        "ADB_READY_PACKAGE_MANAGER",
+        "ADB_READY_JOURNAL_MINIMUM_SEVERITY",
+        "ADB_READY_REVERSE_PORTS",
+        "ADB_READY_JOURNAL_REDACT_ENVIRONMENT",
+        "ADB_READY_JOURNAL_MAX_ENTRIES",
+        "ADB_READY_RECOVERY_MAX_ATTEMPTS",
+        "ADB_READY_SESSION_MAX_BYTES",
+        "ADB_READY_INTERACTIVE",
+      ]);
+    }
+  });
+
+  test("loads profiles from user configuration and reports invalid profile declarations", async () => {
+    const directory = await temporaryDirectory();
+    const userFile = path.join(directory, "user.json");
+    await writeJson(userFile, {
+      version: 1,
+      defaultProfile: "desk",
+      profiles: { desk: { timeoutMs: 3210 } },
+    });
+    const loaded = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: userFile,
+    });
+    expect(loaded).toMatchObject({
+      ok: true,
+      config: {
+        profile: { name: "desk", source: "user", chain: ["desk"] },
+        values: { timeoutMs: 3210 },
+      },
+    });
+
+    const invalidFile = path.join(directory, "invalid-profiles.json");
+    await writeJson(invalidFile, {
+      version: 1,
+      defaultProfile: "missing",
+      profiles: {
+        "bad profile": {},
+        scalar: 42,
+        child: { extends: "bad parent" },
+        nested: { timeoutMs: 0 },
+      },
+    });
+    const invalid = await loadConfig({
+      cwd: directory,
+      env: { ADB_READY_PROFILE: " " },
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: invalidFile,
+      explicitProjectConfig: true,
+    });
+    expect(invalid.ok).toBeFalse();
+    if (!invalid.ok) {
+      expect(invalid.errors.map(({ path: errorPath }) => errorPath)).toContainAllValues([
+        "profiles.bad profile",
+        "profiles.scalar",
+        "profiles.child.extends",
+        "profiles.nested.timeoutMs",
+        "defaultProfile",
+        "ADB_READY_PROFILE",
+        "profile",
+      ]);
+    }
+  });
 });
 
 describe("configuration paths", () => {

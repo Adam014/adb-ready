@@ -555,6 +555,63 @@ describe("runDevices", () => {
 });
 
 describe("wireless target commands", () => {
+  test("fails wireless discovery cleanly when ADB is missing, interrupted, or unsupported", async () => {
+    const missing = await runWirelessDiscovery(
+      "connect",
+      { adbPath: "/missing/adb" },
+      { locateAdb: async () => undefined, idFactory: () => "missing", clock: () => new Date(0) },
+    );
+    expect(missing.exitCode).toBe(ExitCode.Environment);
+    expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);
+
+    const interrupted = await runWirelessDiscovery(
+      "connect",
+      {},
+      deterministicDependencies(async (request) =>
+        commandName(request) === "host-features"
+          ? processResult(request, {
+              exitCode: null,
+              signal: "SIGTERM",
+              aborted: true,
+            })
+          : processResult(request),
+      ),
+    );
+    expect(interrupted.exitCode).toBe(ExitCode.Interrupted);
+
+    const unsupported = await runWirelessDiscovery(
+      "pairing",
+      {},
+      deterministicDependencies(async (request) =>
+        commandName(request) === "mdns-services"
+          ? processResult(request, { exitCode: 1, stderr: "unknown mdns command" })
+          : processResult(request),
+      ),
+    );
+    expect(unsupported.exitCode).toBe(ExitCode.AdbOperation);
+    expect(unsupported.result.problems[0]?.code).toBe(ProblemCode.AdbCommandFailed);
+  });
+
+  test("explains manual pairing when discovery has no unique pairing endpoint", async () => {
+    const execution = await runWirelessDiscovery(
+      "connect",
+      {},
+      deterministicDependencies(
+        fixtureRunner({
+          "host-features": "track_mdns\n",
+          "mdns-track-services":
+            'tls {\n service {\n instance: "unknown"\n service: "_adb-tls-connect._tcp"\n ipv4: "192.168.1.20"\n port: 37123\n }\n known_device: false\n}\n',
+        }),
+      ),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Target);
+    expect(execution.result.problems[0]).toMatchObject({
+      code: ProblemCode.WirelessPairingRequired,
+      actions: [{ id: "open_pairing_screen", kind: "user" }],
+    });
+  });
+
   test("preserves failures at every connect verification boundary", async () => {
     const endpoint = "192.168.1.20:37123";
     const missing = await runConnect(endpoint, {}, { locateAdb: async () => undefined });
@@ -917,11 +974,40 @@ describe("wireless target commands", () => {
     const deps = deterministicDependencies(fixtureRunner({}));
     const connection = await runConnect("0.0.0.0:5555", {}, deps);
     const pairing = await runPair("192.168.1.20:41234", "12ab56", {}, deps);
+    const pairingEndpoint = await runPair("0.0.0.0:41234", "123456", {}, deps);
 
     expect(connection.exitCode).toBe(ExitCode.InvalidInput);
     expect(connection.result.problems[0]?.code).toBe(ProblemCode.InvalidEndpoint);
     expect(pairing.exitCode).toBe(ExitCode.InvalidInput);
     expect(pairing.result.problems[0]?.code).toBe(ProblemCode.InvalidPairingCode);
+    expect(pairingEndpoint.exitCode).toBe(ExitCode.InvalidInput);
+    expect(pairingEndpoint.result.problems[0]?.code).toBe(ProblemCode.InvalidEndpoint);
+  });
+
+  test("does not guess when pairing discovery is empty or fails", async () => {
+    const empty = await runPair(
+      undefined,
+      "123456",
+      {},
+      deterministicDependencies(
+        fixtureRunner({ "mdns-services": "List of discovered mdns services\n" }),
+      ),
+    );
+    expect(empty.exitCode).toBe(ExitCode.Target);
+    expect(empty.result.problems[0]?.code).toBe(ProblemCode.WirelessEndpointNotFound);
+
+    const failed = await runPair(
+      undefined,
+      "123456",
+      {},
+      deterministicDependencies(async (request) =>
+        commandName(request) === "mdns-services"
+          ? processResult(request, { exitCode: 1, stderr: "mDNS unavailable" })
+          : processResult(request),
+      ),
+    );
+    expect(failed.exitCode).toBe(ExitCode.AdbOperation);
+    expect(failed.result.problems[0]?.code).toBe(ProblemCode.AdbCommandFailed);
   });
 
   test("plans connect and pair without invoking a mutating ADB command", async () => {

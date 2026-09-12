@@ -100,6 +100,50 @@ describe("agent development tasks", () => {
     ).toBeUndefined();
   });
 
+  test("prunes expired terminal task records and their bounded output files", async () => {
+    const { project, state } = await temporary();
+    const expiredHandle = "66666666-6666-4666-8666-666666666666";
+    const file = await recordFile(project, state, expiredHandle);
+    const projectFingerprint = path.basename(path.dirname(file));
+    await Promise.all([
+      writeFile(
+        file,
+        `${JSON.stringify(
+          storedTask(expiredHandle, {
+            projectFingerprint,
+            status: "completed",
+            ready: true,
+            pid: 0,
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            finishedAt: "2026-01-01T00:00:00.000Z",
+            exitCode: 0,
+          }),
+        )}\n`,
+      ),
+      writeFile(path.join(path.dirname(file), `${expiredHandle}.result.json`), "{}\n"),
+      writeFile(path.join(path.dirname(file), `${expiredHandle}.stderr.log`), "old output\n"),
+    ]);
+
+    const task = await startAgentDevTask({
+      cwd: project,
+      env: {},
+      cliPath: fixture,
+      serial: "fixture-usb",
+      targetIdentity: "hardware-1",
+      directory: state,
+      clock: () => new Date("2026-09-12T10:00:00.000Z"),
+    });
+    await awaitStatus(task.handle, project, state, "completed");
+
+    for (const suffix of [".json", ".result.json", ".stderr.log"]) {
+      expect(
+        await readFile(path.join(path.dirname(file), `${expiredHandle}${suffix}`), "utf8").catch(
+          () => undefined,
+        ),
+      ).toBeUndefined();
+    }
+  });
+
   test("stops only the process owned by a fresh project handle", async () => {
     const { project, state } = await temporary();
     const task = await startAgentDevTask({
@@ -197,6 +241,27 @@ describe("agent development tasks", () => {
     expect(stopped).toMatchObject({ status: "failed", exitCode: 70 });
   });
 
+  test("keeps a fresh task running when its real owner process is alive", async () => {
+    const { project, state } = await temporary();
+    const handle = "88888888-8888-4888-8888-888888888888";
+    const file = await recordFile(project, state, handle);
+    const projectFingerprint = path.basename(path.dirname(file));
+    const now = new Date().toISOString();
+    await writeFile(
+      file,
+      `${JSON.stringify(storedTask(handle, { projectFingerprint, pid: process.pid, updatedAt: now }))}\n`,
+    );
+
+    await expect(
+      getAgentDevTask(handle, {
+        cwd: project,
+        env: {},
+        directory: state,
+        clock: () => new Date(now),
+      }),
+    ).resolves.toMatchObject({ status: "running" });
+  });
+
   test("activates and finalizes the exact agent task supplied through the environment", async () => {
     const { directory } = await temporary();
     for (const fixture of [
@@ -236,6 +301,45 @@ describe("agent development tasks", () => {
         ADB_READY_AGENT_TASK_HANDLE: "invalid",
       }),
     ).toBeUndefined();
+  });
+
+  test("heartbeats an activated task through the runtime scheduler", async () => {
+    const { directory } = await temporary();
+    const handle = "77777777-7777-4777-8777-777777777777";
+    const file = path.join(directory, `${handle}.json`);
+    await writeFile(
+      file,
+      `${JSON.stringify(
+        storedTask(handle, { pid: process.pid, updatedAt: "2026-01-01T00:00:00.000Z" }),
+      )}\n`,
+    );
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    let heartbeat: (() => void) | undefined;
+    globalThis.setInterval = ((callback: () => void) => {
+      heartbeat = callback;
+      return { unref() {} };
+    }) as unknown as typeof setInterval;
+    globalThis.clearInterval = (() => undefined) as typeof clearInterval;
+    try {
+      const activation = await activateAgentTaskFromEnvironment({
+        ADB_READY_AGENT_TASK_FILE: file,
+        ADB_READY_AGENT_TASK_HANDLE: handle,
+      });
+      const activatedAt = JSON.parse(await readFile(file, "utf8")).updatedAt;
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      heartbeat?.();
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const current = JSON.parse(await readFile(file, "utf8"));
+        if (current.updatedAt !== activatedAt) break;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(JSON.parse(await readFile(file, "utf8")).updatedAt).not.toBe(activatedAt);
+      await activation?.finish(0);
+    } finally {
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
   });
 
   test("records startup failure when the managed process cannot be spawned", async () => {

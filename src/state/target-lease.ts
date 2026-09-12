@@ -178,7 +178,15 @@ export async function acquireTargetLease(
     );
   }
   const root = leaseDirectory(options);
-  await mkdir(root, { recursive: true, mode: 0o700 });
+  try {
+    await mkdir(root, { recursive: true, mode: 0o700 });
+  } catch {
+    return {
+      ok: false,
+      code: "TARGET_LEASE_UNAVAILABLE",
+      message: "ADB Ready could not create the target ownership lease.",
+    };
+  }
   const canonicalRoot = await realpath(path.resolve(request.projectRoot)).catch(() =>
     path.resolve(request.projectRoot),
   );

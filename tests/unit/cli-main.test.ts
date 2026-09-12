@@ -1,12 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { type CliDependencies, type CliInput, type CliIo, runCli } from "../../src/cli/main.js";
+import {
+  type CliDependencies,
+  type CliInput,
+  type CliIo,
+  processIo,
+  runCli,
+} from "../../src/cli/main.js";
 import { EventBus } from "../../src/core/event-bus.js";
 import { ExitCode } from "../../src/domain/contracts.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
 import { SessionRecorder } from "../../src/state/session-store.js";
+import { acquireTargetLease } from "../../src/state/target-lease.js";
 import type { TextSink } from "../../src/ui/spinner.js";
 
 class MemoryOutput implements TextSink {
@@ -1221,5 +1228,458 @@ describe("runCli", () => {
     expect(exitCode).toBe(ExitCode.Success);
     expect(streams.error.value).toContain("Connected 192.168.1.20:37123");
     expect(streams.error.value).toContain("Verified  192.168.1.20:37123 · device");
+  });
+
+  test("reports version and agent setup without loading ADB", async () => {
+    const versionStreams = io();
+    const blocked: CliDependencies = {
+      locateAdb: async () => {
+        throw new Error("must not locate ADB");
+      },
+      loadConfig: async () => {
+        throw new Error("must not load project configuration");
+      },
+    };
+    expect(await runCli(["version"], versionStreams, blocked)).toBe(ExitCode.Success);
+    expect(versionStreams.output.value).toMatch(/^\d+\.\d+\.\d+\n$/u);
+
+    const agentStreams = io();
+    expect(
+      await runCli(
+        ["agent", "setup", "generic", "--dry-run", "--json", "--non-interactive"],
+        agentStreams,
+        blocked,
+      ),
+    ).toBe(ExitCode.Success);
+    expect(JSON.parse(agentStreams.output.value)).toMatchObject({
+      command: "agent setup",
+      ok: true,
+      data: { client: "generic", status: "manual" },
+    });
+  });
+
+  test("turns configuration validation failures into redacted structured problems", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.loadConfig = async () => ({
+      ok: false,
+      errors: [
+        {
+          code: "CONFIG_INVALID_VALUE",
+          path: "dev.ready.timeoutMs",
+          message: "dev.ready.timeoutMs must be positive.",
+          source: "project",
+          location: "/project/adb-ready.config.json?token=supersecret",
+        },
+      ],
+    });
+
+    expect(await runCli(["doctor", "--json", "--non-interactive"], streams, fixture)).toBe(
+      ExitCode.InvalidInput,
+    );
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      ok: false,
+      problems: [
+        {
+          code: "CONFIG_INVALID_VALUE",
+          category: "input.configuration",
+          evidence: [{ field: "path", value: "dev.ready.timeoutMs" }, { field: "location" }],
+        },
+      ],
+    });
+    expect(streams.output.value).not.toContain("supersecret");
+  });
+
+  test("fails --last on unreadable state but degrades ordinary selection to a warning", async () => {
+    const failure = {
+      ok: false as const,
+      code: "STATE_INVALID" as const,
+      message: "Saved target state is malformed.",
+      path: "/Users/person/.state/adb-ready/targets.json",
+    };
+    const strictStreams = io();
+    const strict = dependencies();
+    strict.readTargetState = async () => failure;
+    expect(
+      await runCli(["devices", "--last", "--json", "--non-interactive"], strictStreams, strict),
+    ).toBe(ExitCode.Environment);
+    expect(JSON.parse(strictStreams.output.value).problems[0]).toMatchObject({
+      category: "environment.state",
+      severity: "error",
+    });
+
+    const warningStreams = io();
+    const warning = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    warning.readTargetState = async () => failure;
+    expect(
+      await runCli(["apps", "list", "--json", "--non-interactive"], warningStreams, warning),
+    ).toBe(ExitCode.Success);
+    expect(JSON.parse(warningStreams.output.value).problems).toContainEqual(
+      expect.objectContaining({ category: "state.persistence", severity: "warning" }),
+    );
+  });
+
+  test("reports cancelled interactive target and pairing selections without mutating", async () => {
+    const targetStreams = io({ inputTTY: true, errorTTY: true });
+    targetStreams.input.autoInput = "\u001b";
+    const targetFixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\nUSB-2 device model:Pixel_8 transport_id:8\n",
+    );
+    expect(
+      await runCli(
+        ["devices", "--select", "--no-animation", "--no-color"],
+        targetStreams,
+        targetFixture,
+      ),
+    ).toBe(ExitCode.InvalidInput);
+    expect(targetStreams.error.value).toContain("Target selection was cancelled");
+
+    const pairingStreams = io({ inputTTY: true, errorTTY: true });
+    pairingStreams.input.autoInput = "\u0003";
+    const pairingFixture = dependencies();
+    expect(
+      await runCli(
+        ["pair", "192.168.1.20:41234", "--no-animation", "--no-color"],
+        pairingStreams,
+        pairingFixture,
+      ),
+    ).toBe(ExitCode.Interrupted);
+    expect(pairingStreams.error.value).toContain("Pairing code entry was cancelled");
+  });
+
+  test("fails safely when wireless discovery cannot produce a selectable endpoint", async () => {
+    const streams = io({ inputTTY: true, errorTTY: true });
+    const fixture = dependencies();
+    expect(await runCli(["connect", "--no-animation", "--no-color"], streams, fixture)).toBe(
+      ExitCode.Target,
+    );
+    expect(streams.error.value).toContain("No wireless connect endpoint was discovered");
+  });
+
+  test("retains a successful connection when remembered-state persistence fails", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.runner = async (request) => {
+      if (request.args?.includes("connect")) {
+        return result(request, "connected to 192.168.1.20:37123\n");
+      }
+      if (request.args?.includes("get-state")) return result(request, "device\n");
+      if (request.args?.includes("ro.serialno")) return result(request, "PHONE-1\n");
+      return result(request, "");
+    };
+    fixture.writeRememberedTarget = async () => ({
+      ok: false,
+      code: "STATE_UNWRITABLE",
+      message: "State file cannot be written.",
+      path: "/Users/person/.state/adb-ready/targets.json",
+    });
+
+    expect(
+      await runCli(
+        ["connect", "192.168.1.20:37123", "--json", "--non-interactive"],
+        streams,
+        fixture,
+      ),
+    ).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      ok: true,
+      problems: [{ code: "STATE_UNWRITABLE", severity: "warning" }],
+    });
+  });
+
+  test("maps every resolved dev policy into a complete offline plan", async () => {
+    const streams = io();
+    streams.env.PRIVATE_TOKEN = "must-not-leak";
+    const fixture = dependencies();
+    fixture.loadConfig = async () => ({
+      ok: true,
+      config: {
+        values: {
+          adbPath: "/sdk/adb",
+          adbHost: "localhost",
+          adbPort: 5037,
+          timeoutMs: 8_000,
+          devPreset: "custom",
+          packageManager: "bun",
+          devCommand: { executable: "node", args: ["server.mjs"], cwd: "mobile" },
+          devReversePorts: [{ device: 8081, host: 8082 }],
+          devLogs: false,
+          devCleanupPorts: false,
+          devWatch: false,
+          devReadiness: { all: [{ kind: "boot" }], timeoutMs: 12_000, pollIntervalMs: 250 },
+          recoveryMaxAttempts: 4,
+          recoveryInitialDelayMs: 100,
+          recoveryMaxDelayMs: 1_000,
+          recoveryTotalTimeoutMs: 10_000,
+          devHooks: { onReady: [{ run: ["node", "ready.mjs"] }] },
+          journalMaxEntries: 500,
+          journalMaxBytes: 50_000,
+          journalSources: ["child.stdout"],
+          journalMinimumSeverity: "warning",
+          journalRedactEnvironment: ["PRIVATE_TOKEN", "MISSING_TOKEN"],
+          sessionPersist: true,
+          sessionMaxSessions: 5,
+          sessionMaxAgeDays: 7,
+          sessionMaxBytes: 100_000,
+        },
+        provenance: { timeoutMs: { source: "project" } },
+        files: { project: "/project/adb-ready.config.json" },
+      },
+    });
+
+    expect(await runCli(["dev", "--dry-run", "--json"], streams, fixture)).toBe(ExitCode.Success);
+    const payload = JSON.parse(streams.output.value);
+    expect(payload.data).toMatchObject({
+      preset: "custom",
+      command: {
+        executable: "node",
+        args: ["server.mjs"],
+        cwd: path.resolve("/project/mobile"),
+      },
+      ports: { requested: [{ device: "tcp:8081", host: "tcp:8082" }] },
+      plan: {
+        dryRun: true,
+        steps: [
+          { id: "acquire-target" },
+          { id: "reverse-1" },
+          { id: "start-child" },
+          { id: "ready-1" },
+          { id: "hook-onReady-1" },
+        ],
+      },
+    });
+    expect(streams.output.value).not.toContain("must-not-leak");
+  });
+
+  test("classifies unavailable and interrupted target pickers", async () => {
+    const devices =
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\nUSB-2 device model:Pixel_8 transport_id:8\n";
+    const unavailableStreams = io();
+    expect(
+      await runCli(
+        ["devices", "--select", "--no-animation", "--no-color"],
+        unavailableStreams,
+        dependencies(devices),
+      ),
+    ).toBe(ExitCode.InvalidInput);
+    expect(unavailableStreams.error.value).toContain("Interactive target selection is unavailable");
+
+    const interruptedStreams = io({ inputTTY: true, errorTTY: true });
+    interruptedStreams.input.autoInput = "\u0003";
+    expect(
+      await runCli(
+        ["devices", "--select", "--no-animation", "--no-color"],
+        interruptedStreams,
+        dependencies(devices),
+      ),
+    ).toBe(ExitCode.Interrupted);
+    expect(interruptedStreams.error.value).toContain("Target selection was interrupted");
+  });
+
+  test("renders target preflight failure for an interactive target-aware command", async () => {
+    const streams = io({ inputTTY: true, errorTTY: true });
+    const fixture = dependencies();
+    fixture.runner = async (request) =>
+      request.args?.includes("devices")
+        ? { ...result(request, ""), exitCode: 1, stderr: "ADB server unavailable" }
+        : result(request, "");
+    expect(await runCli(["apps", "list", "--no-animation", "--no-color"], streams, fixture)).toBe(
+      ExitCode.AdbOperation,
+    );
+    expect(streams.error.value).toContain("ADB devices failed");
+  });
+
+  test("uses a selected serial when ADB exposes no transport ID", async () => {
+    const streams = io();
+    const fixture = dependencies("List of devices attached\nUSB-1 device model:Pixel_9\n");
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(request, "List of devices attached\nUSB-1 device model:Pixel_9\n");
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+      if (args.includes("list") && args.includes("packages")) {
+        return result(request, "package:/data/app/demo/base.apk=com.example.app\n");
+      }
+      if (args.includes("dumpsys") && args.includes("package")) {
+        return result(request, "Package [com.example.app]\n versionCode=1\n versionName=1.0\n");
+      }
+      if (args.includes("activity") && args.includes("activities")) return result(request, "");
+      return result(request, "");
+    };
+    expect(
+      await runCli(
+        ["app", "info", "com.example.app", "--json", "--non-interactive"],
+        streams,
+        fixture,
+      ),
+    ).toBe(ExitCode.Success);
+    expect(JSON.parse(streams.output.value).data.selected.transport).toMatchObject({
+      serial: "USB-1",
+    });
+  });
+
+  test("reports unavailable and concurrently owned target leases before mutation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-lease-"));
+    const deviceList = "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n";
+    const withIdentity = (leaseDirectory: string): CliDependencies => {
+      const fixture = dependencies(deviceList);
+      fixture.targetLease = { directory: leaseDirectory, heartbeatIntervalMs: 0 };
+      fixture.runner = async (request) => {
+        const args = request.args ?? [];
+        if (args.includes("devices")) return result(request, deviceList);
+        if (args.includes("host-features")) return result(request, "shell_v2\n");
+        if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+        if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+        return result(request, "");
+      };
+      return fixture;
+    };
+
+    try {
+      const blocker = path.join(root, "blocker");
+      await writeFile(blocker, "file");
+      const unavailableStreams = io();
+      expect(
+        await runCli(
+          ["app", "stop", "com.example.app", "--device", "USB-1", "--json", "--non-interactive"],
+          unavailableStreams,
+          withIdentity(path.join(blocker, "leases")),
+        ),
+      ).toBe(ExitCode.Target);
+      expect(JSON.parse(unavailableStreams.output.value).problems[0]).toMatchObject({
+        code: "TARGET_LEASE_UNAVAILABLE",
+      });
+
+      const leaseDirectory = path.join(root, "leases");
+      await mkdir(leaseDirectory);
+      const owner = await acquireTargetLease(
+        { targetIdentity: "PHONE-1", projectRoot: "/another-project", purpose: "CI verification" },
+        { directory: leaseDirectory, heartbeatIntervalMs: 0 },
+      );
+      expect(owner.ok).toBeTrue();
+      const busyStreams = io();
+      expect(
+        await runCli(
+          ["app", "stop", "com.example.app", "--device", "USB-1", "--json", "--non-interactive"],
+          busyStreams,
+          withIdentity(leaseDirectory),
+        ),
+      ).toBe(ExitCode.Target);
+      const busyProblem = JSON.parse(busyStreams.output.value).problems[0];
+      expect(busyProblem.code).toBe("TARGET_BUSY");
+      expect(busyProblem.evidence).toContainEqual(
+        expect.objectContaining({ field: "purpose", value: "CI verification" }),
+      );
+      if (owner.ok) await owner.lease.release();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("lets an interactive user choose among discovered wireless targets", async () => {
+    const streams = io({ inputTTY: true, errorTTY: true });
+    streams.input.autoInput = "\u001b[B\r";
+    const fixture = dependencies();
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("mdns")) {
+        return result(
+          request,
+          "List of discovered mdns services\n" +
+            "adb-A-x _adb-tls-connect._tcp 192.168.1.20:37123\n" +
+            "adb-B-y _adb-tls-connect._tcp 192.168.1.21:37124\n",
+        );
+      }
+      if (args.includes("connect")) return result(request, "connected to 192.168.1.21:37124\n");
+      if (args.includes("get-state")) return result(request, "device\n");
+      if (args.includes("ro.serialno")) return result(request, "PHONE-2\n");
+      return result(request, "");
+    };
+
+    expect(await runCli(["connect", "--no-animation", "--no-color"], streams, fixture)).toBe(
+      ExitCode.Success,
+    );
+    expect(streams.error.value).toContain("Choose a wireless target");
+    expect(streams.error.value).toContain("Connected 192.168.1.21:37124");
+  });
+
+  test("defaults destructive confirmation to cancel at the CLI boundary", async () => {
+    const streams = io({ inputTTY: true, errorTTY: true });
+    streams.input.autoInput = "\r";
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    const requests: ProcessRequest[] = [];
+    fixture.runner = async (request) => {
+      requests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+      if (args.includes("list") && args.includes("packages")) {
+        return result(request, "package:/data/app/demo/base.apk=com.example.app\n");
+      }
+      return result(request, "");
+    };
+
+    expect(
+      await runCli(
+        ["app", "clear-data", "com.example.app", "--no-animation", "--no-color"],
+        streams,
+        fixture,
+      ),
+    ).toBe(ExitCode.Interrupted);
+    expect(streams.error.value).toContain("destructive app action was cancelled");
+    expect(requests.some(({ args }) => args?.includes("clear"))).toBeFalse();
+  });
+
+  test("streams classified human log lines through stderr", async () => {
+    const streams = io();
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+      if (args.includes("logcat")) {
+        const line = "09-10 10:00:00.000  321  322 W Demo: retrying\n";
+        request.onStdoutChunk?.(new TextEncoder().encode(line));
+        return result(request, line);
+      }
+      return result(request, "");
+    };
+
+    expect(await runCli(["logs", "--dump", "--no-animation", "--no-color"], streams, fixture)).toBe(
+      ExitCode.Success,
+    );
+    expect(streams.error.value).toContain("Demo: retrying");
+  });
+
+  test("exposes the actual process streams through processIo", () => {
+    const streams = processIo();
+    expect(streams.input).toBe(process.stdin);
+    expect(streams.output).toBe(process.stdout);
+    expect(streams.error).toBe(process.stderr);
+    expect(streams.cwd).toBe(process.cwd());
+    expect(streams.env).toBe(process.env);
   });
 });

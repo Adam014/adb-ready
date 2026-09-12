@@ -17,8 +17,8 @@ process.stdout.write(
 
 /** @type {Array<[string, { found: number; hit: number; ratio: number }, number]>} */
 const checks = [
-  ["lines", summary.lines, 0.9],
-  ["functions", summary.functions, 0.9],
+  ["lines", summary.lines, 0.95],
+  ["functions", summary.functions, 0.95],
 ];
 const failures = checks
   .filter(([, value, minimum]) => value.ratio < minimum)

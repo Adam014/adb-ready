@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EventBus } from "../../src/core/event-bus.js";
@@ -113,6 +113,39 @@ describe("SessionRecorder", () => {
       const sessions = await listSessions({ directory });
       expect(sessions).toMatchObject({ ok: true, value: [{ status: "running" }] });
       await recorder.finish({ status: "interrupted", finishedAt: new Date().toISOString() });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("reports an event persistence failure instead of claiming a complete session", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-sessions-failure-"));
+    try {
+      const bus = new EventBus();
+      const recorder = await SessionRecorder.create(
+        bus,
+        {
+          sessionId: "session-write-failure",
+          command: "dev",
+          startedAt: "2026-09-10T10:00:00.000Z",
+        },
+        { directory },
+      );
+      const events = path.join(directory, "session-write-failure.ndjson");
+      await rm(events);
+      await mkdir(events);
+      bus.emit({
+        type: "target.selected",
+        source: "target",
+        severity: "info",
+        message: "Connected endpoint-secret",
+        correlation: { commandId: "command-1", targetId: "target-secret" },
+        data: { args: ["connect", "endpoint-secret"] },
+      });
+
+      await expect(
+        recorder.finish({ status: "completed", finishedAt: "2026-09-10T10:01:00.000Z" }),
+      ).resolves.toMatchObject({ ok: false, code: "SESSION_UNWRITABLE" });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
