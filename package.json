@@ -1,6 +1,6 @@
 {
   "name": "adb-ready",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Agent-ready Android CLI for reliable ADB sessions, app automation, and verified evidence.",
   "private": false,
   "type": "module",
