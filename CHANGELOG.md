@@ -9,6 +9,24 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Publish the verified LCOV report to Codecov through short-lived GitHub OIDC
+  credentials and show the measured `main` coverage in a live README badge.
+
+### Changed
+
+- Raise the authoritative LCOV line and function coverage floors from 90% to
+  95% with additional lifecycle, recovery, agent, configuration, persistence,
+  platform, terminal, and protocol boundary tests.
+
+### Fixed
+
+- Keep a development session running when optional local session history cannot
+  be initialized or finalized, while reporting the persistence gap as a warning.
+- Return a structured target-lease availability error when its per-user state
+  directory cannot be created instead of leaking an internal filesystem error.
+
 ## [0.3.3] - 2026-09-11
 
 ### Changed

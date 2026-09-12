@@ -9,7 +9,7 @@ verified evidence—for developers, agents, and CI.
 
 [![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
 [![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/LCOV-%E2%89%A590%25-16a34a)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/Adam014/adb-ready/graph/badge.svg?branch=main)](https://app.codecov.io/gh/Adam014/adb-ready)
 [![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
