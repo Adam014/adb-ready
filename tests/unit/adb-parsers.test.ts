@@ -49,6 +49,19 @@ describe("parseAdbDevices", () => {
     expect(devices[0]?.unparsed.length).toBeGreaterThan(0);
   });
 
+  test("preserves a Bonjour collision suffix inside an mDNS transport serial", async () => {
+    const devices = parseAdbDevices(await fixture("devices-mdns-collision.txt"));
+
+    expect(devices).toHaveLength(2);
+    expect(devices[1]).toMatchObject({
+      serial: "adb-EXAMPLE-random (2)._adb-tls-connect._tcp",
+      state: "device",
+      model: "Example Phone",
+      transportId: "1",
+      unparsed: [],
+    });
+  });
+
   test("returns an empty list for a valid empty response", async () => {
     expect(parseAdbDevices(await fixture("devices-empty.txt"))).toEqual([]);
   });

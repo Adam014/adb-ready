@@ -36,7 +36,7 @@ if (!Array.isArray(files)) {
 }
 
 const forbidden = files.filter((file) =>
-  /^(AGENTS\.md|context\/|src\/|scripts\/|tests\/|node_modules\/|bun\.lock$)/u.test(file),
+  /^(AGENTS\.md|context\/|src\/|scripts\/|tests\/|node_modules\/|bun\.lock$)|\.map$/u.test(file),
 );
 if (forbidden.length > 0) {
   throw new Error(`private or development files entered the package: ${forbidden.join(", ")}`);

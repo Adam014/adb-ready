@@ -1,6 +1,6 @@
 {
   "name": "adb-ready",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Agent-ready Android CLI for reliable ADB sessions, app automation, and verified evidence.",
   "private": false,
   "type": "module",
@@ -11,7 +11,7 @@
   "files": [
     "CHANGELOG.md",
     "COMPATIBILITY.md",
-    "dist",
+    "dist/cli.js",
     "docs",
     "examples",
     "LICENSE",
@@ -34,6 +34,7 @@
     "ui:check": "bun run scripts/ui-playground.ts --all --non-interactive",
     "test": "bun test",
     "test:coverage": "bun test --coverage && bun run scripts/coverage-check.mjs",
+    "test:coverage:diff": "bun run scripts/coverage-diff-check.mjs",
     "test:commands": "bun run build && bun run scripts/command-matrix.mjs",
     "test:package-managers": "bun run build && bun run scripts/package-manager-smoke.mjs",
     "test:integration": "bun test tests/integration",

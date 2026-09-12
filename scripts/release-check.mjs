@@ -156,7 +156,9 @@ if (packed.exitCode !== 0) {
       requireCondition(files.includes(required), `packed artifact is missing ${required}`);
     }
     const forbidden = files.filter((file) =>
-      /^(AGENTS\.md|context\/|scripts\/|src\/|tests\/|node_modules\/|bun\.lock$)/u.test(file),
+      /^(AGENTS\.md|context\/|scripts\/|src\/|tests\/|node_modules\/|bun\.lock$)|\.map$/u.test(
+        file,
+      ),
     );
     requireCondition(
       forbidden.length === 0,

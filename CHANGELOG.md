@@ -9,6 +9,26 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-12
+
+### Changed
+
+- Enforce at least 95% coverage of measurable executable lines added or
+  replaced by a pull request, in addition to the existing repository-wide
+  line and function coverage floors.
+- Keep external source maps available in local builds while excluding their
+  unreferenced payload from the published npm package.
+- Make the read-only real-ADB check report logical targets and raw transports
+  separately and fail when ADB returns an unrecognized device state.
+
+### Fixed
+
+- Preserve complete mDNS transport serials containing Bonjour collision
+  suffixes such as ` (2)`, preventing one physical device from appearing as a
+  second unknown target.
+- Classify connected `_adb-tls-connect._tcp` service transports as TLS even
+  when their mDNS serial contains a Bonjour collision suffix.
+
 ## [0.3.4] - 2026-09-12
 
 ### Added
@@ -242,7 +262,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/Adam014/adb-ready/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Adam014/adb-ready/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Adam014/adb-ready/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Adam014/adb-ready/compare/v0.3.1...v0.3.2

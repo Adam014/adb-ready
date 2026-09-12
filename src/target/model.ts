@@ -124,6 +124,8 @@ function transportKind(
       : "tcp";
   }
   if (isMdnsServiceSerial(device.serial)) {
+    if (/\._adb-tls-connect\._tcp(?:\.|$)/iu.test(device.serial)) return "tls";
+    if (/\._adb\._tcp(?:\.|$)/iu.test(device.serial)) return "tcp";
     return "unknown";
   }
   if (device.usb !== undefined || device.serial !== "") {

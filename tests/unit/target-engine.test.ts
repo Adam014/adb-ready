@@ -3,11 +3,16 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   type AdbDevice,
+  parseAdbDevices,
   parseAdbMdnsServices,
   parseAdbMdnsTrackServices,
   parseAdbNetworkEndpoint,
 } from "../../src/adb/parsers.js";
-import { buildTargetInventory, isStableAdbSerial } from "../../src/target/model.js";
+import {
+  buildTargetInventory,
+  correlateMdnsTransportIdentities,
+  isStableAdbSerial,
+} from "../../src/target/model.js";
 import { selectTarget } from "../../src/target/selection.js";
 
 const fixture = (name: string) =>
@@ -96,6 +101,31 @@ describe("target inventory", () => {
     expect(
       inventory.targets.find(({ serial }) => serial === "emulator-5554")?.transports[0]?.kind,
     ).toBe("emulator");
+  });
+
+  test("correlates an mDNS transport whose Bonjour instance has a collision suffix", async () => {
+    const devices = parseAdbDevices(await fixture("devices-mdns-collision.txt"));
+    const services = parseAdbMdnsServices(await fixture("mdns-collision.txt"));
+    const correlated = correlateMdnsTransportIdentities(
+      devices.map((observed) => ({
+        device: observed,
+        ...(observed.serial === "192.0.2.42:37199" ? { hardwareSerial: "PHONE-1" } : {}),
+      })),
+      services,
+    );
+    const inventory = buildTargetInventory(correlated, services);
+
+    expect(inventory.targets).toHaveLength(1);
+    expect(inventory.targets[0]).toMatchObject({
+      hardwareSerial: "PHONE-1",
+      serial: "192.0.2.42:37199",
+      state: "device",
+    });
+    expect(inventory.targets[0]?.transports.map(({ serial }) => serial)).toEqual([
+      "192.0.2.42:37199",
+      "adb-EXAMPLE-random (2)._adb-tls-connect._tcp",
+    ]);
+    expect(inventory.targets[0]?.transports.map(({ kind }) => kind)).toEqual(["tls", "tls"]);
   });
 
   test("never treats mDNS service names or unspecified addresses as stable serials", () => {

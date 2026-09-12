@@ -108,6 +108,34 @@ function normalizeState(tokens: string[]): { state: AdbDeviceState; consumed: nu
   return { state: "unknown", consumed: candidate === undefined ? 0 : 1 };
 }
 
+function splitDeviceLine(line: string): { serial: string; tokens: string[] } | undefined {
+  // ADB can expose Bonjour collision suffixes inside an mDNS transport serial,
+  // for example `adb-... (2)._adb-tls-connect._tcp`. Splitting the first token
+  // would truncate that valid transport identity and shift the real state into
+  // the unparsed details. Prefer the documented state boundary and retain the
+  // original fallback for future states we do not know yet.
+  const knownState = line.match(
+    /^(.+?)\s+(no\s+permissions|bootloader|device|offline|recovery|sideload|unauthorized)(?:\s+(.*))?$/u,
+  );
+  if (knownState !== null) {
+    const serial = knownState[1]?.trim();
+    const state = knownState[2];
+    if (serial === undefined || serial === "" || state === undefined) return undefined;
+    const details = knownState[3]?.trim();
+    return {
+      serial,
+      tokens: [
+        ...state.split(/\s+/u),
+        ...(details === undefined || details === "" ? [] : details.split(/\s+/u)),
+      ],
+    };
+  }
+
+  const tokens = line.split(/\s+/u);
+  const serial = tokens.shift();
+  return serial === undefined || serial === "" ? undefined : { serial, tokens };
+}
+
 export function parseAdbDevices(output: string): AdbDevice[] {
   const devices: AdbDevice[] = [];
   let sawHeader = false;
@@ -125,11 +153,9 @@ export function parseAdbDevices(output: string): AdbDevice[] {
       continue;
     }
 
-    const tokens = line.split(/\s+/u);
-    const serial = tokens.shift();
-    if (serial === undefined || serial === "") {
-      continue;
-    }
+    const fields = splitDeviceLine(line);
+    if (fields === undefined) continue;
+    const { serial, tokens } = fields;
 
     const { state, consumed } = normalizeState(tokens);
     const details = tokens.slice(consumed);
