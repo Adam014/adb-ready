@@ -235,25 +235,33 @@ describe("locateAdb", () => {
 
   test("resolves a named explicit executable and quoted PATH entry without a shell", async () => {
     const directory = await temporaryDirectory();
-    const executable = path.join(directory, "custom-adb");
+    const name = process.platform === "win32" ? "custom-adb.exe" : "custom-adb";
+    const executable = path.join(directory, name);
     await writeFile(executable, "fixture", { mode: 0o755 });
     const env = { PATH: `"${directory}"` };
-    expect(await locateExecutable("custom-adb", { env, platform: "linux" })).toBe(executable);
-    expect(await locateAdb({ explicitPath: "custom-adb", env, platform: "linux" })).toBe(
+    expect(await locateExecutable(name, { env, platform: process.platform })).toBe(executable);
+    expect(await locateAdb({ explicitPath: name, env, platform: process.platform })).toBe(
       executable,
     );
-    expect(await locateAdb({ explicitPath: "   ", env, platform: "linux" })).toBeUndefined();
+    expect(
+      await locateAdb({ explicitPath: "   ", env, platform: process.platform }),
+    ).toBeUndefined();
   });
 
-  test("falls back to the conventional Linux SDK directory", async () => {
+  test("falls back to the conventional SDK directory for the active platform", async () => {
     const directory = await temporaryDirectory();
-    const platformTools = path.join(directory, "Android", "Sdk", "platform-tools");
-    const executable = path.join(platformTools, "adb");
+    const sdkRoot =
+      process.platform === "darwin"
+        ? path.join(directory, "Library", "Android", "sdk")
+        : path.join(directory, "Android", "Sdk");
+    const platformTools = path.join(sdkRoot, "platform-tools");
+    const executable = path.join(platformTools, process.platform === "win32" ? "adb.exe" : "adb");
     await mkdir(platformTools, { recursive: true });
     await writeFile(executable, "fixture", { mode: 0o755 });
-    expect(
-      await locateAdb({ env: { PATH: "" }, homeDirectory: directory, platform: "linux" }),
-    ).toBe(executable);
+    const env = process.platform === "win32" ? { PATH: "", LOCALAPPDATA: directory } : { PATH: "" };
+    expect(await locateAdb({ env, homeDirectory: directory, platform: process.platform })).toBe(
+      executable,
+    );
   });
 
   test("honors only directly spawnable Windows executable extensions", async () => {

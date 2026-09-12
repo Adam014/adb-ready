@@ -99,7 +99,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write
+      id-token: write # Exchange the workflow identity for a short-lived Codecov upload token.
 
     steps:
       - name: Check out repository

@@ -1433,7 +1433,11 @@ describe("runCli", () => {
     const payload = JSON.parse(streams.output.value);
     expect(payload.data).toMatchObject({
       preset: "custom",
-      command: { executable: "node", args: ["server.mjs"], cwd: "/project/mobile" },
+      command: {
+        executable: "node",
+        args: ["server.mjs"],
+        cwd: path.resolve("/project/mobile"),
+      },
       ports: { requested: [{ device: "tcp:8081", host: "tcp:8082" }] },
       plan: {
         dryRun: true,
