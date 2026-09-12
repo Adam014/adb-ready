@@ -859,4 +859,93 @@ describe("parseArguments", () => {
       option: "--dry-run",
     });
   });
+
+  test("rejects malformed values for every bounded public option", () => {
+    const cases: Array<{ argv: string[]; option?: string }> = [
+      { argv: ["doctor", "--format", "xml"], option: "--format" },
+      { argv: ["doctor", "--device="], option: "--device" },
+      { argv: ["devices", "--transport-id", "abc"], option: "--transport-id" },
+      { argv: ["dev", "--preset", "cordova"], option: "--preset" },
+      { argv: ["dev", "--package-manager", "other"], option: "--package-manager" },
+      { argv: ["dev", "--port", "70000"], option: "--port" },
+      { argv: ["logs", "--package", "invalid"], option: "--package" },
+      { argv: ["logs", "--pid", "0"], option: "--pid" },
+      { argv: ["logs", "--tag", "bad:tag"], option: "--tag" },
+      { argv: ["logs", "--exclude-tag", "bad tag"], option: "--exclude-tag" },
+      { argv: ["logs", "--buffer", "radio"], option: "--buffer" },
+      { argv: ["logs", "--since", "yesterday"], option: "--since" },
+      { argv: ["sessions", "--since", "never"], option: "--since" },
+      { argv: ["sessions", "--status", "unknown"], option: "--status" },
+      { argv: ["sessions", "--limit", "101"], option: "--limit" },
+      { argv: ["context", "--only", "logs,secrets"], option: "--only" },
+      { argv: ["logs", "--tail", "0"], option: "--tail" },
+      { argv: ["logs", "--level", "X"], option: "--level" },
+      { argv: ["capture", "screenshot", "--out="], option: "--out" },
+      { argv: ["capture", "screen-record", "--duration", "1.5s"], option: "--duration" },
+      { argv: ["ui", "wait", "text=Ready", "--state", "hidden"], option: "--state" },
+      { argv: ["inspect", "ui", "--max-depth", "101"], option: "--max-depth" },
+      { argv: ["app", "launch", "--activity", "bad activity"], option: "--activity" },
+      { argv: ["apps", "list", "--filter="], option: "--filter" },
+      { argv: ["logs", "--max-records", "0"], option: "--max-records" },
+      { argv: ["context", "--budget", "999"], option: "--budget" },
+      { argv: ["doctor", "--timeout", "forever"], option: "--timeout" },
+      { argv: ["run", "--run-timeout", "0s", "--", "true"], option: "--run-timeout" },
+      { argv: ["doctor", "--adb="], option: "--adb" },
+      { argv: ["doctor", "--adb-host="], option: "--adb-host" },
+      { argv: ["doctor", "--adb-port", "0"], option: "--adb-port" },
+      { argv: ["doctor", "--config="], option: "--config" },
+      { argv: ["doctor", "--profile", "bad profile"], option: "--profile" },
+    ];
+
+    for (const scenario of cases) {
+      expect(parseArguments(scenario.argv)).toMatchObject({
+        ok: false,
+        code: "CLI_INVALID_VALUE",
+        ...(scenario.option === undefined ? {} : { option: scenario.option }),
+      });
+    }
+    expect(parseArguments(["doctor", "--quiet=true"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_OPTION",
+      option: "--quiet",
+    });
+  });
+
+  test("rejects every option outside the workflow that owns it", () => {
+    const cases = [
+      ["doctor", "--package", "com.example.app"],
+      ["doctor", "--select"],
+      ["doctor", "--device", "USB-1"],
+      ["doctor", "--pairing-code-stdin"],
+      ["doctor", "--last"],
+      ["doctor", "--dry-run"],
+      ["doctor", "--interactive-only"],
+      ["doctor", "--max-depth", "2"],
+      ["doctor", "--submit"],
+      ["doctor", "--state", "gone"],
+      ["ui", "audit", "--dry-run"],
+      ["doctor", "--out", "screen.png"],
+      ["capture", "screenshot", "--duration", "1s"],
+      ["doctor", "--user"],
+      ["doctor", "--filter", "example"],
+      ["doctor", "--activity", ".MainActivity"],
+      ["app", "info", "--replace"],
+      ["app", "info", "--allow-destructive"],
+      ["doctor", "--preset", "expo"],
+      ["doctor", "--run-timeout", "1m"],
+      ["doctor", "--tag", "Demo"],
+      ["doctor", "--budget", "1000"],
+      ["doctor", "--format", "markdown"],
+      ["doctor", "--force"],
+    ];
+
+    for (const argv of cases) {
+      expect(parseArguments(argv)).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    }
+    expect(parseArguments(["doctor", "--only", "logs"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+      option: "--only",
+    });
+  });
 });

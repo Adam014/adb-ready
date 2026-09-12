@@ -35,6 +35,25 @@ describe("target leases", () => {
     ).rejects.toThrow("heartbeatIntervalMs must be non-negative and less than ttlMs");
   });
 
+  test("reports an unavailable lease root as a structured acquisition failure", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-lease-root-"));
+    const unavailableRoot = path.join(directory, "not-a-directory");
+    try {
+      await writeFile(unavailableRoot, "occupied\n");
+      const result = await acquireTargetLease(
+        { targetIdentity: "phone-1", projectRoot: "/project", purpose: "dev" },
+        { directory: unavailableRoot, heartbeatIntervalMs: 0 },
+      );
+      expect(result).toEqual({
+        ok: false,
+        code: "TARGET_LEASE_UNAVAILABLE",
+        message: "ADB Ready could not create the target ownership lease.",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("prevents concurrent ownership and releases only its own lease", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-lease-"));
     try {

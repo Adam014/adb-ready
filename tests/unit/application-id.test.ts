@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { resolveApplicationId } from "../../src/app/application-id.js";
 
@@ -90,5 +92,22 @@ describe("application ID resolution", () => {
       ...files({}),
     });
     expect(many).toMatchObject({ kind: "ambiguous" });
+  });
+
+  test("discovers application metadata through the production filesystem adapters", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-application-id-"));
+    try {
+      await writeFile(
+        path.join(root, "app.json"),
+        JSON.stringify({ expo: { android: { package: "com.example.filesystem" } } }),
+      );
+      expect(await resolveApplicationId({ root })).toMatchObject({
+        kind: "resolved",
+        applicationId: "com.example.filesystem",
+        provenance: { source: "expo" },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

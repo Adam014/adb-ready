@@ -190,7 +190,10 @@ describe("MCP server protocol", () => {
       cwd: root,
       env,
       dependencies: dependencies(),
-      targetLease: false,
+      targetLease: {
+        directory: path.join(root, "leases"),
+        heartbeatIntervalMs: 0,
+      },
       version: "0.3.3-test",
     });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -217,6 +220,13 @@ describe("MCP server protocol", () => {
       expect(
         resultBody(await peer.request("resources/templates/list")).resourceTemplates,
       ).toBeArrayOfSize(3);
+
+      expect(await callTool(peer, "inspect_ui")).toMatchObject({
+        structuredContent: {
+          ok: false,
+          problems: [{ code: "MCP_TARGET_NOT_BOUND" }],
+        },
+      });
 
       expect(await callTool(peer, "doctor")).toMatchObject({ structuredContent: { ok: true } });
       expect(await callTool(peer, "list_targets")).toMatchObject({
@@ -298,6 +308,32 @@ describe("MCP server protocol", () => {
           structuredContent: { ok: false },
         },
       );
+      expect(
+        await callTool(peer, "install_app", { ...target, path: "/tmp/outside.apk" }),
+      ).toMatchObject({
+        structuredContent: {
+          ok: false,
+          problems: [{ code: "MCP_PATH_OUTSIDE_PROJECT" }],
+        },
+      });
+      const alternateUiCalls: Array<[string, Record<string, unknown>]> = [
+        ["find_ui", { ...target, selector: { field: "text", value: "Open" }, limit: 1 }],
+        ["get_ui", { ...target, selector: "text=Open", occurrence: 1 }],
+        ["assert_ui", { ...target, selector: "text=Open", state: "visible" }],
+        ["tap_ui", { ...target, target: { ref: "ui:000000000000:1" }, dryRun: true }],
+        ["tap_ui", { ...target, target: { selector: "text=Open", occurrence: 1 }, dryRun: true }],
+        ["tap_ui", { ...target, target: { x: 120, y: 150 }, dryRun: true }],
+        ["long_press_ui", { ...target, target: { ref: "ui:000000000000:1" }, dryRun: true }],
+        [
+          "long_press_ui",
+          { ...target, target: { selector: "text=Open", occurrence: 1 }, dryRun: true },
+        ],
+        ["long_press_ui", { ...target, target: { x: 120, y: 150 }, dryRun: true }],
+        ["swipe_ui", { ...target, x1: 10, y1: 20, x2: 30, y2: 40, dryRun: true }],
+      ];
+      for (const [name, args] of alternateUiCalls) {
+        expect(await callTool(peer, name, args)).toHaveProperty("structuredContent");
+      }
 
       for (const uri of [
         "adb-ready://targets",
@@ -308,6 +344,43 @@ describe("MCP server protocol", () => {
       ]) {
         expect(resultBody(await peer.request("resources/read", { uri })).contents).toBeArray();
       }
+    } finally {
+      await server.close();
+      await peer.close();
+    }
+  });
+
+  test("returns configuration failures through both tools and resources", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-mcp-invalid-config-"));
+    roots.push(root);
+    await writeFile(path.join(root, "adb-ready.config.json"), '{"version":2}\n');
+    const server = createAdbReadyMcpServer({
+      cwd: root,
+      env: { ...process.env, XDG_CONFIG_HOME: path.join(root, "config") },
+      dependencies: dependencies(),
+      targetLease: false,
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const peer = new McpPeer(clientTransport);
+    await peer.start();
+    await server.connect(serverTransport);
+    try {
+      await peer.request("initialize", {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "adb-ready-tests", version: "1" },
+      });
+      await peer.notify("notifications/initialized");
+      expect(await callTool(peer, "doctor")).toMatchObject({
+        structuredContent: { ok: false, problems: [{ code: "MCP_CONFIG_INVALID" }] },
+      });
+      const resource = resultBody(
+        await peer.request("resources/read", { uri: "adb-ready://targets" }),
+      ) as { contents: Array<{ text: string }> };
+      expect(JSON.parse(resource.contents[0]?.text ?? "{}")).toMatchObject({
+        ok: false,
+        problems: [{ code: "CONFIG_INVALID_VALUE" }],
+      });
     } finally {
       await server.close();
       await peer.close();

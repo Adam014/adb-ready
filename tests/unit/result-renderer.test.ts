@@ -338,7 +338,7 @@ describe("result renderer", () => {
           runtime: { name: "node", version: "22", platform: "linux", architecture: "x64" },
           adb: { path: "/sdk/adb", version: { platformToolsVersion: "37" }, hostFeatures: [] },
           devices: [],
-          targets: [],
+          targets: [target],
           discovery: { mdns: { services: [] } },
         },
         expected: "Runtime",
@@ -421,7 +421,17 @@ describe("result renderer", () => {
       },
       {
         command: "open",
-        data: { selected, url: "demo://ready", status: "planned", verified: false },
+        data: {
+          selected,
+          url: "demo://ready",
+          status: "planned",
+          verified: false,
+          plan: {
+            schemaVersion: 1,
+            dryRun: true,
+            steps: [{ id: "open-url", title: "Open demo URL", risk: "device-reversible" }],
+          },
+        },
         expected: "no changes made",
       },
       {
@@ -499,9 +509,9 @@ describe("result renderer", () => {
         expected: "Sessions (1)",
       },
       {
-        command: "sessions show",
+        command: "sessions events",
         data: {
-          action: "show",
+          action: "events",
           session: {
             sessionId: "session-1",
             status: "completed",
@@ -509,13 +519,29 @@ describe("result renderer", () => {
             eventCount: 0,
             eventBytes: 0,
           },
+          events: [
+            {
+              schemaVersion: 1,
+              sequence: 1,
+              timestamp: "2026-09-10T10:00:00.000Z",
+              type: "target.selected",
+              source: "target",
+              severity: "info",
+              message: "Target selected",
+              correlation: { commandId: "command-1" },
+            },
+          ],
         },
         expected: "Started",
       },
       {
         command: "problems",
-        data: { sessionId: "session-1", status: "completed", problems: [] },
-        expected: "No recorded problems",
+        data: {
+          sessionId: "session-1",
+          status: "completed",
+          problems: [{ code: "TARGET_LOST", summary: "Target disconnected" }],
+        },
+        expected: "Target disconnected",
       },
       {
         command: "context",

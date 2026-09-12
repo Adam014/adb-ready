@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { AdbClient } from "../../src/adb/client.js";
 import {
   createAdbReadinessProbe,
@@ -131,6 +133,17 @@ describe("waitForReadiness", () => {
       }),
     ).toMatchObject({ ready: false, attempts: 0, timedOut: false, assertions: [] });
   });
+
+  test("supports the production clock and abort-aware sleeper", async () => {
+    const assertion = { kind: "boot" as const };
+    const result = await waitForReadiness(
+      [assertion],
+      async () => ({ assertion, status: "failed", detail: "waiting", durationMs: 0 }),
+      { timeoutMs: 2, pollIntervalMs: 1 },
+    );
+
+    expect(result).toMatchObject({ ready: false, timedOut: true });
+  });
 });
 
 describe("ADB readiness probes", () => {
@@ -174,6 +187,53 @@ describe("ADB readiness probes", () => {
         contains: "ready",
       }),
     ).toMatchObject({ status: "unsupported" });
+  });
+
+  test("uses real bounded TCP and HTTP probes when no adapter is supplied", async () => {
+    const tcp = createNetServer();
+    await new Promise<void>((resolve) => tcp.listen(0, "127.0.0.1", resolve));
+    const tcpAddress = tcp.address();
+    if (tcpAddress === null || typeof tcpAddress === "string") throw new Error("Missing TCP port");
+
+    const http = createHttpServer((_request, response) => {
+      response.writeHead(204).end();
+    });
+    await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+    const httpAddress = http.address();
+    if (httpAddress === null || typeof httpAddress === "string") {
+      throw new Error("Missing HTTP port");
+    }
+
+    const probe = createAdbReadinessProbe({ client: client(), target });
+    try {
+      await expect(
+        probe({ kind: "host-port", host: "127.0.0.1", port: tcpAddress.port }),
+      ).resolves.toMatchObject({ status: "passed" });
+      await expect(
+        probe({ kind: "http", url: `http://127.0.0.1:${String(httpAddress.port)}` }),
+      ).resolves.toMatchObject({ status: "passed" });
+    } finally {
+      await Promise.all([
+        new Promise<void>((resolve, reject) =>
+          tcp.close((error) => (error === undefined ? resolve() : reject(error))),
+        ),
+        new Promise<void>((resolve, reject) =>
+          http.close((error) => (error === undefined ? resolve() : reject(error))),
+        ),
+      ]);
+    }
+
+    await expect(
+      probe({ kind: "host-port", host: "127.0.0.1", port: tcpAddress.port }),
+    ).resolves.toMatchObject({ status: "failed" });
+
+    const controller = new AbortController();
+    const cancelled = probe(
+      { kind: "host-port", host: "192.0.2.1", port: 65_534 },
+      controller.signal,
+    );
+    controller.abort();
+    await expect(cancelled).resolves.toMatchObject({ status: "failed" });
   });
 
   test("checks Android boot, lock, process, foreground, and activity state", async () => {

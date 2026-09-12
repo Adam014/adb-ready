@@ -2385,15 +2385,16 @@ export async function runDev(
         },
       );
     } catch {
-      problems.push(
-        commandProblem(
+      problems.push({
+        ...commandProblem(
           ProblemCode.SessionPersistenceFailed,
           "session.persistence",
           "Session history could not be started.",
           "The development session can continue, but this run will not be available afterward.",
           context.commandId,
         ),
-      );
+        severity: "warning",
+      });
     }
   }
   const complete = async (
@@ -2442,15 +2443,16 @@ export async function runDev(
         ...(data?.preset === undefined ? {} : { preset: data.preset }),
       });
       if (!persisted.ok) {
-        execution.result.problems.push(
-          commandProblem(
+        execution.result.problems.push({
+          ...commandProblem(
             ProblemCode.SessionPersistenceFailed,
             "session.persistence",
             persisted.message,
             "The development session completed, but its local history is incomplete.",
             context.commandId,
           ),
-        );
+          severity: "warning",
+        });
       }
     }
     return execution;
