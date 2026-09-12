@@ -11,7 +11,7 @@
   "files": [
     "CHANGELOG.md",
     "COMPATIBILITY.md",
-    "dist",
+    "dist/cli.js",
     "docs",
     "examples",
     "LICENSE",
