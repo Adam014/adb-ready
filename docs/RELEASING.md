@@ -24,7 +24,8 @@ The workflow does not use a long-lived npm write token.
 Release evidence has three tiers:
 
 - **Every release:** the complete fixture, unit, integration, runtime, package,
-  documentation, privacy, and release-artifact verification gate must pass.
+  documentation, privacy, coverage, and release-artifact verification gate must
+  pass. Pull requests must also satisfy the 95% changed-line coverage gate.
 - **Device-behavior changes:** rerun every affected workflow on a real target
   and record the exact host, target, Android version, and transport. A
   documentation, metadata, or machine-output-only patch does not manufacture

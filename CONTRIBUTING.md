@@ -37,8 +37,11 @@ bun run verify:real-adb
 ```
 
 The authoritative verification enforces at least 95% LCOV line and function
-coverage, then generates `coverage/lcov.info`. CI publishes the verified report
-to Codecov, which supplies the live coverage badge in the README. Coverage measures
+coverage, then generates `coverage/lcov.info`. CI requires at least 95% overall
+line and function coverage and at least 95% coverage of measurable executable
+lines added or replaced by a pull request. New executable source that is absent
+from LCOV fails closed. CI publishes the verified report to Codecov, which supplies
+the live coverage badge in the README. Coverage measures
 exercised code; it does not replace the real-device acceptance matrix.
 
 The real-ADB verification is read-only. Do not add a hardware mutation to it.
