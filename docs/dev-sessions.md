@@ -98,6 +98,22 @@ Configure the budget explicitly:
 
 Set `dev.watch` to `false` only for a deliberately one-shot child process.
 
+## Live terminal controls
+
+An interactive `adb-ready dev` session shows a compact control bar after it
+becomes ready. ADB Ready preserves the framework's native terminal input rather
+than intercepting or redefining it:
+
+- Expo shows `r` reload, `m` developer menu, `j` debugger, and `?` commands.
+- Flutter shows `r` hot reload, `R` hot restart, and `h` commands.
+- Other presets state that framework input is active without promising
+  unsupported shortcuts.
+- `Ctrl+C` stops the owned child and performs the normal verified cleanup.
+
+The control bar is never rendered by `run`, JSON/NDJSON output, redirected
+streams, CI, `--non-interactive`, or `--quiet`. This keeps scripts deterministic
+and leaves arbitrary child input untouched.
+
 ## Lifecycle hooks
 
 Supported phases are:

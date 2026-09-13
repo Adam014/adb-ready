@@ -9,6 +9,11 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Show a compact, preset-aware live control bar in interactive `dev` sessions
+  while preserving the framework's native stdin and keeping automation silent.
+
 ### Fixed
 
 - Make `adb-ready help version` follow the same focused-help contract as every

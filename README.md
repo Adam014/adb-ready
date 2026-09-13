@@ -133,6 +133,11 @@ adb-ready dev -- pnpm run android:local
 adb-ready dev --dry-run --json
 ```
 
+In an interactive Expo or Flutter session, ADB Ready shows the framework's
+active reload, developer-menu, debugger, and help shortcuts as soon as the
+session is ready. Input continues directly to the framework; automation and
+redirected output stay prompt-free.
+
 [Reach your first ready session →](./docs/getting-started.md)
 
 ### In CI and automation

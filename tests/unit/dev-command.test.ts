@@ -287,6 +287,10 @@ describe("runDev", () => {
     expect(serializedJournal).toContain("child.stdout");
     expect(serializedJournal).toContain("log.record");
     expect(
+      execution.result.data?.journal.events.find(({ type }) => type === "child.started")?.data
+        ?.preset,
+    ).toBe("custom");
+    expect(
       execution.result.data?.journal.events
         .filter(({ type }) => type === "session.state.changed")
         .map(({ data }) => data?.to),

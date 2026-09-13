@@ -3000,7 +3000,7 @@ export async function runDev(
     severity: "info",
     message: `Starting ${preset} development command`,
     correlation: targetCorrelation,
-    data: commandData,
+    data: { ...commandData, preset },
   });
   const childController = new AbortController();
   if (signal?.aborted === true) childController.abort();
