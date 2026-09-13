@@ -349,6 +349,11 @@ List filters:
   --preset NAME          Keep sessions using one development preset
   --limit COUNT          Return at most 1-100 sessions
 `,
+  version: `Usage: adb-ready version
+
+Prints the installed ADB Ready version and exits without loading project
+configuration or ADB.
+`,
 } as const;
 
 export interface CliInput extends SelectInput {

@@ -1243,6 +1243,10 @@ describe("runCli", () => {
     expect(await runCli(["version"], versionStreams, blocked)).toBe(ExitCode.Success);
     expect(versionStreams.output.value).toMatch(/^\d+\.\d+\.\d+\n$/u);
 
+    const versionHelpStreams = io();
+    expect(await runCli(["help", "version"], versionHelpStreams, blocked)).toBe(ExitCode.Success);
+    expect(versionHelpStreams.output.value).toContain("Usage: adb-ready version");
+
     const agentStreams = io();
     expect(
       await runCli(

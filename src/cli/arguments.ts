@@ -47,7 +47,7 @@ export type ContextFilter =
 
 export interface CliOptions {
   command: CommandName;
-  helpTarget?: Exclude<CommandName, "help" | "version">;
+  helpTarget?: Exclude<CommandName, "help">;
   format: OutputFormat;
   quiet: boolean;
   verbose: boolean;
@@ -420,7 +420,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "problems" ||
           candidate === "run" ||
           candidate === "sessions" ||
-          candidate === "ui"
+          candidate === "ui" ||
+          candidate === "version"
         ) {
           helpTarget = candidate;
           continue;
