@@ -138,6 +138,11 @@ active reload, developer-menu, debugger, and help shortcuts as soon as the
 session is ready. Input continues directly to the framework; automation and
 redirected output stay prompt-free.
 
+If Expo or React Native Metro is already running, ADB Ready verifies its
+standard status endpoint and attaches the Android session without restarting or
+owning that server. An unrelated process on the same port is reported as a
+clear conflict instead of being mistaken for Metro.
+
 [Reach your first ready session →](./docs/getting-started.md)
 
 ### In CI and automation

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { abortableDelay, type SessionHealth, watchSession } from "../../src/session/watcher.js";
+import {
+  abortableDelay,
+  type SessionHealth,
+  sessionHealthy,
+  watchSession,
+} from "../../src/session/watcher.js";
 
 const HEALTHY: SessionHealth = {
   targetReady: true,
@@ -9,6 +14,11 @@ const HEALTHY: SessionHealth = {
 };
 
 describe("watchSession", () => {
+  test("treats an unavailable attached service as unhealthy", () => {
+    expect(sessionHealthy({ ...HEALTHY, serviceReady: true })).toBeTrue();
+    expect(sessionHealthy({ ...HEALTHY, serviceReady: false })).toBeFalse();
+  });
+
   test("repairs an unhealthy session and independently verifies it", async () => {
     const controller = new AbortController();
     const events: string[] = [];

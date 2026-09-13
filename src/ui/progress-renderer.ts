@@ -54,6 +54,11 @@ export function renderDevControlHint(
   return `${style.dim("  controls", capabilities)}  ${controls.join(separator)}\n`;
 }
 
+export function renderAttachedServiceHint(capabilities: TerminalCapabilities): string {
+  const separator = style.dim(" · ", capabilities);
+  return `${style.dim("  attached", capabilities)}  Metro controls stay in its original terminal${separator}${key("Ctrl+C", capabilities)} stop this session\n`;
+}
+
 export class ProgressRenderer {
   readonly #spinner: Spinner;
   readonly #unsubscribe: () => void;
@@ -62,6 +67,7 @@ export class ProgressRenderer {
   readonly #capabilities: TerminalCapabilities;
   readonly #showDevControls: boolean;
   #preset?: DevPreset;
+  #attachedService = false;
 
   constructor(options: {
     bus: EventBus;
@@ -87,10 +93,14 @@ export class ProgressRenderer {
   private onEvent(event: AdbReadyEvent): void {
     if (event.data?.presentation === "background") return;
 
-    const eventPreset = event.type === "child.started" ? event.data?.preset : undefined;
+    const eventPreset =
+      event.type === "child.started" || event.type === "service.attached"
+        ? event.data?.preset
+        : undefined;
     if (typeof eventPreset === "string" && DEV_PRESETS.has(eventPreset as DevPreset)) {
       this.#preset = eventPreset as DevPreset;
     }
+    if (event.type === "service.attached") this.#attachedService = true;
 
     if (event.type === "operation.started") {
       this.#spinner.start(event.message);
@@ -106,10 +116,16 @@ export class ProgressRenderer {
         this.#spinner.start("Preparing session ports");
       } else if (state === "starting-child") {
         this.#spinner.start("Starting development command");
+      } else if (state === "attaching-child") {
+        this.#spinner.start("Attaching to existing Metro server");
       } else if (state === "ready") {
         this.#spinner.succeed("Development session ready");
         if (this.#showDevControls) {
-          this.#sink.write(renderDevControlHint(this.#preset, this.#capabilities));
+          this.#sink.write(
+            this.#attachedService
+              ? renderAttachedServiceHint(this.#capabilities)
+              : renderDevControlHint(this.#preset, this.#capabilities),
+          );
         }
       } else if (state === "stopping") {
         this.#spinner.start("Stopping owned session resources");

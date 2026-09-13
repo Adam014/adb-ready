@@ -323,6 +323,46 @@ describe("ProgressRenderer", () => {
     );
   });
 
+  test("renders an attached Metro session as a first-class live state", () => {
+    const sink = new MemorySink();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const renderer = new ProgressRenderer({
+      bus,
+      sink,
+      capabilities: { ...interactiveCapabilities, animation: false },
+      showDevControls: true,
+    });
+    bus.emit({
+      type: "service.attached",
+      source: "service",
+      severity: "info",
+      message: "Attached to the existing Metro server at http://127.0.0.1:8081",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { preset: "expo" },
+    });
+    bus.emit({
+      type: "session.state.changed",
+      source: "session",
+      severity: "info",
+      message: "Development session is attaching-child",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { from: "preparing-ports", to: "attaching-child", reason: "fixture" },
+    });
+    bus.emit({
+      type: "session.state.changed",
+      source: "session",
+      severity: "info",
+      message: "Development session is ready",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { from: "attaching-child", to: "ready", reason: "fixture" },
+    });
+    renderer.dispose();
+
+    expect(sink.value).toBe(
+      "✓ Development session ready\n  attached  Metro controls stay in its original terminal · Ctrl+C stop this session\n",
+    );
+  });
+
   test("uses compact controls in narrow terminals and never shows them by default", () => {
     const compact = renderDevControlHint("flutter", {
       ...interactiveCapabilities,

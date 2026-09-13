@@ -35,6 +35,7 @@ adb-ready context --since 5m --only problems,recovery,logs
 | `SESSION_RECOVERY_FAILED` | The bounded target/port recovery budget was exhausted | Inspect `problems`, network state, and saved recovery events |
 | `SESSION_PERSISTENCE_FAILED` | The private session record could not be written | Check user-state directory permissions and capacity |
 | `CHILD_PROCESS_FAILED` | The project command exited unsuccessfully | Inspect child output, targeted logs, and preserved exit code |
+| `DEVELOPMENT_SERVICE_CONFLICT` | Metro's configured host port belongs to another service | Stop that service or map device port `8081` to the actual Metro host port |
 
 ## ADB is installed but not found
 

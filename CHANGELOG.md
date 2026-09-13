@@ -13,11 +13,15 @@ breaking changes.
 
 - Show a compact, preset-aware live control bar in interactive `dev` sessions
   while preserving the framework's native stdin and keeping automation silent.
+- Attach Expo and React Native sessions to a positively identified Metro server
+  that is already running, without starting, controlling, or stopping it.
 
 ### Fixed
 
 - Make `adb-ready help version` follow the same focused-help contract as every
   other visible top-level command without loading project configuration or ADB.
+- Fail with a specific service conflict when Metro's configured host port is
+  occupied by another service instead of launching into an ambiguous port error.
 
 ## [0.3.5] - 2026-09-12
 

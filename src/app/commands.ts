@@ -22,6 +22,7 @@ import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.j
 import { redactText } from "../core/redaction.js";
 import { TextLineBuffer } from "../core/text-lines.js";
 import { type DevHook, type DevHookEvent, type HookRun, runHooks } from "../dev/hooks.js";
+import { type MetroServiceProbeResult, probeMetroService } from "../dev/metro-service.js";
 import {
   type DevPreset,
   detectProject,
@@ -98,6 +99,11 @@ export interface CommandDependencies {
   detectProject?: typeof detectProject;
   locateExecutable?: typeof locateExecutable;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<boolean>;
+  probeMetroService?: (options: {
+    host: string;
+    port: number;
+    signal?: AbortSignal;
+  }) => Promise<MetroServiceProbeResult>;
 }
 
 export interface CommandExecution<T> {
@@ -1964,6 +1970,11 @@ export interface DevData {
     cwd: string;
     envKeys: string[];
   };
+  attachedService?: {
+    kind: "metro";
+    endpoint: string;
+    ownership: "external";
+  };
   child?: {
     exitCode: number | null;
     signal: NodeJS.Signals | null;
@@ -2119,6 +2130,16 @@ function devReadinessAssertions(
         ? []
         : [{ kind: "host-port" as const, port: Number(port) }]),
   ];
+}
+
+function metroServicePort(
+  preset: DevPreset,
+  mappings: readonly { device: string; host: string }[],
+): number | undefined {
+  if (preset !== "expo" && preset !== "react-native") return undefined;
+  const mapping = mappings.find(({ device }) => device === "tcp:8081");
+  const port = mapping?.host.match(/^tcp:(\d+)$/u)?.[1];
+  return port === undefined ? undefined : Number(port);
 }
 
 interface ResolvedDevDefinition {
@@ -2589,6 +2610,7 @@ export async function runDev(
     cwd: redactedPath(commandCwd),
     envKeys: [...new Set(["ANDROID_SERIAL", ...Object.keys(childCommand.env ?? {})])].sort(),
   };
+  let attachedService: DevData["attachedService"];
   const baseData = () => ({
     sessionId,
     adbPath: redactedPath(executable),
@@ -2607,6 +2629,7 @@ export async function runDev(
           },
         }),
     command: commandData,
+    ...(attachedService === undefined ? {} : { attachedService }),
   });
   let recoverySummary: SessionWatchSummary = {
     checks: 0,
@@ -2869,7 +2892,61 @@ export async function runDev(
     correlation: targetCorrelation,
     data: { created: created.length, reused: reused.length },
   });
-  transition("starting-child", "ports verified and development command prepared");
+  const metroPort = metroServicePort(preset, normalizedPorts.mappings);
+  if (metroPort !== undefined) {
+    const probe = await (dependencies.probeMetroService ?? probeMetroService)({
+      host: "127.0.0.1",
+      port: metroPort,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (probe.status === "available") {
+      attachedService = {
+        kind: "metro",
+        endpoint: probe.endpoint,
+        ownership: "external",
+      };
+      bus.emit({
+        type: "service.attached",
+        source: "service",
+        severity: "info",
+        message: `Attached to the existing Metro server at ${probe.endpoint}`,
+        correlation: targetCorrelation,
+        data: { kind: "metro", endpoint: probe.endpoint, ownership: "external", preset },
+      });
+    } else if (probe.status === "occupied") {
+      problems.push(
+        commandProblem(
+          ProblemCode.DevelopmentServiceConflict,
+          "child.service.conflict",
+          `Port ${String(metroPort)} is occupied by a service that is not Metro.`,
+          `${probe.detail} Stop that service or configure the matching Metro host port before retrying.`,
+          context.commandId,
+          [{ source: "metro.status", field: "endpoint", value: probe.endpoint }],
+        ),
+      );
+    } else if (probe.status === "aborted") {
+      problems.push(
+        commandProblem(
+          ProblemCode.OperationInterrupted,
+          "child.interrupted",
+          "The development session was interrupted.",
+          "No development command was started.",
+          context.commandId,
+        ),
+      );
+    }
+  }
+  if (problems.some(({ severity }) => severity === "error")) {
+    await cleanup();
+    await runHookPhase("finally", {}, false);
+    return await complete(failedData());
+  }
+  transition(
+    attachedService === undefined ? "starting-child" : "attaching-child",
+    attachedService === undefined
+      ? "ports verified and development command prepared"
+      : "verified existing Metro server selected without taking ownership",
+  );
   if (!(await runHookPhase("onPortsReady"))) {
     await cleanup();
     await runHookPhase("finally", {}, false);
@@ -2994,29 +3071,34 @@ export async function runDev(
     });
     options.onChildLine?.("stderr", safe);
   });
-  bus.emit({
-    type: "child.started",
-    source: "child",
-    severity: "info",
-    message: `Starting ${preset} development command`,
-    correlation: targetCorrelation,
-    data: { ...commandData, preset },
-  });
-  const childController = new AbortController();
-  if (signal?.aborted === true) childController.abort();
-  const abortChild = () => childController.abort();
+  const childController = attachedService === undefined ? new AbortController() : undefined;
+  if (signal?.aborted === true) childController?.abort();
+  const abortChild = () => childController?.abort();
   signal?.addEventListener("abort", abortChild, { once: true });
-  const childPromise = runner({
-    executable: childCommand.executable,
-    args: childCommand.args,
-    cwd: commandCwd,
-    env: { ...childCommand.env, ANDROID_SERIAL: selected.transport.serial },
-    signal: childController.signal,
-    stdin: options.childStdin ?? "ignore",
-    maxBufferBytes: 4 * 1024 * 1024,
-    onStdoutChunk: (chunk) => childStdout.push(chunk),
-    onStderrChunk: (chunk) => childStderr.push(chunk),
-  });
+  const childPromise =
+    childController === undefined
+      ? undefined
+      : (() => {
+          bus.emit({
+            type: "child.started",
+            source: "child",
+            severity: "info",
+            message: `Starting ${preset} development command`,
+            correlation: targetCorrelation,
+            data: { ...commandData, preset },
+          });
+          return runner({
+            executable: childCommand.executable,
+            args: childCommand.args,
+            cwd: commandCwd,
+            env: { ...childCommand.env, ANDROID_SERIAL: selected.transport.serial },
+            signal: childController.signal,
+            stdin: options.childStdin ?? "ignore",
+            maxBufferBytes: 4 * 1024 * 1024,
+            onStdoutChunk: (chunk) => childStdout.push(chunk),
+            onStderrChunk: (chunk) => childStderr.push(chunk),
+          });
+        })();
   const readinessController = new AbortController();
   if (signal?.aborted === true) readinessController.abort();
   const abortReadiness = () => readinessController.abort();
@@ -3066,7 +3148,7 @@ export async function runDev(
       ? ("readiness" as const)
       : await Promise.race([
           readinessPromise.then(() => "readiness" as const),
-          childPromise.then(() => "child" as const),
+          ...(childPromise === undefined ? [] : [childPromise.then(() => "child" as const)]),
         ]);
   if (readinessRace === "child") readinessController.abort();
   const readiness = await readinessPromise;
@@ -3099,8 +3181,15 @@ export async function runDev(
     });
   }
   const readyHooksSucceeded = readiness.ready && (await runHookPhase("onReady"));
-  if (!readyHooksSucceeded) childController.abort();
-  if (readyHooksSucceeded) transition("ready", "target, ports, logs, and child are ready");
+  if (!readyHooksSucceeded) childController?.abort();
+  if (readyHooksSucceeded) {
+    transition(
+      "ready",
+      attachedService === undefined
+        ? "target, ports, logs, and child are ready"
+        : "target, ports, logs, and attached Metro server are ready",
+    );
+  }
 
   const watchController = new AbortController();
   if (signal?.aborted === true || !readyHooksSucceeded) watchController.abort();
@@ -3141,17 +3230,29 @@ export async function runDev(
           (mapping) => mapping.device === requested.device && mapping.host === requested.host,
         ),
     );
+    const attachedProbe =
+      attachedService === undefined
+        ? undefined
+        : await (dependencies.probeMetroService ?? probeMetroService)({
+            host: "127.0.0.1",
+            port: Number(new URL(attachedService.endpoint).port),
+            signal: watchSignal,
+          });
+    const serviceReady = attachedProbe === undefined || attachedProbe.status === "available";
     return {
       targetReady: true,
       logReady: options.logs === false || !logStreamFailed,
+      ...(attachedService === undefined ? {} : { serviceReady }),
       targetSerial: target.serial,
       missingPorts,
       conflictingPorts,
       ...(conflictingPorts.length > 0
         ? { detail: "A required device port is owned by another mapping." }
-        : logStreamFailed
-          ? { detail: "The target log stream stopped unexpectedly." }
-          : {}),
+        : !serviceReady
+          ? { detail: "The externally owned Metro server is no longer available." }
+          : logStreamFailed
+            ? { detail: "The target log stream stopped unexpectedly." }
+            : {}),
     };
   };
   const recoverSession = async (
@@ -3298,6 +3399,12 @@ export async function runDev(
       await stopLogStream();
       startLogStream();
     }
+    if (health.serviceReady === false) {
+      return {
+        changedTarget: target.serial !== previousSerial,
+        detail: "Waiting for the external Metro owner to restore the server.",
+      };
+    }
     return {
       changedTarget: target.serial !== previousSerial,
       detail:
@@ -3349,6 +3456,9 @@ export async function runDev(
                         ...(event.health.logReady === undefined
                           ? {}
                           : { logReady: event.health.logReady }),
+                        ...(event.health.serviceReady === undefined
+                          ? {}
+                          : { serviceReady: event.health.serviceReady }),
                         targetSerial: event.health.targetSerial,
                         missingPorts: event.health.missingPorts.map(({ device, host }) => ({
                           device,
@@ -3430,25 +3540,36 @@ export async function runDev(
             onStderrChunk: (chunk) => verificationStderr.push(chunk),
           });
         })();
+  let resolveSessionAbort: (() => void) | undefined;
+  const sessionAbortPromise = new Promise<"signal">((resolve) => {
+    resolveSessionAbort = () => resolve("signal");
+  });
+  const notifySessionAbort = () => resolveSessionAbort?.();
+  if (signal?.aborted === true) notifySessionAbort();
+  else signal?.addEventListener("abort", notifySessionAbort, { once: true });
+  const watchFailurePromise = watchPromise.then(async (summary) => {
+    if (summary.failed) return "watch-failed" as const;
+    return await new Promise<never>(() => undefined);
+  });
   const firstCompletion = await Promise.race([
-    childPromise.then(() => "child" as const),
-    watchPromise.then((summary) =>
-      summary.failed ? ("watch-failed" as const) : ("watch-stopped" as const),
-    ),
+    ...(childPromise === undefined ? [] : [childPromise.then(() => "child" as const)]),
+    watchFailurePromise,
     ...(verificationPromise === undefined
       ? []
       : [verificationPromise.then(() => "verification" as const)]),
+    sessionAbortPromise,
   ]);
-  if (firstCompletion === "watch-failed") {
-    childController.abort();
+  signal?.removeEventListener("abort", notifySessionAbort);
+  if (firstCompletion === "watch-failed" || firstCompletion === "signal") {
+    childController?.abort();
     verificationController.abort();
   } else if (firstCompletion === "child") {
     verificationController.abort();
   } else if (firstCompletion === "verification") {
-    childController.abort();
+    childController?.abort();
   }
   const verificationProcess = await verificationPromise;
-  if (verificationProcess !== undefined) childController.abort();
+  if (verificationProcess !== undefined) childController?.abort();
   verificationStdout.flush();
   verificationStderr.flush();
   signal?.removeEventListener("abort", abortVerification);
@@ -3490,22 +3611,24 @@ export async function runDev(
   childStderr.flush();
   await stopLogStream();
   signal?.removeEventListener("abort", abortLogs);
-  bus.emit({
-    type: "child.exited",
-    source: "child",
-    severity: child.exitCode === 0 ? "info" : "error",
-    message: `Development command exited ${child.exitCode === null ? `by ${String(child.signal)}` : `with ${String(child.exitCode)}`}`,
-    correlation: targetCorrelation,
-    data: { exitCode: child.exitCode, signal: child.signal, durationMs: child.durationMs },
-  });
-  await runHookPhase(
-    "onChildExit",
-    {
-      ADB_READY_CHILD_EXIT_CODE: child.exitCode === null ? "" : String(child.exitCode),
-      ADB_READY_CHILD_SIGNAL: child.signal ?? "",
-    },
-    false,
-  );
+  if (child !== undefined) {
+    bus.emit({
+      type: "child.exited",
+      source: "child",
+      severity: child.exitCode === 0 ? "info" : "error",
+      message: `Development command exited ${child.exitCode === null ? `by ${String(child.signal)}` : `with ${String(child.exitCode)}`}`,
+      correlation: targetCorrelation,
+      data: { exitCode: child.exitCode, signal: child.signal, durationMs: child.durationMs },
+    });
+    await runHookPhase(
+      "onChildExit",
+      {
+        ADB_READY_CHILD_EXIT_CODE: child.exitCode === null ? "" : String(child.exitCode),
+        ADB_READY_CHILD_SIGNAL: child.signal ?? "",
+      },
+      false,
+    );
+  }
   await cleanup();
   if (recoverySummary.failed) {
     problems.push(
@@ -3513,7 +3636,9 @@ export async function runDev(
         ProblemCode.SessionRecoveryFailed,
         "session.recovery",
         "The development session could not be recovered safely.",
-        "ADB Ready exhausted the bounded recovery budget and stopped its child process.",
+        attachedService === undefined
+          ? "ADB Ready exhausted the bounded recovery budget and stopped its child process."
+          : "ADB Ready exhausted the bounded recovery budget and stopped its session; the external Metro server was left untouched.",
         context.commandId,
         [
           {
@@ -3571,17 +3696,23 @@ export async function runDev(
       correlation: { ...correlation, targetId: selected.target.id },
     });
   }
-  if (child.aborted && signal?.aborted === true) {
+  if (
+    signal?.aborted === true &&
+    !problems.some(({ code }) => code === ProblemCode.OperationInterrupted)
+  ) {
     problems.push(
       commandProblem(
         ProblemCode.OperationInterrupted,
         "child.interrupted",
         "The development session was interrupted.",
-        "The owned child process and session-owned port mappings were stopped safely.",
+        attachedService === undefined
+          ? "The owned child process and session-owned port mappings were stopped safely."
+          : "Session-owned resources were stopped safely; the external Metro server remains running.",
         context.commandId,
       ),
     );
   } else if (
+    child !== undefined &&
     !processSucceeded(child) &&
     readyHooksSucceeded &&
     !recoverySummary.failed &&
@@ -3635,19 +3766,23 @@ export async function runDev(
       reused,
       cleaned,
     },
-    child: {
-      exitCode: child.exitCode,
-      signal: child.signal,
-      durationMs: child.durationMs,
-      stdoutTruncated: child.stdoutTruncated,
-      stderrTruncated: child.stderrTruncated,
-    },
+    ...(child === undefined
+      ? {}
+      : {
+          child: {
+            exitCode: child.exitCode,
+            signal: child.signal,
+            durationMs: child.durationMs,
+            stdoutTruncated: child.stdoutTruncated,
+            stderrTruncated: child.stderrTruncated,
+          },
+        }),
     hooks: hookSummary(),
     recovery: recoverySummary,
     readiness,
     ...(verification === undefined ? {} : { verification }),
   });
-  if (problems.some(({ code }) => code === ProblemCode.ChildProcessFailed)) {
+  if (child !== undefined && problems.some(({ code }) => code === ProblemCode.ChildProcessFailed)) {
     execution.exitCode = preservedChildExitCode(child) ?? execution.exitCode;
   }
   if (verificationProcess !== undefined && !processSucceeded(verificationProcess)) {

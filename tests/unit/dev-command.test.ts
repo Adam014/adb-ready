@@ -65,6 +65,197 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
 }
 
 describe("runDev", () => {
+  test("attaches to a verified existing Metro server without owning its process", async () => {
+    const requests: ProcessRequest[] = [];
+    let mapped = false;
+    const controller = new AbortController();
+    const deps = dependencies(async (request) => {
+      requests.push(request);
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = async () => {
+      queueMicrotask(() => controller.abort());
+      return { status: "available", endpoint: "http://127.0.0.1:8081" };
+    };
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        command: { executable: "project-start", args: ["--android"] },
+        reversePorts: [{ device: 8081 }],
+        readiness: { all: [] },
+        logs: false,
+        watch: false,
+      },
+      {},
+      deps,
+      controller.signal,
+    );
+
+    expect(requests.some(({ executable }) => executable === "project-start")).toBeFalse();
+    expect(mapped).toBeFalse();
+    expect(execution.exitCode).toBe(ExitCode.Interrupted);
+    expect(execution.result.data).toMatchObject({
+      status: "interrupted",
+      attachedService: {
+        kind: "metro",
+        endpoint: "http://127.0.0.1:8081",
+        ownership: "external",
+      },
+      ports: { cleaned: true },
+    });
+    expect(execution.result.data).not.toHaveProperty("child");
+    expect(
+      execution.result.data?.journal.events
+        .filter(({ type }) => type === "session.state.changed")
+        .map(({ data }) => data?.to),
+    ).toEqual([
+      "acquiring-target",
+      "preparing-ports",
+      "attaching-child",
+      "ready",
+      "stopping",
+      "ended",
+    ]);
+    expect(execution.result.data?.journal.events.map(({ type }) => type)).not.toContain(
+      "child.started",
+    );
+  });
+
+  test("refuses to attach or launch when Metro's port belongs to another service", async () => {
+    const requests: ProcessRequest[] = [];
+    let mapped = false;
+    const deps = dependencies(async (request) => {
+      requests.push(request);
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = async () => ({
+      status: "occupied",
+      endpoint: "http://127.0.0.1:8081",
+      detail: "The service did not return Metro's running status.",
+    });
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "react-native",
+        command: { executable: "project-start", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(requests.some(({ executable }) => executable === "project-start")).toBeFalse();
+    expect(mapped).toBeFalse();
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.DevelopmentServiceConflict }),
+    );
+  });
+
+  test("runs bounded verification against attached Metro without stopping it", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = dependencies(async (request) => {
+      requests.push(request);
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      if (request.args?.includes("--list")) {
+        return result(request, { stdout: "host tcp:8081 tcp:8081\n" });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = async () => ({
+      status: "available",
+      endpoint: "http://127.0.0.1:8081",
+    });
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "expo",
+        command: { executable: "project-start", args: [] },
+        reversePorts: [{ device: 8081 }],
+        readiness: { all: [] },
+        verification: { command: { executable: "verify-app", args: [] } },
+        logs: false,
+        watch: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data).toMatchObject({
+      status: "completed",
+      attachedService: { ownership: "external" },
+      verification: { passed: true },
+    });
+    expect(requests.some(({ executable }) => executable === "verify-app")).toBeTrue();
+    expect(requests.some(({ executable }) => executable === "project-start")).toBeFalse();
+    expect(requests.some(({ args }) => args?.includes("--remove"))).toBeFalse();
+  });
+
   test("fails safely at every target and reverse-port preflight boundary", async () => {
     const options = {
       cwd: "/workspace/app",

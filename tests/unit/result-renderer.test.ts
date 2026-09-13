@@ -616,4 +616,40 @@ describe("result renderer", () => {
     );
     expect(markdown.value).toBe("# Context\n");
   });
+
+  test("identifies an external Metro attachment without implying a child launch", () => {
+    const attached: ResultEnvelope<unknown> = {
+      ...result,
+      command: "dev",
+      data: {
+        sessionId: "session-1",
+        status: "completed",
+        selected: {
+          target: { name: "Pixel 9" },
+          transport: { serial: "emulator-5554" },
+        },
+        project: { root: "/workspace/app" },
+        preset: "expo",
+        ports: { requested: [], created: [], reused: [] },
+        command: { executable: "npm", args: ["run", "start"] },
+        attachedService: {
+          kind: "metro",
+          endpoint: "http://127.0.0.1:8081",
+          ownership: "external",
+        },
+        journal: { events: [], dropped: 0 },
+        recovery: { failed: false, recoveries: 0 },
+      },
+    };
+    const human = new MemorySink();
+    const plain = new MemorySink();
+
+    renderResult(attached, { format: "human", capabilities, sink: human });
+    renderResult(attached, { format: "plain", capabilities, sink: plain });
+
+    expect(human.value).toContain("Service  Metro · http://127.0.0.1:8081 · attached");
+    expect(human.value).not.toContain("Command  npm run start");
+    expect(plain.value).toContain("attached_service=metro\n");
+    expect(plain.value).toContain("attached_ownership=external\n");
+  });
 });
