@@ -2782,9 +2782,9 @@ export async function runDev(
   }
 
   let cleaned = false;
-  const failedData = (): Omit<DevData, "journal"> => ({
+  const failedData = (status: "failed" | "interrupted" = "failed"): Omit<DevData, "journal"> => ({
     ...baseData(),
-    status: "failed",
+    status,
     ports: {
       requested: normalizedPorts.mappings,
       created,
@@ -2939,7 +2939,14 @@ export async function runDev(
   if (problems.some(({ severity }) => severity === "error")) {
     await cleanup();
     await runHookPhase("finally", {}, false);
-    return await complete(failedData());
+    const errors = problems.filter(({ severity }) => severity === "error");
+    return await complete(
+      failedData(
+        errors.every(({ code }) => code === ProblemCode.OperationInterrupted)
+          ? "interrupted"
+          : "failed",
+      ),
+    );
   }
   transition(
     attachedService === undefined ? "starting-child" : "attaching-child",

@@ -203,6 +203,60 @@ describe("runDev", () => {
     );
   });
 
+  test("cancels safely when the Metro probe is interrupted before launch", async () => {
+    let mapped = false;
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = async () => ({
+      status: "aborted",
+      endpoint: "http://127.0.0.1:8081",
+    });
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        command: { executable: "project-start", args: [] },
+        reversePorts: [{ device: 8081 }],
+        logs: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(mapped).toBeFalse();
+    expect(execution.exitCode).toBe(ExitCode.Interrupted);
+    expect(execution.result.data?.status).toBe("interrupted");
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.OperationInterrupted }),
+    );
+  });
+
   test("runs bounded verification against attached Metro without stopping it", async () => {
     const requests: ProcessRequest[] = [];
     const deps = dependencies(async (request) => {
@@ -254,6 +308,79 @@ describe("runDev", () => {
     expect(requests.some(({ executable }) => executable === "verify-app")).toBeTrue();
     expect(requests.some(({ executable }) => executable === "project-start")).toBeFalse();
     expect(requests.some(({ args }) => args?.includes("--remove"))).toBeFalse();
+  });
+
+  test("reports a degraded attached session when its external Metro server disappears", async () => {
+    const requests: ProcessRequest[] = [];
+    let mapped = false;
+    let metroProbes = 0;
+    const deps = dependencies(async (request) => {
+      requests.push(request);
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("get-state")) return result(request, { stdout: "device\n" });
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = async () => {
+      metroProbes += 1;
+      return metroProbes === 1
+        ? { status: "available", endpoint: "http://127.0.0.1:8081" }
+        : { status: "unavailable", endpoint: "http://127.0.0.1:8081" };
+    };
+    deps.sleep = async () => true;
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        command: { executable: "project-start", args: [] },
+        reversePorts: [{ device: 8081 }],
+        readiness: { all: [] },
+        logs: false,
+        watchIntervalMs: 1,
+        recovery: { maxAttempts: 1, initialDelayMs: 1, maxDelayMs: 1 },
+      },
+      {},
+      deps,
+    );
+
+    expect(requests.some(({ executable }) => executable === "project-start")).toBeFalse();
+    expect(metroProbes).toBe(3);
+    expect(mapped).toBeFalse();
+    expect(execution.result.data).toMatchObject({
+      status: "failed",
+      attachedService: { kind: "metro", ownership: "external" },
+      recovery: { checks: 2, recoveryAttempts: 1, recoveries: 0, failed: true },
+    });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.SessionRecoveryFailed }),
+    );
+    expect(
+      execution.result.data?.journal.events.find(({ type }) => type === "session.degraded")?.data
+        ?.health,
+    ).toMatchObject({ serviceReady: false });
   });
 
   test("fails safely at every target and reverse-port preflight boundary", async () => {
