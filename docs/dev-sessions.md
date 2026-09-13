@@ -62,6 +62,28 @@ Disable cleanup only when the mapping should intentionally outlive the process:
 adb-ready dev --no-cleanup-ports
 ```
 
+## Existing Metro servers
+
+For Expo and React Native, ADB Ready checks the local host behind the default
+device port `8081` before launching the project command. It attaches only when
+`/status` returns Metro's exact running-status response. An open port alone is
+not sufficient evidence.
+
+An attached Metro server remains externally owned:
+
+- ADB Ready does not start, restart, send terminal controls to, or stop it.
+- `Ctrl+C` ends only the ADB Ready session and cleans only mappings created by
+  that session.
+- Human, plain, JSON, and NDJSON results identify the external attachment.
+- Session health checks detect when the external server disappears, but recovery
+  never restarts a process ADB Ready does not own.
+- A non-Metro service on the configured host port fails with
+  `DEVELOPMENT_SERVICE_CONFLICT` and an actionable explanation.
+
+Run Metro in its original terminal when you need its native reload or developer
+controls. A newly started Metro process continues to receive its controls
+directly through ADB Ready.
+
 ## Health and recovery
 
 Once ready, the session watches:
@@ -120,7 +142,7 @@ Supported phases are:
 
 ```text
 beforeDev → onTargetReady → onPortsReady → onReady
-          → onChildExit → finally
+          → onChildExit (owned child only) → finally
 ```
 
 Hooks are executable/argument arrays, not shell strings. Each hook may set a

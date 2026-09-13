@@ -343,7 +343,14 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
           ]),
       `${style.success(glyphs.success, capabilities)} Project  ${clean(data.project.name ?? data.project.root)} · ${clean(data.preset)}`,
       `${style.success(glyphs.success, capabilities)} Ports    ${String(data.ports.requested.length)} ready · ${String(data.ports.created.length)} created · ${String(data.ports.reused.length)} reused`,
-      `${style.success(glyphs.success, capabilities)} Command  ${clean(data.command.executable)} ${data.command.args.map(clean).join(" ")}`,
+      ...(data.attachedService === undefined
+        ? [
+            `${style.success(glyphs.success, capabilities)} Command  ${clean(data.command.executable)} ${data.command.args.map(clean).join(" ")}`,
+          ]
+        : [
+            `${style.success(glyphs.success, capabilities)} Service  Metro · ${clean(data.attachedService.endpoint)} · attached`,
+            `${style.dim(glyphs.pending, capabilities)} Command  skipped · external server kept running`,
+          ]),
     );
     if (data.child !== undefined) {
       const childMarker =
@@ -776,6 +783,11 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`plan_scope=${clean(developmentData.planScope)}\n`);
     }
     sink.write(`project_root=${clean(developmentData.project.root)}\n`);
+    if (developmentData.attachedService !== undefined) {
+      sink.write(`attached_service=${clean(developmentData.attachedService.kind)}\n`);
+      sink.write(`attached_endpoint=${clean(developmentData.attachedService.endpoint)}\n`);
+      sink.write(`attached_ownership=${clean(developmentData.attachedService.ownership)}\n`);
+    }
     sink.write(`port_count=${String(developmentData.ports.requested.length)}\n`);
     sink.write(`journal_event_count=${String(developmentData.journal.events.length)}\n`);
     sink.write(`journal_dropped=${String(developmentData.journal.dropped)}\n`);

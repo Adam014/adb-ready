@@ -14,6 +14,7 @@ export interface WatchedPort {
 export interface SessionHealth {
   targetReady: boolean;
   logReady?: boolean;
+  serviceReady?: boolean;
   targetSerial: string;
   missingPorts: WatchedPort[];
   conflictingPorts: WatchedPort[];
@@ -73,6 +74,7 @@ export function sessionHealthy(health: SessionHealth): boolean {
   return (
     health.targetReady &&
     health.logReady !== false &&
+    health.serviceReady !== false &&
     health.missingPorts.length === 0 &&
     health.conflictingPorts.length === 0
   );
