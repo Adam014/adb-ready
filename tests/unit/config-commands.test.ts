@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { projectConfigDocument, runConfigReport, runInit } from "../../src/app/config-commands.js";
 import { loadConfig } from "../../src/config/loader.js";
+import { ExitCode } from "../../src/domain/contracts.js";
 
 describe("project configuration commands", () => {
   test("creates a minimal detected Expo configuration that validates", async () => {
@@ -25,6 +26,14 @@ describe("project configuration commands", () => {
               conflicts: [],
             },
           }),
+          discoverExpoLocalServices: () => [
+            {
+              devicePort: 8000,
+              hostPort: 8000,
+              variables: ["EXPO_PUBLIC_API_URL"],
+              environmentFiles: [".env.local"],
+            },
+          ],
         },
       );
       expect(execution.result.data).toMatchObject({
@@ -32,12 +41,20 @@ describe("project configuration commands", () => {
         path: "adb-ready.config.json",
         detectedPreset: "expo",
         detectedPackageManager: "pnpm",
+        discoveredLocalServices: [
+          {
+            devicePort: 8000,
+            hostPort: 8000,
+            variables: ["EXPO_PUBLIC_API_URL"],
+            environmentFiles: [".env.local"],
+          },
+        ],
         document: {
           version: 1,
           dev: {
             preset: "expo",
             packageManager: "pnpm",
-            reversePorts: [8081],
+            reversePorts: [8081, 8000],
             logs: true,
             cleanupPorts: true,
             watch: true,
@@ -159,5 +176,67 @@ describe("project configuration commands", () => {
     expect(projectConfigDocument({ preset: "gradle" })).not.toMatchObject({
       dev: { reversePorts: expect.anything() },
     });
+  });
+
+  test("persists an explicit opt-out without inspecting Expo environment files", async () => {
+    let discoveryCalls = 0;
+    const execution = await runInit(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        packageManager: "npm",
+        autoReverseLocalhost: false,
+        dryRun: true,
+      },
+      {
+        detectProject: async () => ({
+          root: "/workspace/app",
+          presetEvidence: [],
+          packageManager: { conflicts: [] },
+        }),
+        discoverExpoLocalServices: () => {
+          discoveryCalls += 1;
+          return [];
+        },
+      },
+    );
+
+    expect(discoveryCalls).toBe(0);
+    expect(execution.result.data).toMatchObject({
+      discoveredLocalServices: [],
+      document: {
+        dev: { reversePorts: [8081], autoReverseLocalhost: false },
+      },
+    });
+  });
+
+  test("does not write configuration when Expo environment discovery fails", async () => {
+    const execution = await runInit(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        packageManager: "npm",
+        dryRun: true,
+      },
+      {
+        detectProject: async () => ({
+          root: "/workspace/app",
+          presetEvidence: [],
+          packageManager: { conflicts: [] },
+        }),
+        discoverExpoLocalServices: () => {
+          throw new Error("secret dotenv value");
+        },
+      },
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.InvalidInput);
+    expect(execution.result.data).toBeNull();
+    expect(execution.result.problems).toEqual([
+      expect.objectContaining({
+        code: "EXPO_ENV_DISCOVERY_FAILED",
+        detail: expect.not.stringContaining("secret dotenv value"),
+      }),
+    ]);
   });
 });

@@ -247,6 +247,7 @@ describe("loadConfig", () => {
         packageManager: "pnpm",
         command: { executable: "pnpm", args: ["run", "start"], cwd: "mobile" },
         reversePorts: [8081, { device: 8000, host: 8001 }],
+        autoReverseLocalhost: true,
         logs: true,
         cleanupPorts: true,
         watch: true,
@@ -294,6 +295,7 @@ describe("loadConfig", () => {
         ADB_READY_PRESET: "react-native",
         ADB_READY_REVERSE_PORTS: "3000,8081",
         ADB_READY_DEV_LOGS: "false",
+        ADB_READY_AUTO_REVERSE_LOCALHOST: "false",
         ADB_READY_JOURNAL_REDACT_ENVIRONMENT: "CI_TOKEN,PRIVATE_TOKEN",
       },
       homeDirectory: directory,
@@ -311,6 +313,7 @@ describe("loadConfig", () => {
           packageManager: "bun",
           devCommand: { executable: "pnpm", args: ["run", "start"], cwd: "mobile" },
           devReversePorts: [{ device: 3000 }, { device: 8081 }],
+          devAutoReverseLocalhost: false,
           devLogs: false,
           devCleanupPorts: false,
           devWatch: true,
@@ -354,6 +357,7 @@ describe("loadConfig", () => {
           devPreset: { source: "environment" },
           packageManager: { source: "cli" },
           devReversePorts: { source: "environment" },
+          devAutoReverseLocalhost: { source: "environment" },
           devCleanupPorts: { source: "cli" },
           journalRedactEnvironment: { source: "environment" },
         },
@@ -405,6 +409,7 @@ describe("loadConfig", () => {
         packageManager: "other",
         command: { executable: "", args: "start", shell: true },
         reversePorts: [0, { device: 8081, host: 70000, extra: true }],
+        autoReverseLocalhost: "yes",
         logs: "yes",
         journal: {
           maxEntries: 0,
@@ -434,6 +439,7 @@ describe("loadConfig", () => {
       expect(paths).toContain("dev.command.shell");
       expect(paths).toContain("dev.reversePorts.0.device");
       expect(paths).toContain("dev.reversePorts.1.host");
+      expect(paths).toContain("dev.autoReverseLocalhost");
       expect(paths).toContain("dev.journal.minimumSeverity");
       expect(paths).toContain("dev.journal.redactEnvironment");
       expect(paths).toContain("dev.hooks.unknown");

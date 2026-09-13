@@ -631,6 +631,14 @@ describe("result renderer", () => {
         project: { root: "/workspace/app" },
         preset: "expo",
         ports: { requested: [], created: [], reused: [] },
+        localServices: [
+          {
+            devicePort: 8000,
+            hostPort: 8000,
+            variables: ["EXPO_PUBLIC_API_URL"],
+            environmentFiles: [".env.local"],
+          },
+        ],
         command: { executable: "npm", args: ["run", "start"] },
         attachedService: {
           kind: "metro",
@@ -648,8 +656,10 @@ describe("result renderer", () => {
     renderResult(attached, { format: "plain", capabilities, sink: plain });
 
     expect(human.value).toContain("Service  Metro · http://127.0.0.1:8081 · attached");
+    expect(human.value).toContain("Local    8000 · EXPO_PUBLIC_API_URL · auto-reversed");
     expect(human.value).not.toContain("Command  npm run start");
     expect(plain.value).toContain("attached_service=metro\n");
     expect(plain.value).toContain("attached_ownership=external\n");
+    expect(plain.value).toContain("discovered_local_ports=8000\n");
   });
 });

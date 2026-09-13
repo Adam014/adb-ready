@@ -76,6 +76,7 @@ export interface CliOptions {
   preset?: DevPreset;
   packageManager?: PackageManagerName;
   reversePorts?: string[];
+  autoReverseLocalhost?: boolean;
   logs?: boolean;
   cleanupPorts?: boolean;
   customCommand?: { executable: string; args: string[] };
@@ -218,6 +219,8 @@ const BOOLEAN_OPTIONS = new Set([
   "--no-logs",
   "--cleanup-ports",
   "--no-cleanup-ports",
+  "--auto-reverse-localhost",
+  "--no-auto-reverse-localhost",
   "--dump",
   "--force",
   "--replace",
@@ -316,6 +319,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   const reversePorts: string[] = [];
   let logs: boolean | undefined;
   let cleanupPorts: boolean | undefined;
+  let autoReverseLocalhost: boolean | undefined;
   let customCommand: CliOptions["customCommand"];
   let runCommand: CliOptions["runCommand"];
   let runTimeoutMs: number | undefined;
@@ -712,6 +716,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       cleanupPorts = true;
     } else if (option === "--no-cleanup-ports") {
       cleanupPorts = false;
+    } else if (option === "--auto-reverse-localhost") {
+      autoReverseLocalhost = true;
+    } else if (option === "--no-auto-reverse-localhost") {
+      autoReverseLocalhost = false;
     } else if (option === "--package") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -1420,6 +1428,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       reversePorts.length > 0 ||
       logs !== undefined ||
       cleanupPorts !== undefined ||
+      autoReverseLocalhost !== undefined ||
       customCommand !== undefined)
   ) {
     return failure("CLI_USAGE", "Development options can only be used with dev or run.");
@@ -1503,6 +1512,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(preset === undefined ? {} : { preset }),
       ...(packageManager === undefined ? {} : { packageManager }),
       ...(reversePorts.length === 0 ? {} : { reversePorts }),
+      ...(autoReverseLocalhost === undefined ? {} : { autoReverseLocalhost }),
       ...(logs === undefined ? {} : { logs }),
       ...(cleanupPorts === undefined ? {} : { cleanupPorts }),
       ...(customCommand === undefined ? {} : { customCommand }),

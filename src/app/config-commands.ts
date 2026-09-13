@@ -3,6 +3,7 @@ import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ConfigProvenance, ConfigValues, LoadedConfig } from "../config/types.js";
 import { redactText } from "../core/redaction.js";
+import { type DiscoveredLocalService, discoverExpoLocalServices } from "../dev/local-services.js";
 import { type DevPreset, detectProject, type PackageManagerName } from "../dev/project.js";
 import type { JsonValue, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ExitCode, SCHEMA_VERSION } from "../domain/contracts.js";
@@ -10,6 +11,8 @@ import { ExitCode, SCHEMA_VERSION } from "../domain/contracts.js";
 export interface ConfigCommandDependencies {
   clock?: () => Date;
   detectProject?: typeof detectProject;
+  discoverExpoLocalServices?: typeof discoverExpoLocalServices;
+  env?: NodeJS.ProcessEnv;
   idFactory?: () => string;
 }
 
@@ -18,6 +21,7 @@ export interface InitOptions {
   preset?: DevPreset;
   packageManager?: PackageManagerName;
   reversePorts?: readonly number[];
+  autoReverseLocalhost?: boolean;
   logs?: boolean;
   cleanupPorts?: boolean;
   force?: boolean;
@@ -29,6 +33,7 @@ export interface InitData {
   path: string;
   detectedPreset?: DevPreset;
   detectedPackageManager?: PackageManagerName;
+  discoveredLocalServices: DiscoveredLocalService[];
   document: JsonValue;
 }
 
@@ -103,6 +108,7 @@ export function projectConfigDocument(options: {
   preset?: DevPreset;
   packageManager?: PackageManagerName;
   reversePorts?: readonly number[];
+  autoReverseLocalhost?: boolean;
   logs?: boolean;
   cleanupPorts?: boolean;
 }): JsonValue {
@@ -113,6 +119,9 @@ export function projectConfigDocument(options: {
     ...(options.preset === undefined ? {} : { preset: options.preset }),
     ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
     ...(reversePorts.length === 0 ? {} : { reversePorts }),
+    ...(options.autoReverseLocalhost === undefined
+      ? {}
+      : { autoReverseLocalhost: options.autoReverseLocalhost }),
     logs: options.logs ?? true,
     cleanupPorts: options.cleanupPorts ?? true,
     watch: true,
@@ -136,10 +145,44 @@ export async function runInit(
   });
   const preset = options.preset ?? project.preset;
   const packageManager = options.packageManager ?? project.packageManager.name;
+  let discoveredLocalServices: DiscoveredLocalService[] = [];
+  if (preset === "expo" && options.autoReverseLocalhost !== false) {
+    try {
+      discoveredLocalServices = (
+        dependencies.discoverExpoLocalServices ?? discoverExpoLocalServices
+      )({
+        projectRoot: project.root,
+        env: dependencies.env ?? process.env,
+      });
+    } catch {
+      return execute<InitData>(
+        "init",
+        null,
+        [
+          configProblem(
+            "EXPO_ENV_DISCOVERY_FAILED",
+            "Expo localhost services could not be discovered safely.",
+            "Fix the project environment-file syntax, or use --no-auto-reverse-localhost and declare every required service with --port.",
+          ),
+        ],
+        dependencies,
+      );
+    }
+  }
+  const frameworkPorts = preset === "expo" || preset === "react-native" ? [8081] : [];
+  const reversePorts = [
+    ...new Set([
+      ...(options.reversePorts ?? frameworkPorts),
+      ...discoveredLocalServices.map(({ devicePort }) => devicePort),
+    ]),
+  ];
   const document = projectConfigDocument({
     ...(preset === undefined ? {} : { preset }),
     ...(packageManager === undefined ? {} : { packageManager }),
-    ...(options.reversePorts === undefined ? {} : { reversePorts: options.reversePorts }),
+    reversePorts,
+    ...(options.autoReverseLocalhost === undefined
+      ? {}
+      : { autoReverseLocalhost: options.autoReverseLocalhost }),
     ...(options.logs === undefined ? {} : { logs: options.logs }),
     ...(options.cleanupPorts === undefined ? {} : { cleanupPorts: options.cleanupPorts }),
   });
@@ -172,6 +215,7 @@ export async function runInit(
         ...(project.packageManager.name === undefined
           ? {}
           : { detectedPackageManager: project.packageManager.name }),
+        discoveredLocalServices,
         document,
       },
       [],
@@ -222,6 +266,7 @@ export async function runInit(
       ...(project.packageManager.name === undefined
         ? {}
         : { detectedPackageManager: project.packageManager.name }),
+      discoveredLocalServices,
       document,
     },
     [],

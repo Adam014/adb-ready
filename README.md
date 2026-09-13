@@ -133,6 +133,12 @@ adb-ready dev -- pnpm run android:local
 adb-ready dev --dry-run --json
 ```
 
+For Expo projects, explicit localhost URLs in `EXPO_PUBLIC_*` environment
+variables are discovered with Expo's own development environment resolution.
+ADB Ready safely adds their ports to the selected target and verifies the host
+services before calling the session ready. Explicit port configuration always
+wins, and `--no-auto-reverse-localhost` disables discovery when required.
+
 In an interactive Expo or Flutter session, ADB Ready shows the framework's
 active reload, developer-menu, debugger, and help shortcuts as soon as the
 session is ready. Input continues directly to the framework; automation and

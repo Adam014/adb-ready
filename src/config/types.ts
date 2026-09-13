@@ -56,6 +56,7 @@ export interface ConfigValues {
   packageManager?: ConfigPackageManager;
   devCommand?: ConfigDevCommand;
   devReversePorts?: ConfigDevPort[];
+  devAutoReverseLocalhost?: boolean;
   devLogs?: boolean;
   devCleanupPorts?: boolean;
   devWatch?: boolean;

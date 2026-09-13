@@ -65,6 +65,237 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
 }
 
 describe("runDev", () => {
+  test("auto-reverses public Expo localhost services and includes them in default readiness", async () => {
+    const deps = dependencies(async (request) => result(request));
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: ["dependency: expo"],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.discoverExpoLocalServices = () => [
+      {
+        devicePort: 8000,
+        hostPort: 8000,
+        variables: ["EXPO_PUBLIC_API_URL"],
+        environmentFiles: [".env.development.local"],
+      },
+    ];
+
+    const execution = await runDevOfflinePlan(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        reversePorts: [{ device: 8081 }],
+      },
+      deps,
+    );
+
+    expect(execution.result.data).toMatchObject({
+      localServices: [
+        {
+          devicePort: 8000,
+          hostPort: 8000,
+          variables: ["EXPO_PUBLIC_API_URL"],
+        },
+      ],
+      ports: {
+        requested: [
+          { device: "tcp:8081", host: "tcp:8081" },
+          { device: "tcp:8000", host: "tcp:8000" },
+        ],
+      },
+    });
+    expect(execution.result.data?.plan?.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "reverse-2", title: expect.stringContaining("tcp:8000") }),
+        expect.objectContaining({ id: "ready-2", title: "Verify host-port readiness" }),
+        expect.objectContaining({ id: "ready-3", title: "Verify host-port readiness" }),
+      ]),
+    );
+  });
+
+  test("lets an explicit Expo mapping cover a discovered device port", async () => {
+    const deps = dependencies(async (request) => result(request));
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.discoverExpoLocalServices = () => [
+      {
+        devicePort: 8000,
+        hostPort: 8000,
+        variables: ["EXPO_PUBLIC_API_URL"],
+        environmentFiles: [],
+      },
+    ];
+
+    const execution = await runDevOfflinePlan(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        reversePorts: [{ device: 8081 }, { device: 8000, host: 9000 }],
+      },
+      deps,
+    );
+
+    expect(execution.result.data?.ports.requested).toEqual([
+      { device: "tcp:8081", host: "tcp:8081" },
+      { device: "tcp:8000", host: "tcp:9000" },
+    ]);
+  });
+
+  test("supports an explicit opt-out from Expo localhost discovery", async () => {
+    let discoveryCalls = 0;
+    const deps = dependencies(async (request) => result(request));
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.discoverExpoLocalServices = () => {
+      discoveryCalls += 1;
+      return [];
+    };
+
+    const execution = await runDevOfflinePlan(
+      { cwd: "/workspace/app", preset: "expo", autoReverseLocalhost: false },
+      deps,
+    );
+
+    expect(discoveryCalls).toBe(0);
+    expect(execution.result.data?.localServices).toEqual([]);
+    expect(execution.result.data?.ports.requested).toEqual([
+      { device: "tcp:8081", host: "tcp:8081" },
+    ]);
+  });
+
+  test("fails safely when Expo environment discovery cannot be completed", async () => {
+    const deps = dependencies(async (request) => result(request));
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: ["dependency: expo"],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.discoverExpoLocalServices = () => {
+      throw new Error("secret dotenv value");
+    };
+
+    const execution = await runDevOfflinePlan({ cwd: "/workspace/app" }, deps);
+
+    expect(execution.exitCode).toBe(ExitCode.Environment);
+    expect(execution.result.data).toBeNull();
+    expect(execution.result.problems).toEqual([
+      expect.objectContaining({
+        code: ProblemCode.ExpoEnvironmentDiscoveryFailed,
+        detail: expect.not.stringContaining("secret dotenv value"),
+      }),
+    ]);
+  });
+
+  test("creates and cleans a discovered backend mapping in a real development session", async () => {
+    const requests: ProcessRequest[] = [];
+    const mappings = new Map<string, string>();
+    const deps = dependencies(async (request) => {
+      requests.push(request);
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--no-rebind")) {
+        const device = args.at(-2);
+        const host = args.at(-1);
+        if (device !== undefined && host !== undefined) mappings.set(device, host);
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        const device = args.at(-1);
+        if (device !== undefined) mappings.delete(device);
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, {
+          stdout: [...mappings].map(([device, host]) => `host ${device} ${host}\n`).join(""),
+        });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: [],
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "lockfile",
+        conflicts: [],
+      },
+    });
+    deps.discoverExpoLocalServices = () => [
+      {
+        devicePort: 8000,
+        hostPort: 8000,
+        variables: ["EXPO_PUBLIC_API_URL"],
+        environmentFiles: [".env.local"],
+      },
+    ];
+    deps.probeMetroService = async () => ({
+      status: "unavailable",
+      endpoint: "http://127.0.0.1:8081",
+    });
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "expo",
+        command: { executable: "project-start", args: [] },
+        reversePorts: [{ device: 8081 }],
+        readiness: { all: [] },
+        logs: false,
+        watch: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(mappings.size).toBe(0);
+    expect(execution.result.data?.ports).toMatchObject({
+      requested: [
+        { device: "tcp:8081", host: "tcp:8081" },
+        { device: "tcp:8000", host: "tcp:8000" },
+      ],
+      created: expect.anything(),
+      cleaned: true,
+    });
+    expect(
+      requests.filter(({ args }) => args?.includes("--no-rebind")).map(({ args }) => args?.at(-2)),
+    ).toEqual(["tcp:8081", "tcp:8000"]);
+  });
+
   test("attaches to a verified existing Metro server without owning its process", async () => {
     const requests: ProcessRequest[] = [];
     let mapped = false;

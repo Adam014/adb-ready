@@ -93,6 +93,28 @@ ADB Ready will reuse an exact mapping, but it will not overwrite a different
 host destination. Remove the old mapping only when you know which tool owns it,
 or choose a different device port.
 
+## An Expo app cannot reach its localhost API
+
+Run an offline preview and check whether the API port appears in the requested
+reverse mappings:
+
+```bash
+adb-ready dev --dry-run --json
+```
+
+ADB Ready automatically detects explicit loopback URLs in `EXPO_PUBLIC_*`
+variables using Expo's development `.env` resolution. If the application builds
+its URL dynamically, uses a non-public variable, or omits the URL port, declare
+the mapping explicitly:
+
+```bash
+adb-ready dev --port 8000
+```
+
+The host service must already be listening on that port. ADB Ready verifies it
+before reporting the session ready; it does not start an unknown backend on the
+user's behalf.
+
 ## A session will not recover
 
 Recovery is intentionally bounded and identity-safe. It will not connect an

@@ -11,6 +11,10 @@ breaking changes.
 
 ### Added
 
+- Detect explicit localhost ports in Expo `EXPO_PUBLIC_*` environment URLs,
+  include them in development-session reverse mappings and readiness checks,
+  and surface only their variable names, ports, and loaded environment-file
+  names.
 - Show a compact, preset-aware live control bar in interactive `dev` sessions
   while preserving the framework's native stdin and keeping automation silent.
 - Attach Expo and React Native sessions to a positively identified Metro server
@@ -18,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Prevent an Expo development session from reporting ready while a detected
+  localhost API is unreachable from the selected Android target.
 - Make `adb-ready help version` follow the same focused-help contract as every
   other visible top-level command without loading project configuration or ADB.
 - Fail with a specific service conflict when Metro's configured host port is

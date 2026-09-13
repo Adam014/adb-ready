@@ -62,6 +62,40 @@ Disable cleanup only when the mapping should intentionally outlive the process:
 adb-ready dev --no-cleanup-ports
 ```
 
+## Expo localhost services
+
+Android's `localhost` belongs to the selected target, not the development host.
+For Expo projects, ADB Ready therefore resolves the same development `.env`
+files as Expo and inspects public variables whose values are explicit
+`http://`, `https://`, `ws://`, or `wss://` loopback URLs. For example,
+`EXPO_PUBLIC_API_URL=http://localhost:8000` adds `tcp:8000 → tcp:8000` to the
+session and verifies host port `8000` before reporting ready.
+
+Detection is deliberately bounded:
+
+- only `EXPO_PUBLIC_*` variables are inspected;
+- only `localhost`, `127.0.0.1`, and `[::1]` URLs with explicit ports qualify;
+- the URL value is never retained or printed—results expose only the variable
+  name, port, and loaded `.env` basenames;
+- an explicit mapping for the same device port always wins; and
+- cleanup still removes only mappings created by the current session.
+
+Preview the resolved mappings without touching ADB:
+
+```bash
+adb-ready dev --dry-run --json
+```
+
+Disable this behavior for an intentionally different network topology:
+
+```bash
+adb-ready dev --no-auto-reverse-localhost
+```
+
+The same switch is available to `adb-ready init`. It can also be persisted as
+`dev.autoReverseLocalhost: false` or set with
+`ADB_READY_AUTO_REVERSE_LOCALHOST=false`.
+
 ## Existing Metro servers
 
 For Expo and React Native, ADB Ready checks the local host behind the default

@@ -203,6 +203,7 @@
             ]
           }
         },
+        "autoReverseLocalhost": { "type": "boolean" },
         "logs": { "type": "boolean" },
         "cleanupPorts": { "type": "boolean" },
         "watch": { "type": "boolean" },
