@@ -59,7 +59,11 @@ async function boundedResponse(response: Response): Promise<string> {
     body += decoder.decode();
     return body;
   } finally {
-    await reader.cancel().catch(() => undefined);
+    try {
+      await reader.cancel();
+    } catch {
+      // The response is already bounded; cancellation is best-effort cleanup.
+    }
   }
 }
 

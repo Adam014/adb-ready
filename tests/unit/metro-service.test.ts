@@ -4,6 +4,7 @@ import { probeMetroService } from "../../src/dev/metro-service.js";
 
 describe("probeMetroService", () => {
   test("recognizes a real loopback Metro status endpoint", async () => {
+    let port: number | undefined;
     const server = createServer((request, response) => {
       if (request.url === "/status") {
         response.writeHead(200, { "content-type": "text/plain" });
@@ -16,7 +17,8 @@ describe("probeMetroService", () => {
     try {
       const address = server.address();
       if (address === null || typeof address === "string") throw new Error("missing test port");
-      expect(await probeMetroService({ host: "127.0.0.1", port: address.port })).toMatchObject({
+      port = address.port;
+      expect(await probeMetroService({ host: "127.0.0.1", port })).toMatchObject({
         status: "available",
       });
     } finally {
@@ -24,6 +26,10 @@ describe("probeMetroService", () => {
         server.close((error) => (error === undefined ? resolve() : reject(error))),
       );
     }
+    if (port === undefined) throw new Error("missing closed test port");
+    expect(await probeMetroService({ host: "127.0.0.1", port })).toMatchObject({
+      status: "unavailable",
+    });
   });
 
   test("attaches only to the exact Metro status contract", async () => {
