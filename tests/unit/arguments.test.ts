@@ -49,6 +49,10 @@ describe("parseArguments", () => {
       ok: true,
       options: { command: "help", helpTarget: "doctor" },
     });
+    expect(parseArguments(["help", "version"])).toMatchObject({
+      ok: true,
+      options: { command: "help", helpTarget: "version" },
+    });
   });
 
   test("uses the last explicit presentation preference", () => {

@@ -9,6 +9,11 @@ breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Make `adb-ready help version` follow the same focused-help contract as every
+  other visible top-level command without loading project configuration or ADB.
+
 ## [0.3.5] - 2026-09-12
 
 ### Changed
