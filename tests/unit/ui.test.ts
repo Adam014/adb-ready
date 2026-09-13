@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventBus } from "../../src/core/event-bus.js";
-import { ProgressRenderer } from "../../src/ui/progress-renderer.js";
+import { ProgressRenderer, renderDevControlHint } from "../../src/ui/progress-renderer.js";
 import { Spinner, type TextSink, type TimerScheduler } from "../../src/ui/spinner.js";
 import { sanitizeTerminalText, symbols } from "../../src/ui/style.js";
 import { resolveTerminalCapabilities, type TerminalCapabilities } from "../../src/ui/terminal.js";
@@ -285,6 +285,67 @@ describe("ProgressRenderer", () => {
         data: { from: "planning", to: state, reason: "fixture" },
       });
     }
+    renderer.dispose();
+
+    expect(sink.value).toBe("✓ Development session ready\n");
+  });
+
+  test("shows framework-native controls only for an interactive dev session", () => {
+    const sink = new MemorySink();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const renderer = new ProgressRenderer({
+      bus,
+      sink,
+      capabilities: { ...interactiveCapabilities, animation: false },
+      showDevControls: true,
+    });
+
+    bus.emit({
+      type: "child.started",
+      source: "child",
+      severity: "info",
+      message: "Starting expo development command",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { preset: "expo" },
+    });
+    bus.emit({
+      type: "session.state.changed",
+      source: "session",
+      severity: "info",
+      message: "Development session is ready",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { from: "starting-child", to: "ready", reason: "fixture" },
+    });
+    renderer.dispose();
+
+    expect(sink.value).toBe(
+      "✓ Development session ready\n  controls  r reload · m dev menu · j debugger · ? commands · Ctrl+C stop\n",
+    );
+  });
+
+  test("uses compact controls in narrow terminals and never shows them by default", () => {
+    const compact = renderDevControlHint("flutter", {
+      ...interactiveCapabilities,
+      color: false,
+      columns: 56,
+    });
+    expect(compact).toBe("  controls  r reload · h commands · Ctrl+C stop\n");
+
+    const sink = new MemorySink();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const renderer = new ProgressRenderer({
+      bus,
+      sink,
+      capabilities: { ...interactiveCapabilities, animation: false },
+    });
+    bus.emit({
+      type: "session.state.changed",
+      source: "session",
+      severity: "info",
+      message: "Development session is ready",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { from: "starting-child", to: "ready", reason: "fixture" },
+    });
     renderer.dispose();
 
     expect(sink.value).toBe("✓ Development session ready\n");

@@ -1344,6 +1344,7 @@ async function runCliInternal(
           sink: io.error,
           capabilities: errorCapabilities,
           verbose: options.verbose,
+          showDevControls: options.command === "dev" && errorCapabilities.interactive,
         })
       : undefined;
   const events = options.format === "ndjson" ? new NdjsonEventRenderer(bus, io.output) : undefined;

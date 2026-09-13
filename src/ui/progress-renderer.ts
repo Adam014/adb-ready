@@ -1,23 +1,80 @@
 import type { EventBus } from "../core/event-bus.js";
+import type { DevPreset } from "../dev/project.js";
 import type { AdbReadyEvent } from "../domain/contracts.js";
 import { Spinner, type TextSink, type TimerScheduler } from "./spinner.js";
+import { style } from "./style.js";
 import type { TerminalCapabilities } from "./terminal.js";
+
+const DEV_PRESETS = new Set<DevPreset>([
+  "capacitor",
+  "custom",
+  "expo",
+  "flutter",
+  "gradle",
+  "react-native",
+]);
+
+function key(value: string, capabilities: TerminalCapabilities): string {
+  return style.accent(value, capabilities);
+}
+
+export function renderDevControlHint(
+  preset: DevPreset | undefined,
+  capabilities: TerminalCapabilities,
+): string {
+  const separator = style.dim(" · ", capabilities);
+  const stop = `${key("Ctrl+C", capabilities)} stop`;
+  let controls: string[];
+
+  if (preset === "expo") {
+    controls =
+      capabilities.columns < 72
+        ? [`${key("r", capabilities)} reload`, `${key("?", capabilities)} commands`, stop]
+        : [
+            `${key("r", capabilities)} reload`,
+            `${key("m", capabilities)} dev menu`,
+            `${key("j", capabilities)} debugger`,
+            `${key("?", capabilities)} commands`,
+            stop,
+          ];
+  } else if (preset === "flutter") {
+    controls =
+      capabilities.columns < 72
+        ? [`${key("r", capabilities)} reload`, `${key("h", capabilities)} commands`, stop]
+        : [
+            `${key("r", capabilities)} hot reload`,
+            `${key("R", capabilities)} hot restart`,
+            `${key("h", capabilities)} commands`,
+            stop,
+          ];
+  } else {
+    controls = [style.dim("framework input active", capabilities), stop];
+  }
+
+  return `${style.dim("  controls", capabilities)}  ${controls.join(separator)}\n`;
+}
 
 export class ProgressRenderer {
   readonly #spinner: Spinner;
   readonly #unsubscribe: () => void;
   readonly #verbose: boolean;
   readonly #sink: TextSink;
+  readonly #capabilities: TerminalCapabilities;
+  readonly #showDevControls: boolean;
+  #preset?: DevPreset;
 
   constructor(options: {
     bus: EventBus;
     sink: TextSink;
     capabilities: TerminalCapabilities;
     verbose?: boolean;
+    showDevControls?: boolean;
     scheduler?: TimerScheduler;
   }) {
     this.#sink = options.sink;
     this.#verbose = options.verbose ?? false;
+    this.#capabilities = options.capabilities;
+    this.#showDevControls = options.showDevControls ?? false;
     this.#spinner = new Spinner(options.sink, options.capabilities, options.scheduler);
     this.#unsubscribe = options.bus.subscribe((event) => this.onEvent(event));
   }
@@ -29,6 +86,11 @@ export class ProgressRenderer {
 
   private onEvent(event: AdbReadyEvent): void {
     if (event.data?.presentation === "background") return;
+
+    const eventPreset = event.type === "child.started" ? event.data?.preset : undefined;
+    if (typeof eventPreset === "string" && DEV_PRESETS.has(eventPreset as DevPreset)) {
+      this.#preset = eventPreset as DevPreset;
+    }
 
     if (event.type === "operation.started") {
       this.#spinner.start(event.message);
@@ -46,6 +108,9 @@ export class ProgressRenderer {
         this.#spinner.start("Starting development command");
       } else if (state === "ready") {
         this.#spinner.succeed("Development session ready");
+        if (this.#showDevControls) {
+          this.#sink.write(renderDevControlHint(this.#preset, this.#capabilities));
+        }
       } else if (state === "stopping") {
         this.#spinner.start("Stopping owned session resources");
       } else if (state === "failed") {
