@@ -1,4 +1,10 @@
 const TRACKED_PATHS = /^(?:src\/.*\.ts|scripts\/lib\/.*\.mjs)$/u;
+const TYPE_DECLARATION_PATHS = /(?:^|\/)(?:types|[^/]+\.types|[^/]+\.d)\.ts$/u;
+
+/** @param {string} file */
+function isExecutableSource(file) {
+  return TRACKED_PATHS.test(file) && !TYPE_DECLARATION_PATHS.test(file);
+}
 
 /** @param {string} value */
 function normalizePath(value) {
@@ -91,7 +97,7 @@ export function changedLineCoverage(report, diff) {
   const missingFiles = [];
 
   for (const [file, lines] of changed) {
-    if (!TRACKED_PATHS.test(file) || lines.size === 0) continue;
+    if (!isExecutableSource(file) || lines.size === 0) continue;
     files += 1;
     const absoluteSuffix = `/${file}`;
     const lineHits =

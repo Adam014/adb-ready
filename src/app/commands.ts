@@ -22,6 +22,7 @@ import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.j
 import { redactText } from "../core/redaction.js";
 import { TextLineBuffer } from "../core/text-lines.js";
 import { type DevHook, type DevHookEvent, type HookRun, runHooks } from "../dev/hooks.js";
+import { type DiscoveredLocalService, discoverExpoLocalServices } from "../dev/local-services.js";
 import { type MetroServiceProbeResult, probeMetroService } from "../dev/metro-service.js";
 import {
   type DevPreset,
@@ -98,6 +99,8 @@ export interface CommandDependencies {
   runtime?: () => RuntimeInfo;
   detectProject?: typeof detectProject;
   locateExecutable?: typeof locateExecutable;
+  discoverExpoLocalServices?: typeof discoverExpoLocalServices;
+  env?: NodeJS.ProcessEnv;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<boolean>;
   probeMetroService?: (options: {
     host: string;
@@ -1914,6 +1917,7 @@ export interface DevOptions {
   packageManager?: PackageManagerName;
   command?: DevCommand;
   reversePorts?: readonly DevPort[];
+  autoReverseLocalhost?: boolean;
   cleanupPorts?: boolean;
   logs?: boolean;
   journal?: {
@@ -1964,6 +1968,7 @@ export interface DevData {
     reused: Array<{ device: string; host: string }>;
     cleaned: boolean;
   };
+  localServices: DiscoveredLocalService[];
   command: {
     executable: string;
     args: string[];
@@ -2117,18 +2122,25 @@ function devReadinessAssertions(
   options: DevOptions,
   preset: DevPreset,
   mappings: readonly { device: string; host: string }[],
+  localServices: readonly DiscoveredLocalService[],
 ): readonly ReadinessAssertion[] {
   if (options.readiness !== undefined) return options.readiness.all;
   if (preset === "custom") return [];
   const metro = mappings.find(({ device }) => device === "tcp:8081") ?? mappings[0];
   const port = metro?.host.match(/^tcp:(\d+)$/u)?.[1];
+  const localServiceHostPorts = localServices.flatMap(({ devicePort }) => {
+    const mapping = mappings.find(({ device }) => device === `tcp:${String(devicePort)}`);
+    const hostPort = mapping?.host.match(/^tcp:(\d+)$/u)?.[1];
+    return hostPort === undefined ? [] : [Number(hostPort)];
+  });
+  const hostPorts = [
+    ...new Set([...(port === undefined ? [] : [Number(port)]), ...localServiceHostPorts]),
+  ];
   return [
     { kind: "boot" },
     ...(preset !== "expo" && preset !== "react-native"
       ? []
-      : port === undefined
-        ? []
-        : [{ kind: "host-port" as const, port: Number(port) }]),
+      : hostPorts.map((hostPort) => ({ kind: "host-port" as const, port: hostPort }))),
   ];
 }
 
@@ -2147,6 +2159,7 @@ interface ResolvedDevDefinition {
   preset: DevPreset;
   childCommand: DevCommand;
   mappings: Array<{ device: string; host: string }>;
+  localServices: DiscoveredLocalService[];
 }
 
 async function resolveDevDefinition(
@@ -2226,13 +2239,44 @@ async function resolveDevDefinition(
     return { problems };
   }
   const defaultPorts = preset === "expo" || preset === "react-native" ? [{ device: 8081 }] : [];
-  const normalized = normalizeDevPorts(options.reversePorts ?? defaultPorts, commandId);
+  let localServices: DiscoveredLocalService[] = [];
+  if (preset === "expo" && options.autoReverseLocalhost !== false) {
+    try {
+      localServices = (dependencies.discoverExpoLocalServices ?? discoverExpoLocalServices)({
+        projectRoot: project.root,
+        env: dependencies.env ?? process.env,
+      });
+    } catch {
+      problems.push(
+        commandProblem(
+          ProblemCode.ExpoEnvironmentDiscoveryFailed,
+          "environment.project",
+          "Expo localhost services could not be discovered safely.",
+          "Fix the project environment-file syntax, or use --no-auto-reverse-localhost and declare every required service with --port.",
+          commandId,
+        ),
+      );
+      return { problems };
+    }
+  }
+  const configuredPorts = options.reversePorts ?? defaultPorts;
+  const coveredDevicePorts = new Set(configuredPorts.map(({ device }) => Number(device)));
+  const discoveredPorts = localServices
+    .filter(({ devicePort }) => !coveredDevicePorts.has(devicePort))
+    .map(({ devicePort, hostPort }) => ({ device: devicePort, host: hostPort }));
+  const normalized = normalizeDevPorts([...configuredPorts, ...discoveredPorts], commandId);
   problems.push(...normalized.problems);
   return normalized.problems.length > 0
     ? { problems }
     : {
         problems,
-        definition: { project, preset, childCommand, mappings: normalized.mappings },
+        definition: {
+          project,
+          preset,
+          childCommand,
+          mappings: normalized.mappings,
+          localServices,
+        },
       };
 }
 
@@ -2251,8 +2295,25 @@ export async function runDevOfflinePlan(
     journal.close();
     return execution;
   }
-  const { project, preset, childCommand, mappings } = resolved.definition;
-  const readinessAssertions = devReadinessAssertions(options, preset, mappings);
+  const { project, preset, childCommand, mappings, localServices } = resolved.definition;
+  if (localServices.length > 0) {
+    bus.emit({
+      type: "local.service.discovered",
+      source: "project.env",
+      severity: "info",
+      message: `${String(localServices.length)} public Expo localhost service(s) added to the session`,
+      correlation: { commandId: context.commandId, sessionId },
+      data: {
+        services: localServices.map(({ devicePort, hostPort, variables, environmentFiles }) => ({
+          devicePort,
+          hostPort,
+          variables,
+          environmentFiles,
+        })),
+      },
+    });
+  }
+  const readinessAssertions = devReadinessAssertions(options, preset, mappings, localServices);
   const commandCwd = path.resolve(project.root, childCommand.cwd ?? ".");
   const hookSteps = (event: DevHookEvent) =>
     (options.hooks?.[event] ?? []).map((hook, index) => ({
@@ -2331,6 +2392,7 @@ export async function runDevOfflinePlan(
             },
           }),
       ports: { requested: mappings, created: [], reused: [], cleaned: false },
+      localServices,
       command: {
         executable: redactedPath(childCommand.executable),
         args: childCommand.args.map((argument) => redactText(argument).value),
@@ -2554,11 +2616,39 @@ export async function runDev(
   );
   problems.push(...resolved.problems);
   if (resolved.definition === undefined) return await complete(null);
-  const { project, preset, childCommand, mappings: requestedMappings } = resolved.definition;
+  const {
+    project,
+    preset,
+    childCommand,
+    mappings: requestedMappings,
+    localServices,
+  } = resolved.definition;
   recorder?.addPrivateLiteral(project.root);
+  if (localServices.length > 0) {
+    bus.emit({
+      type: "local.service.discovered",
+      source: "project.env",
+      severity: "info",
+      message: `${String(localServices.length)} public Expo localhost service(s) added to the session`,
+      correlation: { commandId: context.commandId, sessionId, targetId: selected.target.id },
+      data: {
+        services: localServices.map(({ devicePort, hostPort, variables, environmentFiles }) => ({
+          devicePort,
+          hostPort,
+          variables,
+          environmentFiles,
+        })),
+      },
+    });
+  }
   transition("preparing-ports", "target selected and project configuration resolved");
   const normalizedPorts = { mappings: requestedMappings };
-  const readinessAssertions = devReadinessAssertions(options, preset, requestedMappings);
+  const readinessAssertions = devReadinessAssertions(
+    options,
+    preset,
+    requestedMappings,
+    localServices,
+  );
 
   const targetCorrelation = { ...correlation, targetId: selected.target.id };
   const clientOptions = {
@@ -2629,6 +2719,7 @@ export async function runDev(
           },
         }),
     command: commandData,
+    localServices,
     ...(attachedService === undefined ? {} : { attachedService }),
   });
   let recoverySummary: SessionWatchSummary = {

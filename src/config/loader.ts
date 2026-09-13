@@ -60,6 +60,7 @@ const DEV_KEYS = new Set([
   "packageManager",
   "command",
   "reversePorts",
+  "autoReverseLocalhost",
   "logs",
   "cleanupPorts",
   "watch",
@@ -613,6 +614,7 @@ function validateDocument(
         }
       }
       for (const [key, configKey] of [
+        ["autoReverseLocalhost", "devAutoReverseLocalhost"],
         ["logs", "devLogs"],
         ["cleanupPorts", "devCleanupPorts"],
         ["watch", "devWatch"],
@@ -1297,6 +1299,7 @@ function parseEnvironment(env: NodeJS.ProcessEnv): { values: ConfigValues; error
     ["ADB_READY_UNICODE", "unicode"],
     ["ADB_READY_ANIMATION", "animation"],
     ["ADB_READY_INTERACTIVE", "interactive"],
+    ["ADB_READY_AUTO_REVERSE_LOCALHOST", "devAutoReverseLocalhost"],
     ["ADB_READY_DEV_LOGS", "devLogs"],
     ["ADB_READY_CLEANUP_PORTS", "devCleanupPorts"],
     ["ADB_READY_DEV_WATCH", "devWatch"],

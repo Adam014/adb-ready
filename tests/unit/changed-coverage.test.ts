@@ -106,4 +106,26 @@ describe("changed-line coverage", () => {
       missingFiles: [],
     });
   });
+
+  test("excludes erased TypeScript declaration files from executable coverage", () => {
+    const diff = [
+      "+++ b/src/config/types.ts",
+      "@@ -10,0 +11 @@",
+      "+  enabled?: boolean;",
+      "+++ b/src/domain/contracts.d.ts",
+      "@@ -1,0 +1 @@",
+      "+export interface Contract {}",
+      "+++ b/src/runtime/feature.types.ts",
+      "@@ -1,0 +1 @@",
+      "+export type Feature = string;",
+    ].join("\n");
+
+    expect(changedLineCoverage(lcov, diff)).toEqual({
+      found: 0,
+      hit: 0,
+      ratio: 1,
+      files: 0,
+      missingFiles: [],
+    });
+  });
 });

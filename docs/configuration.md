@@ -69,6 +69,7 @@ existing file unless `--force` is explicit. Use `--dry-run` first.
 | `packageManager` | `npm`, `pnpm`, `yarn`, or `bun` |
 | `command` | `{ "executable": string, "args": string[], "cwd"?: string }` |
 | `reversePorts` | integers or `{ "device": number, "host"?: number }` objects |
+| `autoReverseLocalhost` | detect explicit localhost URLs in Expo `EXPO_PUBLIC_*` variables; defaults to `true` |
 | `logs` | enable the session's targeted log stream |
 | `cleanupPorts` | remove only mappings created by this session |
 | `watch` | monitor and recover target, port, and log health |
@@ -134,6 +135,7 @@ Supported environment variables include:
 | `ADB_READY_PRESET` | development preset |
 | `ADB_READY_PACKAGE_MANAGER` | package manager |
 | `ADB_READY_REVERSE_PORTS` | comma-separated device ports |
+| `ADB_READY_AUTO_REVERSE_LOCALHOST` | boolean Expo localhost-service discovery override |
 | `ADB_READY_DEV_LOGS` | boolean |
 | `ADB_READY_CLEANUP_PORTS` | boolean |
 | `ADB_READY_DEV_WATCH` | boolean |

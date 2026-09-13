@@ -343,6 +343,11 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
           ]),
       `${style.success(glyphs.success, capabilities)} Project  ${clean(data.project.name ?? data.project.root)} · ${clean(data.preset)}`,
       `${style.success(glyphs.success, capabilities)} Ports    ${String(data.ports.requested.length)} ready · ${String(data.ports.created.length)} created · ${String(data.ports.reused.length)} reused`,
+      ...((data.localServices ?? []).length === 0
+        ? []
+        : [
+            `${style.success(glyphs.success, capabilities)} Local    ${(data.localServices ?? []).map(({ devicePort, variables }) => `${String(devicePort)} · ${variables.map(clean).join(", ")}`).join(" | ")} · auto-reversed`,
+          ]),
       ...(data.attachedService === undefined
         ? [
             `${style.success(glyphs.success, capabilities)} Command  ${clean(data.command.executable)} ${data.command.args.map(clean).join(" ")}`,
@@ -621,6 +626,11 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
         : [
             `${style.success(glyphs.success, capabilities)} Preset   ${clean(result.data.detectedPreset)}`,
           ]),
+      ...((result.data.discoveredLocalServices ?? []).length === 0
+        ? []
+        : [
+            `${style.success(glyphs.success, capabilities)} Local    ${(result.data.discoveredLocalServices ?? []).map(({ devicePort }) => String(devicePort)).join(", ")} added from public Expo env`,
+          ]),
     );
   }
 
@@ -789,6 +799,9 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`attached_ownership=${clean(developmentData.attachedService.ownership)}\n`);
     }
     sink.write(`port_count=${String(developmentData.ports.requested.length)}\n`);
+    sink.write(
+      `discovered_local_ports=${(developmentData.localServices ?? []).map(({ devicePort }) => String(devicePort)).join(",")}\n`,
+    );
     sink.write(`journal_event_count=${String(developmentData.journal.events.length)}\n`);
     sink.write(`journal_dropped=${String(developmentData.journal.dropped)}\n`);
     if (developmentData.child !== undefined) {
@@ -910,6 +923,9 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     if (result.data.detectedPreset !== undefined) {
       sink.write(`detected_preset=${clean(result.data.detectedPreset)}\n`);
     }
+    sink.write(
+      `discovered_local_ports=${(result.data.discoveredLocalServices ?? []).map(({ devicePort }) => String(devicePort)).join(",")}\n`,
+    );
   }
   if (isAgentSetupData(result.data)) {
     sink.write(`client=${clean(result.data.client)}\n`);

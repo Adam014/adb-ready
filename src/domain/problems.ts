@@ -45,6 +45,7 @@ export const ProblemCode = {
   PortMappingVerificationFailed: "PORT_MAPPING_VERIFICATION_FAILED",
   DevPresetNotFound: "DEV_PRESET_NOT_FOUND",
   DevCommandNotFound: "DEV_COMMAND_NOT_FOUND",
+  ExpoEnvironmentDiscoveryFailed: "EXPO_ENV_DISCOVERY_FAILED",
   DevelopmentServiceConflict: "DEVELOPMENT_SERVICE_CONFLICT",
   PackageManagerConflict: "PACKAGE_MANAGER_CONFLICT",
   PackageManagerNotFound: "PACKAGE_MANAGER_NOT_FOUND",

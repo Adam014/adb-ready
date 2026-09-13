@@ -220,6 +220,8 @@ Development options:
   --preset NAME          expo, react-native, flutter, capacitor, gradle, or custom
   --package-manager PM   npm, pnpm, yarn, or bun
   --port PORT            Add a reverse TCP port; repeat for more ports
+  --[no-]auto-reverse-localhost
+                         Detect public Expo localhost URLs (default: enabled)
   --[no-]logs            Enable or disable targeted logcat
   --[no-]cleanup-ports   Keep or remove session-created mappings on exit
   -- EXECUTABLE ARG...   Run a direct custom command without a shell
@@ -246,6 +248,16 @@ Runs read-only host, ADB capability, server, and target diagnostics.
 
 Creates adb-ready.config.json from detected project signals. Existing files are
 never replaced unless --force is explicit. Use --dry-run to preview the file.
+
+Init options:
+  --preset NAME          Override project preset detection
+  --package-manager PM   npm, pnpm, yarn, or bun
+  --port PORT            Add a reverse TCP port; repeat for more ports
+  --[no-]auto-reverse-localhost
+                         Detect public Expo localhost URLs (default: enabled)
+  --[no-]logs            Enable or disable targeted logcat
+  --[no-]cleanup-ports   Configure cleanup of session-created mappings
+  --force                Replace an existing project configuration
 `,
   inspect: `Usage:
   adb-ready inspect app [APP_ID] [options]
@@ -565,6 +577,9 @@ function cliConfig(options: CliOptions): ConfigValues {
     ...(options.reversePorts === undefined
       ? {}
       : { devReversePorts: options.reversePorts.map((device) => ({ device: Number(device) })) }),
+    ...(options.autoReverseLocalhost === undefined
+      ? {}
+      : { devAutoReverseLocalhost: options.autoReverseLocalhost }),
     ...(options.logs === undefined ? {} : { devLogs: options.logs }),
     ...(options.cleanupPorts === undefined ? {} : { devCleanupPorts: options.cleanupPorts }),
     ...(options.command !== "dev" || options.customCommand === undefined
@@ -856,12 +871,15 @@ async function runCliInternal(
         ...(options.reversePorts === undefined
           ? {}
           : { reversePorts: options.reversePorts.map(Number) }),
+        ...(options.autoReverseLocalhost === undefined
+          ? {}
+          : { autoReverseLocalhost: options.autoReverseLocalhost }),
         ...(options.logs === undefined ? {} : { logs: options.logs }),
         ...(options.cleanupPorts === undefined ? {} : { cleanupPorts: options.cleanupPorts }),
         ...(options.force === undefined ? {} : { force: options.force }),
         ...(options.dryRun ? { dryRun: true } : {}),
       },
-      dependencies,
+      { ...dependencies, env: io.env },
     );
     renderResult(execution.result, {
       format: options.format,
@@ -1013,7 +1031,7 @@ async function runCliInternal(
     }
   }
   const bus = dependencies.bus ?? new EventBus(dependencies.clock);
-  const commandDependencies = { ...dependencies, bus };
+  const commandDependencies = { ...dependencies, bus, env: io.env };
   const config: import("../app/commands.js").CommandConfig = {
     ...(values.adbPath === undefined ? {} : { adbPath: values.adbPath }),
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
@@ -1531,6 +1549,9 @@ async function runCliInternal(
         ...(values.packageManager === undefined ? {} : { packageManager: values.packageManager }),
         ...(values.devCommand === undefined ? {} : { command: values.devCommand }),
         ...(values.devReversePorts === undefined ? {} : { reversePorts: values.devReversePorts }),
+        ...(values.devAutoReverseLocalhost === undefined
+          ? {}
+          : { autoReverseLocalhost: values.devAutoReverseLocalhost }),
         ...(values.devLogs === undefined ? {} : { logs: values.devLogs }),
         ...(values.devCleanupPorts === undefined ? {} : { cleanupPorts: values.devCleanupPorts }),
         ...(values.devWatch === undefined ? {} : { watch: values.devWatch }),

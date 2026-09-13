@@ -36,6 +36,7 @@ function execution(): CommandExecution<DevData> {
         project: { root: "~/project", name: "app" },
         preset: "custom",
         ports: { requested: [], created: [], reused: [], cleaned: true },
+        localServices: [],
         command: { executable: "dev", args: [], cwd: "~/project", envKeys: [] },
         verification: {
           command: { executable: "test", args: [], cwd: "~/project", envKeys: [] },
