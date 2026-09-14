@@ -150,6 +150,10 @@ Once ready, the session watches:
 - required reverse mappings; and
 - the owned logcat stream when logs are enabled.
 
+Successful readiness and health polls are background work: they do not compete
+with framework logs and are not retained in the durable session journal.
+Failures, state changes, and recovery actions remain visible and recorded.
+
 Recovery waits for a bounded stabilization period, attempts to reacquire the
 same target, restores only missing session mappings, restarts the targeted log
 stream when necessary, and verifies the complete state independently.

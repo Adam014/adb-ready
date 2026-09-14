@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Keep successful readiness and health polling silent in human output and out
+  of the durable session journal while retaining failures and state changes.
 - Keep Expo's automatic Android launch on the one selected ADB transport: start
   Metro without Expo's all-device `--android` path, resolve the official launch
   URL with an Expo 55-compatible fallback, and open it through target-scoped
