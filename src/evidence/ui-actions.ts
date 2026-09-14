@@ -525,6 +525,13 @@ function directionalPoints(
   return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
 }
 
+function scrollGestureDirection(direction: UiDirection): UiDirection {
+  if (direction === "up") return "down";
+  if (direction === "down") return "up";
+  if (direction === "left") return "right";
+  return "left";
+}
+
 function remoteArgs(ready: Ready, config: CommandConfig, args: string[]): string[] {
   return [
     ...(config.adbHost === undefined ? [] : ["-H", config.adbHost]),
@@ -1016,7 +1023,7 @@ export async function runUiAction(
     const points =
       request.action === "scroll"
         ? directionalPoints(
-            request.direction,
+            scrollGestureDirection(request.direction),
             matchedNode?.bounds ?? { left: 0, top: 0, right: size.width, bottom: size.height },
           )
         : "direction" in request

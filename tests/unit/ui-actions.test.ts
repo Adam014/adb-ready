@@ -368,10 +368,10 @@ describe("safe UI actions", () => {
     });
   });
 
-  test("scrolls inside one semantic scroll container", async () => {
+  test("scrolls by content direction inside one semantic container", async () => {
     const requests: string[][] = [];
     const execution = await runUiAction(
-      { action: "scroll", direction: "up", selector: "id=com.example:id/list" },
+      { action: "scroll", direction: "down", selector: "id=com.example:id/list" },
       {},
       fixture([SCROLLER, AFTER], requests),
     );
@@ -381,6 +381,25 @@ describe("safe UI actions", () => {
     });
     expect(requests).toContainEqual(
       expect.arrayContaining(["input", "swipe", "500", "1680", "500", "720", "350"]),
+    );
+  });
+
+  test("keeps swipe direction physical while scroll direction describes content navigation", async () => {
+    const scroll = await runUiAction(
+      { action: "scroll", direction: "right", dryRun: true },
+      {},
+      fixture([BEFORE]),
+    );
+    const swipe = await runUiAction(
+      { action: "swipe", direction: "right", dryRun: true },
+      {},
+      fixture([BEFORE]),
+    );
+    expect(scroll.result.data?.plan?.steps[0]?.args).toEqual(
+      expect.arrayContaining(["input", "swipe", "864", "1200", "216", "1200", "350"]),
+    );
+    expect(swipe.result.data?.plan?.steps[0]?.args).toEqual(
+      expect.arrayContaining(["input", "swipe", "216", "1200", "864", "1200", "350"]),
     );
   });
 

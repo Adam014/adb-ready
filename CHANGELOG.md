@@ -22,6 +22,9 @@ breaking changes.
 
 ### Fixed
 
+- Make `ui scroll` directions describe content navigation—such as `down`
+  revealing content below—while keeping `ui swipe` directions as physical
+  finger gestures.
 - Reject unreadable or one-frame, zero-duration Android screen recordings
   instead of publishing them as verified evidence, and report the measured
   duration and frame count for valid recordings.
