@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Document every supported app-install and package-list action option in the
+  focused command help, including filtering and install verification flags.
 - Make UI audits follow Android hierarchy semantics: inherit effective labels
   through control descendants and actionable ancestors, exclude structural
   focus and scrolling containers, and explain every finding with confidence
