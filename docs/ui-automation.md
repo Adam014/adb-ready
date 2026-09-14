@@ -84,10 +84,12 @@ adb-ready ui clear 'id=com.example:id/search'
 `get` requires one unambiguous match and returns its semantic values, state,
 and bounds. `fill` and `clear` focus that exact enabled field, select its
 existing value, replace it, then inspect the hierarchy again. A visible normal
-field is successful only when its post-action value matches. Password and
-custom fields can accept input without exposing their value; those calls stay
-successful but report `verified: false` and `text-not-observable`, so the next
-screen state should be asserted explicitly.
+field is successful only when its post-action value matches. Android may expose
+an empty field's hint as accessibility text; ADB Ready reads the separate
+platform `hint` attribute so a declared placeholder is not mistaken for a
+remaining value. Password and custom fields can accept input without exposing
+their value; those calls stay successful but report `verified: false` and
+`text-not-observable`, so the next screen state should be asserted explicitly.
 
 Safe replacement requires the target's Android `input keycombination`
 capability. ADB Ready checks it before touching the screen and returns a

@@ -8,6 +8,7 @@ const BEFORE = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]">
 const AFTER = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Close" resource-id="com.example:id/close" clickable="true" enabled="true" bounds="[20,100][220,200]" /></node></hierarchy>`;
 const FIELD = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="old" resource-id="com.example:id/email" class="android.widget.EditText" focusable="true" enabled="true" bounds="[100,300][900,420]" /></node></hierarchy>`;
 const FILLED_FIELD = FIELD.replace('text="old"', 'text="person@example.com"');
+const HINTED_EMPTY_FIELD = FIELD.replace('text="old"', 'text="Email" hint="Email"');
 const SCROLLER = `<?xml version="1.0"?><hierarchy><node resource-id="com.example:id/list" scrollable="true" enabled="true" bounds="[100,400][900,2000]" /></hierarchy>`;
 const AUDIT = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Save" resource-id="com.example:id/save" clickable="true" enabled="true" bounds="[20,100][220,200]" /><node class="android.widget.ImageButton" clickable="true" enabled="true" bounds="[240,100][440,200]" /></node></hierarchy>`;
 const DUPLICATE = `<?xml version="1.0"?><hierarchy><node><node text="Same" clickable="true" enabled="true" bounds="[10,10][100,100]" /><node text="Same" clickable="true" enabled="true" bounds="[110,10][200,100]" /></node></hierarchy>`;
@@ -349,6 +350,24 @@ describe("safe UI actions", () => {
     expect(requests.some((args) => args.includes("keycombination"))).toBe(false);
   });
 
+  test("verifies a cleared field when Android exposes its declared hint as text", async () => {
+    const execution = await runUiAction(
+      { action: "clear", selector: "id=com.example:id/email" },
+      {},
+      fixture([FIELD, HINTED_EMPTY_FIELD]),
+    );
+
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        verified: true,
+        verification: "text-cleared",
+        after: { digest: expect.any(String) },
+      },
+      problems: [],
+    });
+  });
+
   test("scrolls inside one semantic scroll container", async () => {
     const requests: string[][] = [];
     const execution = await runUiAction(
@@ -642,6 +661,17 @@ describe("safe UI actions", () => {
     expect(mismatch.result).toMatchObject({
       ok: false,
       data: { verified: false, verification: "text-mismatch", verificationGap: "text-mismatch" },
+      problems: [{ code: "UI_TEXT_POSTCONDITION_FAILED" }],
+    });
+
+    const uncleared = await runUiAction(
+      { action: "clear", selector: "id=com.example:id/email" },
+      {},
+      fixture([FIELD, FIELD.replace('text="old"', 'text="remaining" hint="Email"')]),
+    );
+    expect(uncleared.result).toMatchObject({
+      ok: false,
+      data: { verified: false, verification: "text-mismatch" },
       problems: [{ code: "UI_TEXT_POSTCONDITION_FAILED" }],
     });
 

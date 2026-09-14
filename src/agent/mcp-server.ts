@@ -992,7 +992,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "clear_ui",
-    "Focus one semantic editable field, clear its value, and verify the observable value.",
+    "Focus one semantic editable field, clear its value, and verify the observable value or declared hint-only state.",
     z.object({
       ...targetHandleShape,
       selector: uiSelectorSchema,

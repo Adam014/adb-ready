@@ -298,7 +298,7 @@
     },
     {
       "name": "clear_ui",
-      "description": "Focus one semantic editable field, clear its value, and verify the observable value.",
+      "description": "Focus one semantic editable field, clear its value, and verify the observable value or declared hint-only state.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",

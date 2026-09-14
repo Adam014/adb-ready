@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Recognize Android's separate accessibility hint when verifying `ui clear`,
+  so an empty field displaying its placeholder is not reported as a failure.
 - Let unique text and description selectors target their nearest enabled
   actionable ancestor while reporting both the matched label and action node.
 - Keep the interactive home and focused menus inside the detected terminal

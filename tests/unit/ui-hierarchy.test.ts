@@ -6,7 +6,7 @@ const XML = `UI hierchary dumped to: /dev/tty
 <hierarchy rotation="0">
   <node index="0" class="android.widget.FrameLayout" package="com.example.app" bounds="[0,0][1080,2400]">
     <node index="0" text="Orders &amp; invoices" resource-id="com.example.app:id/title" class="android.widget.TextView" clickable="false" enabled="true" bounds="[20,40][900,120]" />
-    <node index="1" text="Open" content-desc="Open order" resource-id="com.example.app:id/open" class="android.widget.Button" clickable="true" checked="true" enabled="true" focusable="true" focused="true" password="false" bounds="[20,140][300,240]" />
+    <node index="1" text="Open" hint="Choose an order" content-desc="Open order" resource-id="com.example.app:id/open" class="android.widget.Button" clickable="true" checked="true" enabled="true" focusable="true" focused="true" password="false" bounds="[20,140][300,240]" />
   </node>
 </hierarchy>`;
 
@@ -27,6 +27,7 @@ describe("UI hierarchy snapshots", () => {
         {
           depth: 1,
           text: "Open",
+          hintText: "Choose an order",
           contentDescription: "Open order",
           clickable: true,
           checked: true,
