@@ -2160,7 +2160,7 @@ function metroServicePort(
   mappings: readonly { device: string; host: string }[],
 ): number | undefined {
   if (preset !== "expo" && preset !== "react-native") return undefined;
-  const mapping = mappings.find(({ device }) => device === "tcp:8081");
+  const mapping = mappings.find(({ device }) => device === "tcp:8081") ?? mappings[0];
   const port = mapping?.host.match(/^tcp:(\d+)$/u)?.[1];
   return port === undefined ? undefined : Number(port);
 }

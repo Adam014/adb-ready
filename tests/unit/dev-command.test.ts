@@ -341,7 +341,7 @@ describe("runDev", () => {
         return result(request);
       }
       if (args.includes("--list")) {
-        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        return result(request, { stdout: mapped ? "host tcp:18081 tcp:18081\n" : "" });
       }
       if (args.includes("resolve-activity")) {
         return result(request, { stdout: "com.example.demo/.MainActivity\n" });
@@ -369,12 +369,26 @@ describe("runDev", () => {
     });
     deps.probeMetroService = async () => ({
       status: "unavailable",
-      endpoint: "http://127.0.0.1:8081",
+      endpoint: "http://127.0.0.1:18081",
     });
+    let resolvedDevicePort: number | undefined;
+    deps.resolveExpoLaunch = async ({ devicePort, runtime }) => {
+      resolvedDevicePort = devicePort;
+      return {
+        status: "resolved",
+        target: {
+          url: `demo://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${String(devicePort)}`,
+          runtime,
+          source: "open",
+          applicationId: "com.example.demo",
+        },
+      };
+    };
 
     const execution = await runDev(
       {
         cwd: "/workspace/app",
+        reversePorts: [{ device: 18081 }],
         readiness: { all: [] },
         logs: false,
         watch: false,
@@ -385,6 +399,7 @@ describe("runDev", () => {
 
     expect(execution.exitCode).toBe(ExitCode.Success);
     expect(mapped).toBeFalse();
+    expect(resolvedDevicePort).toBe(18081);
     expect(execution.result.data?.command).toMatchObject({
       executable: "/bin/npm",
       args: ["run", "start"],
