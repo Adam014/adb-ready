@@ -3399,7 +3399,7 @@ export async function runDev(
   const readinessPromise = waitForReadiness(
     readinessAssertions,
     createAdbReadinessProbe({
-      client,
+      client: healthClient,
       target,
       logLines: () => recentLogLines,
       ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
@@ -3758,6 +3758,9 @@ export async function runDev(
               message: event.detail ?? event.type,
               correlation: { ...correlation, targetId: selected.target.id },
               data: {
+                ...(event.type === "health.checked"
+                  ? { presentation: "background", retention: "transient" }
+                  : {}),
                 ...(event.attempt === undefined ? {} : { attempt: event.attempt }),
                 ...(event.health === undefined
                   ? {}

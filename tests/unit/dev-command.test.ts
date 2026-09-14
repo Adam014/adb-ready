@@ -1153,6 +1153,9 @@ describe("runDev", () => {
       assertions: [{ assertion: { kind: "boot" }, status: "passed" }],
     });
     const events = execution.result.data?.journal.events.map(({ type }) => type) ?? [];
+    expect(
+      execution.result.data?.journal.events.filter(({ source }) => source === "adb.shell"),
+    ).toHaveLength(0);
     expect(events.indexOf("readiness.passed")).toBeLessThan(events.indexOf("child.exited"));
   });
 
@@ -1937,11 +1940,11 @@ describe("runDev", () => {
     expect(execution.result.data?.journal.events.map(({ type }) => type)).toContain(
       "recovery.completed",
     );
-    const backgroundProbeSources = execution.result.data?.journal.events
-      .filter(({ data }) => data?.presentation === "background")
-      .map(({ source }) => source);
-    expect(backgroundProbeSources).toContain("adb.get-state");
-    expect(backgroundProbeSources).toContain("adb.reverse-list");
+    expect(
+      execution.result.data?.journal.events.filter(
+        ({ data, type }) => data?.presentation === "background" || type === "health.checked",
+      ),
+    ).toHaveLength(0);
   });
 
   test("restarts an unexpectedly ended log stream without restarting the development child", async () => {

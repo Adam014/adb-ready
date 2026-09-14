@@ -47,6 +47,28 @@ describe("EventJournal", () => {
     expect(journal.close().events).toHaveLength(1);
   });
 
+  test("does not retain transient polling events", () => {
+    const bus = new EventBus();
+    const journal = new EventJournal(bus);
+    bus.emit({
+      type: "health.checked",
+      source: "recovery",
+      severity: "info",
+      message: "health.checked",
+      correlation: { commandId: "command" },
+      data: { presentation: "background", retention: "transient" },
+    });
+    bus.emit({
+      type: "session.degraded",
+      source: "recovery",
+      severity: "warning",
+      message: "Target disconnected.",
+      correlation: { commandId: "command" },
+    });
+
+    expect(journal.close().events.map(({ type }) => type)).toEqual(["session.degraded"]);
+  });
+
   test("redacts project-specific literal values before journal retention", () => {
     const bus = new EventBus();
     const journal = new EventJournal(bus, {

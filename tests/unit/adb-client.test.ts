@@ -66,7 +66,7 @@ describe("AdbClient", () => {
     expect(events).toEqual(["operation.started", "operation.completed"]);
   });
 
-  test("retains background probe evidence without presenting foreground progress", async () => {
+  test("marks successful background probes as transient", async () => {
     const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
     const events: Array<{ severity: string; data?: Record<string, unknown> }> = [];
     bus.subscribe((event) => events.push(event));
@@ -85,13 +85,47 @@ describe("AdbClient", () => {
     expect(events).toEqual([
       expect.objectContaining({
         severity: "debug",
-        data: expect.objectContaining({ presentation: "background" }),
+        data: expect.objectContaining({
+          presentation: "background",
+          retention: "transient",
+        }),
       }),
       expect.objectContaining({
         severity: "debug",
-        data: expect.objectContaining({ presentation: "background", exitCode: 0 }),
+        data: expect.objectContaining({
+          presentation: "background",
+          retention: "transient",
+          exitCode: 0,
+        }),
       }),
     ]);
+  });
+
+  test("keeps failed background probe evidence durable and self-contained", async () => {
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events: Array<{ type: string; data?: Record<string, unknown> }> = [];
+    bus.subscribe((event) => events.push(event));
+    const client = new AdbClient({
+      executable: "adb",
+      bus,
+      correlation: { commandId: "command-1" },
+      runner: async (request) =>
+        processResult({ args: [...(request.args ?? [])], exitCode: 1, stderr: "offline" }),
+      idFactory: () => "operation-1",
+      presentation: "background",
+    });
+
+    await client.getState("R5CT-001");
+
+    expect(events.at(-1)).toMatchObject({
+      type: "operation.failed",
+      data: {
+        presentation: "background",
+        executable: "adb",
+        args: ["-s", "R5CT-001", "get-state"],
+      },
+    });
+    expect(events.at(-1)?.data).not.toHaveProperty("retention");
   });
 
   test("keeps client version independent from a configured remote server", async () => {

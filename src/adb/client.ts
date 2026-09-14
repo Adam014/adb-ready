@@ -337,7 +337,7 @@ export class AdbClient {
       data: {
         executable: redactText(this.#options.executable).value,
         args: finalArgs.map((argument) => redactText(argument).value),
-        ...(background ? { presentation: "background" } : {}),
+        ...(background ? { presentation: "background", retention: "transient" } : {}),
       },
     });
 
@@ -376,7 +376,17 @@ export class AdbClient {
       correlation,
       data: {
         ...processMetadata(result),
-        ...(background ? { presentation: "background" } : {}),
+        ...(background
+          ? {
+              presentation: "background",
+              ...(succeeded
+                ? { retention: "transient" }
+                : {
+                    executable: redactText(this.#options.executable).value,
+                    args: finalArgs.map((argument) => redactText(argument).value),
+                  }),
+            }
+          : {}),
       },
     });
 

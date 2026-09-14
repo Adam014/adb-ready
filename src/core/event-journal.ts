@@ -89,6 +89,7 @@ export class EventJournal {
 
   #record(input: AdbReadyEvent): void {
     if (
+      input.data?.retention === "transient" ||
       (this.#sources !== undefined && !this.#sources.has(input.source)) ||
       SEVERITY_ORDER[input.severity] < SEVERITY_ORDER[this.#minimumSeverity]
     ) {
