@@ -653,7 +653,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   ]);
   register(
     "audit_ui",
-    "Audit the current screen for enabled actionable nodes without human-readable labels or stable automation IDs.",
+    "Audit real Android controls for effective labels and stable automation IDs, with bounded findings, confidence, and rule rationale.",
     z.object({ ...targetHandleShape }),
     {
       readOnlyHint: true,

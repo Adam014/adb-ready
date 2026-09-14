@@ -29,13 +29,20 @@ ADB Ready does not silently disable device-wide animations.
 adb-ready ui audit --json --non-interactive
 ```
 
-The audit reports enabled actionable nodes that have no visible text or
-content description, and nodes that have no resource ID for a stable selector.
-It returns the exact current references and attributes, plus bounded totals;
-it deliberately does not invent a subjective quality score. A missing label is
-an accessibility warning. A missing stable ID is an automation advisory—use a
-resource ID or expose a Compose test tag through `testTagsAsResourceId` where
-appropriate.
+The audit reports enabled controls that have no effective human-readable label,
+and controls that have no resource ID for a stable selector. Effective labels
+include text, hints, and content descriptions on the control, its descendants,
+or an actionable ancestor. Structural focus and scrolling containers are not
+misreported as controls merely because they are focusable or scrollable.
+
+Every finding includes its rule rationale and confidence. A partial hierarchy
+reduces the confidence of missing-label findings instead of presenting
+incomplete evidence as definitive. The audit returns exact current references,
+attributes, and bounded totals; it deliberately does not invent a subjective
+quality score. A missing label is an accessibility warning. A missing stable ID
+is an automation advisory; effective text and content-description labels remain
+usable, while a resource ID or Compose test tag exposed through
+`testTagsAsResourceId` is more resilient to copy changes.
 
 ## Tap and long-press
 

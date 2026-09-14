@@ -11,6 +11,8 @@ const FILLED_FIELD = FIELD.replace('text="old"', 'text="person@example.com"');
 const HINTED_EMPTY_FIELD = FIELD.replace('text="old"', 'text="Email" hint="Email"');
 const SCROLLER = `<?xml version="1.0"?><hierarchy><node resource-id="com.example:id/list" scrollable="true" enabled="true" bounds="[100,400][900,2000]" /></hierarchy>`;
 const AUDIT = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Save" resource-id="com.example:id/save" clickable="true" enabled="true" bounds="[20,100][220,200]" /><node class="android.widget.ImageButton" clickable="true" enabled="true" bounds="[240,100][440,200]" /></node></hierarchy>`;
+const COMPOSITE_AUDIT = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node resource-id="com.example:id/list" class="android.widget.ScrollView" focusable="true" scrollable="true" enabled="true" bounds="[0,100][1080,2200]"><node clickable="true" enabled="true" bounds="[20,120][1060,300]"><node text="Notifications" class="android.widget.TextView" enabled="true" bounds="[60,150][500,220]" /><node class="android.widget.Switch" checkable="true" enabled="true" bounds="[850,140][1020,260]" /></node></node><node hint="Email" class="android.widget.EditText" focusable="true" enabled="true" bounds="[20,2240][1060,2360]" /><node clickable="true" enabled="true" bounds="[0,2500][1080,2400]" /></node></hierarchy>`;
+const PARTIAL_AUDIT = `<?xml version="1.0"?><hierarchy><node clickable="true" enabled="true" bounds="[20,100][220,200]" />${"<node>".repeat(102)}${"</node>".repeat(102)}</hierarchy>`;
 const DUPLICATE = `<?xml version="1.0"?><hierarchy><node><node text="Same" clickable="true" enabled="true" bounds="[10,10][100,100]" /><node text="Same" clickable="true" enabled="true" bounds="[110,10][200,100]" /></node></hierarchy>`;
 const NON_ACTIONABLE = `<?xml version="1.0"?><hierarchy><node text="Label" enabled="true" bounds="[10,10][100,100]" /></hierarchy>`;
 const LABELED_ROW = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node resource-id="android:id/apps_row" clickable="true" enabled="true" bounds="[20,100][1060,240]"><node class="android.widget.LinearLayout" enabled="true" bounds="[63,100][1060,240]"><node text="Apps" resource-id="android:id/title" class="android.widget.TextView" enabled="true" bounds="[63,120][148,190]" /></node></node></node></hierarchy>`;
@@ -166,8 +168,75 @@ describe("safe UI actions", () => {
           findingCount: 2,
           findingsTruncated: false,
           findings: [
-            { code: "UI_ACTIONABLE_UNLABELED", severity: "warning" },
-            { code: "UI_ACTIONABLE_WITHOUT_STABLE_ID", severity: "info" },
+            {
+              code: "UI_ACTIONABLE_UNLABELED",
+              severity: "warning",
+              confidence: "high",
+              rationale: expect.stringContaining("descendants"),
+            },
+            {
+              code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
+              severity: "info",
+              confidence: "high",
+              rationale: expect.stringContaining("digest-scoped"),
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  test("uses effective hierarchy labels without auditing scroll and focus containers", async () => {
+    const execution = await runUiAction({ action: "audit" }, {}, fixture([COMPOSITE_AUDIT]));
+
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        audit: {
+          actionableNodes: 3,
+          labeledNodes: 3,
+          stableIdNodes: 0,
+          findingCount: 3,
+          findings: [
+            {
+              code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
+              rationale: expect.stringContaining("effective text"),
+              effectiveLabel: { source: "descendant", kind: "text", value: "Notifications" },
+            },
+            {
+              code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
+              rationale: expect.stringContaining("effective text"),
+              effectiveLabel: { source: "ancestor", kind: "text", value: "Notifications" },
+            },
+            {
+              code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
+              rationale: expect.stringContaining("human-readable hint"),
+              effectiveLabel: { source: "self", kind: "hint", value: "Email" },
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  test("downgrades missing-label confidence when the hierarchy is incomplete", async () => {
+    const execution = await runUiAction({ action: "audit" }, {}, fixture([PARTIAL_AUDIT]));
+
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        after: { complete: false, truncated: true },
+        audit: {
+          findings: [
+            {
+              code: "UI_ACTIONABLE_UNLABELED",
+              confidence: "medium",
+              rationale: expect.stringContaining("partial hierarchy"),
+            },
+            {
+              code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
+              confidence: "high",
+            },
           ],
         },
       },
