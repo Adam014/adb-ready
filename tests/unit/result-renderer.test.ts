@@ -319,6 +319,7 @@ describe("result renderer", () => {
     const session = {
       sessionId: "session-1",
       status: "completed",
+      reachedReady: true,
       planScope: "target",
       selected,
       project: { root: "/workspace/app", name: "demo" },
@@ -613,6 +614,40 @@ describe("result renderer", () => {
       expect(plain.value).toContain(`command=${item.command}`);
     }
 
+    const devHuman = new MemorySink();
+    const devPlain = new MemorySink();
+    renderResult(
+      { ...result, command: "dev", data: session },
+      {
+        format: "human",
+        capabilities,
+        sink: devHuman,
+      },
+    );
+    renderResult(
+      { ...result, command: "dev", data: session },
+      {
+        format: "plain",
+        capabilities,
+        sink: devPlain,
+      },
+    );
+    expect(devHuman.value).toContain("Checks   passed · 1/1");
+    expect(devHuman.value).not.toContain("Ready    verified");
+    expect(devPlain.value).toContain("readiness_checks_passed=true\n");
+    expect(devPlain.value).toContain("reached_ready=true\n");
+
+    const noChecks = new MemorySink();
+    renderResult(
+      {
+        ...result,
+        command: "dev",
+        data: { ...session, readiness: { ready: true, assertions: [] } },
+      },
+      { format: "human", capabilities, sink: noChecks },
+    );
+    expect(noChecks.value).toContain("Checks   none configured");
+
     const markdown = new MemorySink();
     renderResult(
       {
@@ -632,6 +667,7 @@ describe("result renderer", () => {
       data: {
         sessionId: "session-1",
         status: "completed",
+        reachedReady: true,
         selected: {
           target: { name: "Pixel 9" },
           transport: { serial: "emulator-5554" },
@@ -681,5 +717,6 @@ describe("result renderer", () => {
     expect(plain.value).toContain("expo_launch_runtime=custom\n");
     expect(plain.value).toContain("expo_launch_app=com.example.demo\n");
     expect(plain.value).toContain("expo_launch_verified=true\n");
+    expect(plain.value).toContain("reached_ready=true\n");
   });
 });

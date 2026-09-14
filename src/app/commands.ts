@@ -1953,6 +1953,8 @@ export interface DevOptions {
 export interface DevData {
   sessionId: string;
   status: "completed" | "failed" | "interrupted" | "planned";
+  /** Present on new results; optional when reading sessions persisted by earlier releases. */
+  reachedReady?: boolean;
   adbPath?: string;
   selected?: SelectedTarget;
   planScope?: "offline" | "target";
@@ -2543,6 +2545,7 @@ export async function runDevOfflinePlan(
     {
       sessionId,
       status: "planned",
+      reachedReady: false,
       planScope: "offline",
       project: {
         root: redactedPath(project.root),
@@ -2592,6 +2595,68 @@ function streamSeverity(
   return "info";
 }
 
+const CHILD_DIAGNOSTIC_PATTERN =
+  /(?:commanderror|error|fatal|exception|failed|failure|unable|cannot|could not|not found|not installed)(?::|\b)/iu;
+const CHILD_STARTUP_SETTLE_MS = 250;
+
+function childFailureDiagnostic(result: ProcessResult): string | undefined {
+  const lines = [result.stderr, result.stdout].flatMap((output) =>
+    output
+      .replaceAll("\r\n", "\n")
+      .split("\n")
+      .map((line) => line.replace(/\s+/gu, " ").trim())
+      .filter((line) => line !== ""),
+  );
+  const diagnostic = lines.find((line) => CHILD_DIAGNOSTIC_PATTERN.test(line)) ?? lines.at(-1);
+  if (diagnostic === undefined) return undefined;
+  return redactText(diagnostic).value.slice(0, 500);
+}
+
+function childProcessFailureProblem(
+  result: ProcessResult,
+  commandId: string,
+  beforeReady: boolean,
+): Problem {
+  const diagnostic = childFailureDiagnostic(result);
+  const exit = result.exitCode === null ? String(result.signal) : String(result.exitCode);
+  return commandProblem(
+    ProblemCode.ChildProcessFailed,
+    "child.exit",
+    beforeReady
+      ? "The development command failed before the session became ready."
+      : "The development command failed.",
+    diagnostic === undefined ? `The child exited with ${exit}.` : diagnostic,
+    commandId,
+    [
+      { source: "child", field: "exitCode", value: result.exitCode },
+      { source: "child", field: "signal", value: result.signal },
+      ...(diagnostic === undefined
+        ? []
+        : [{ source: "child", field: "diagnostic", value: diagnostic }]),
+    ],
+  );
+}
+
+async function observeChildStartup(
+  child: Promise<ProcessResult>,
+  signal?: AbortSignal,
+): Promise<ProcessResult | undefined> {
+  if (signal?.aborted === true) return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let finishBoundary: (() => void) | undefined;
+  const boundary = new Promise<undefined>((resolve) => {
+    finishBoundary = () => resolve(undefined);
+    timer = setTimeout(finishBoundary, CHILD_STARTUP_SETTLE_MS);
+    signal?.addEventListener("abort", finishBoundary, { once: true });
+  });
+  try {
+    return await Promise.race([child, boundary]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (finishBoundary !== undefined) signal?.removeEventListener("abort", finishBoundary);
+  }
+}
+
 export async function runDev(
   options: DevOptions,
   config: CommandConfig = {},
@@ -2605,9 +2670,11 @@ export async function runDev(
   const context = createContext(options.mode ?? "dev", { ...dependencies, bus, idFactory });
   const problems: Problem[] = [];
   const stateMachine = new SessionStateMachine(dependencies.clock);
+  let reachedReady = false;
   const transition = (to: SessionState, reason: string): void => {
     if (!stateMachine.canTransition(to)) return;
     const state = stateMachine.transition(to, reason);
+    if (to === "ready") reachedReady = true;
     bus.emit({
       type: "session.state.changed",
       source: "session",
@@ -3043,6 +3110,7 @@ export async function runDev(
     return await complete({
       ...baseData(),
       status: "planned",
+      reachedReady: false,
       planScope: "target",
       ports: {
         requested: normalizedPorts.mappings,
@@ -3357,6 +3425,7 @@ export async function runDev(
   if (signal?.aborted === true) childController?.abort();
   const abortChild = () => childController?.abort();
   signal?.addEventListener("abort", abortChild, { once: true });
+  let settledChild: ProcessResult | undefined;
   const childPromise =
     childController === undefined
       ? undefined
@@ -3379,6 +3448,9 @@ export async function runDev(
             maxBufferBytes: 4 * 1024 * 1024,
             onStdoutChunk: (chunk) => childStdout.push(chunk),
             onStderrChunk: (chunk) => childStderr.push(chunk),
+          }).then((result) => {
+            settledChild = result;
+            return result;
           });
         })();
   const readinessController = new AbortController();
@@ -3391,8 +3463,8 @@ export async function runDev(
     severity: "info",
     message:
       readinessAssertions.length === 0
-        ? "No additional app readiness assertions are configured"
-        : `Waiting for ${String(readinessAssertions.length)} app readiness assertion(s)`,
+        ? "No additional readiness checks are configured"
+        : `Waiting for ${String(readinessAssertions.length)} configured readiness check(s)`,
     correlation: targetCorrelation,
     data: { count: readinessAssertions.length },
   });
@@ -3441,7 +3513,7 @@ export async function runDev(
       type: "readiness.failed",
       source: "readiness",
       severity: "error",
-      message: "Application readiness was not verified",
+      message: "Configured readiness checks did not pass",
       correlation: targetCorrelation,
       data: {
         attempts: readiness.attempts,
@@ -3457,7 +3529,7 @@ export async function runDev(
       type: "readiness.passed",
       source: "readiness",
       severity: "info",
-      message: "Application readiness was verified",
+      message: "Configured readiness checks passed",
       correlation: targetCorrelation,
       data: { attempts: readiness.attempts, durationMs: readiness.durationMs },
     });
@@ -3490,8 +3562,36 @@ export async function runDev(
     }
   }
   const expoLaunchSucceeded = preset !== "expo" || expoLaunch !== undefined;
+  if (
+    readiness.ready &&
+    expoLaunchSucceeded &&
+    childPromise !== undefined &&
+    settledChild === undefined
+  ) {
+    settledChild = await observeChildStartup(childPromise, signal);
+  }
+  let childFailureRecorded = false;
+  if (settledChild !== undefined && !processSucceeded(settledChild) && !settledChild.aborted) {
+    problems.push(childProcessFailureProblem(settledChild, context.commandId, true));
+    childFailureRecorded = true;
+  }
+  const readyPreconditionsPassed =
+    readiness.ready &&
+    expoLaunchSucceeded &&
+    (settledChild === undefined || processSucceeded(settledChild));
+  const onReadyHooksSucceeded = readyPreconditionsPassed && (await runHookPhase("onReady"));
+  await Promise.resolve();
+  if (
+    !childFailureRecorded &&
+    settledChild !== undefined &&
+    !processSucceeded(settledChild) &&
+    !settledChild.aborted
+  ) {
+    problems.push(childProcessFailureProblem(settledChild, context.commandId, true));
+    childFailureRecorded = true;
+  }
   const readyHooksSucceeded =
-    readiness.ready && expoLaunchSucceeded && (await runHookPhase("onReady"));
+    onReadyHooksSucceeded && (settledChild === undefined || processSucceeded(settledChild));
   if (!readyHooksSucceeded) childController?.abort();
   if (readyHooksSucceeded) {
     transition(
@@ -4028,23 +4128,11 @@ export async function runDev(
   } else if (
     child !== undefined &&
     !processSucceeded(child) &&
-    readyHooksSucceeded &&
-    !recoverySummary.failed &&
-    !(verification !== undefined && child.aborted)
+    !child.aborted &&
+    !childFailureRecorded &&
+    !recoverySummary.failed
   ) {
-    problems.push(
-      commandProblem(
-        ProblemCode.ChildProcessFailed,
-        "child.exit",
-        "The development command failed.",
-        `The child exited with ${child.exitCode === null ? String(child.signal) : String(child.exitCode)}.`,
-        context.commandId,
-        [
-          { source: "child", field: "exitCode", value: child.exitCode },
-          { source: "child", field: "signal", value: child.signal },
-        ],
-      ),
-    );
+    problems.push(childProcessFailureProblem(child, context.commandId, !reachedReady));
   }
   if (verification !== undefined && !verification.passed && signal?.aborted !== true) {
     problems.push(
@@ -4093,6 +4181,7 @@ export async function runDev(
         }),
     hooks: hookSummary(),
     recovery: recoverySummary,
+    reachedReady,
     readiness,
     ...(verification === undefined ? {} : { verification }),
   });
