@@ -5,6 +5,7 @@ import path from "node:path";
 import type { CommandDependencies } from "../../src/app/commands.js";
 import { runCapture } from "../../src/evidence/capture.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
+import { recordingMp4 } from "../fixtures/mp4.js";
 
 function result(request: ProcessRequest, stdout = "", exitCode = 0): ProcessResult {
   return {
@@ -133,7 +134,7 @@ describe("evidence capture", () => {
   test("bounds, transfers, verifies, and cleans only its owned device recording", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-record-"));
     const requests: string[][] = [];
-    const mp4 = Uint8Array.from([0, 0, 0, 12, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+    const mp4 = recordingMp4();
     const dependencies = fixture(new Uint8Array(), requests);
     const baseRunner = dependencies.runner;
     dependencies.runner = async (request) => {
@@ -163,7 +164,13 @@ describe("evidence capture", () => {
         data: {
           kind: "screen-record",
           durationSeconds: 2,
-          evidence: { path: "evidence/demo.mp4", mediaType: "video/mp4", bytes: mp4.byteLength },
+          evidence: {
+            path: "evidence/demo.mp4",
+            mediaType: "video/mp4",
+            bytes: mp4.byteLength,
+            durationMs: 2_510,
+            frameCount: 6,
+          },
         },
       });
       const record = requests.find((args) => args.includes("screenrecord"));
@@ -171,6 +178,46 @@ describe("evidence capture", () => {
       expect(record).toEqual(expect.arrayContaining(["screenrecord", "--time-limit", "2"]));
       expect(cleanup?.at(-1)).toBe(record?.at(-1));
       expect(new Uint8Array(await readFile(path.join(root, "evidence/demo.mp4")))).toEqual(mp4);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects Android recordings without a temporal frame timeline", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-record-"));
+    const requests: string[][] = [];
+    const dependencies = fixture(new Uint8Array(), requests);
+    const baseRunner = dependencies.runner;
+    dependencies.runner = async (request) => {
+      const args = [...(request.args ?? [])];
+      if (args.includes("pull")) {
+        const destination = args.at(-1);
+        if (destination === undefined) throw new Error("missing pull destination");
+        await writeFile(destination, recordingMp4({ duration: 0, frameCount: 1 }));
+        return result(request, "1 file pulled\n");
+      }
+      return (await baseRunner?.(request)) ?? result(request);
+    };
+    try {
+      const execution = await runCapture(
+        { kind: "screen-record", cwd: root, out: "empty.mp4", durationSeconds: 2 },
+        {},
+        dependencies,
+      );
+      expect(execution.result).toMatchObject({
+        ok: false,
+        data: null,
+        problems: [
+          {
+            code: "SCREEN_RECORD_EMPTY",
+            summary: "Android produced a screen recording without a usable timeline.",
+          },
+        ],
+      });
+      await expect(readFile(path.join(root, "empty.mp4"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(requests.some((args) => args.includes("rm") && args.includes("-f"))).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

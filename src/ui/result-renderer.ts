@@ -502,6 +502,12 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       `${style.success(glyphs.success, capabilities)} Target  ${clean(result.data.selected.target.name)} · ${clean(result.data.selected.transport.serial)}`,
       `${style.success(glyphs.success, capabilities)} File    ${clean(result.data.evidence.path)}`,
       `${style.success(glyphs.success, capabilities)} Type    ${clean(result.data.evidence.mediaType)} · ${String(result.data.evidence.bytes)} bytes`,
+      ...(result.data.evidence.durationMs === undefined ||
+      result.data.evidence.frameCount === undefined
+        ? []
+        : [
+            `${style.success(glyphs.success, capabilities)} Timeline ${(result.data.evidence.durationMs / 1_000).toFixed(2)}s · ${String(result.data.evidence.frameCount)} frames`,
+          ]),
       `${style.success(glyphs.success, capabilities)} SHA-256 ${clean(result.data.evidence.sha256)}`,
     );
   }
@@ -885,6 +891,12 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`media_type=${clean(result.data.evidence.mediaType)}\n`);
     sink.write(`bytes=${String(result.data.evidence.bytes)}\n`);
     sink.write(`sha256=${clean(result.data.evidence.sha256)}\n`);
+    if (result.data.evidence.durationMs !== undefined) {
+      sink.write(`media_duration_ms=${String(result.data.evidence.durationMs)}\n`);
+    }
+    if (result.data.evidence.frameCount !== undefined) {
+      sink.write(`video_frame_count=${String(result.data.evidence.frameCount)}\n`);
+    }
   }
   if (isInspectAppData(result.data)) {
     sink.write("kind=app\n");

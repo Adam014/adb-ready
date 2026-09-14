@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, writeSync } from "node:fs";
-import { open, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import {
   type Context,
   context,
@@ -20,6 +20,7 @@ import {
   openEvidenceTemporary,
   prepareEvidenceDestination,
 } from "./files.js";
+import { inspectMp4Recording } from "./mp4.js";
 
 export type CaptureKind = "screen-record" | "screenshot";
 
@@ -36,6 +37,8 @@ export interface EvidenceFile {
   mediaType: "image/png" | "video/mp4";
   bytes: number;
   sha256: string;
+  durationMs?: number;
+  frameCount?: number;
   provenance: {
     command: "exec-out screencap -p" | "shell screenrecord";
     targetSerial: string;
@@ -126,17 +129,6 @@ async function sha256(file: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
   return hash.digest("hex");
-}
-
-async function validMp4(file: string): Promise<boolean> {
-  const handle = await open(file, "r");
-  try {
-    const header = Buffer.alloc(12);
-    const { bytesRead } = await handle.read(header, 0, header.byteLength, 0);
-    return bytesRead >= 8 && header.subarray(4, 8).toString("ascii") === "ftyp";
-  } finally {
-    await handle.close();
-  }
 }
 
 async function captureScreenshot(
@@ -236,13 +228,32 @@ async function captureScreenRecord(
       () => undefined,
       signal,
     );
-    if (!succeeded(pulled.process) || !(await validMp4(destination.temporaryPath))) {
+    if (!succeeded(pulled.process)) {
       problems.push(
         problem(
           "SCREEN_RECORD_PULL_FAILED",
           "evidence.capture",
-          "The screen recording could not be verified after transfer.",
+          "The screen recording could not be transferred from the selected target.",
           "ADB Ready kept no incomplete local evidence file.",
+          current.commandId,
+        ),
+      );
+      await discardEvidenceDestination(destination);
+      return undefined;
+    }
+    const inspection = await inspectMp4Recording(destination.temporaryPath);
+    if (!inspection.valid) {
+      const empty = inspection.reason === "empty-timeline";
+      problems.push(
+        problem(
+          empty ? "SCREEN_RECORD_EMPTY" : "SCREEN_RECORD_INVALID",
+          "evidence.capture",
+          empty
+            ? "Android produced a screen recording without a usable timeline."
+            : "Android produced an unreadable or incomplete MP4 screen recording.",
+          empty
+            ? "Trigger visible activity during capture and retry; Android screenrecord can emit a one-frame, zero-duration MP4 when the display stays static."
+            : "Retry the capture after confirming Android screenrecord is available on the selected target.",
           current.commandId,
         ),
       );
@@ -256,6 +267,8 @@ async function captureScreenRecord(
       mediaType: "video/mp4",
       bytes: metadata.size,
       sha256: await sha256(destination.finalPath),
+      durationMs: inspection.durationMs,
+      frameCount: inspection.frameCount,
       provenance: { command: "shell screenrecord", targetSerial: ready.target.serial },
     };
   } finally {
