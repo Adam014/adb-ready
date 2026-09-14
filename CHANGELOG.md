@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Keep the interactive home and focused menus inside the detected terminal
+  width, including real narrow PTYs, without implicit last-column wrapping.
 - Prevent a development session from reporting ready after its owned command
   has already exited; distinguish passed readiness checks from the complete
   session-ready gate and promote the first actionable child error.

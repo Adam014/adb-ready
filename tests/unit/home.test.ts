@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { clearInteractiveScreen, showHomeScreen } from "../../src/ui/home.js";
 import type { SelectInput } from "../../src/ui/select.js";
 import type { TextSink } from "../../src/ui/spinner.js";
-import { sanitizeTerminalText } from "../../src/ui/style.js";
+import { stripTerminalSequences } from "../../src/ui/style.js";
 import type { TerminalCapabilities } from "../../src/ui/terminal.js";
 
 class MemorySink implements TextSink {
@@ -62,6 +62,10 @@ class ManualInput implements SelectInput {
       listener(value);
     }
   }
+}
+
+function visibleLineLength(value: string): number {
+  return [...stripTerminalSequences(value).replaceAll("\r", "")].length;
 }
 
 const interactive: TerminalCapabilities = {
@@ -151,13 +155,11 @@ describe("home screen", () => {
 
     expect(selected).toEqual({ kind: "action", action: "exit" });
     expect(sink.value).toContain("WHAT DO YOU WANT TO DO?");
-    expect(sink.value).toContain("####");
+    expect(sink.value).toContain("ADB READY");
     expect(sink.value).toStartWith("\u001B[?25l\u001B[2K\n");
     expect(sink.value).not.toContain("\u001B[2J\u001B[H");
     expect(sink.value).not.toContain("Android sessions. Kept ready.");
-    expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 45)).toBe(
-      true,
-    );
+    expect(sink.value.split("\n").every((line) => visibleLineLength(line) < 45)).toBe(true);
   });
 
   test("keeps the compact ASCII wordmark static", async () => {
@@ -198,9 +200,7 @@ describe("home screen", () => {
     expect(sink.value).toContain("ADB READY");
     expect(sink.value).toContain("Android sessions. Kept ready.");
     expect(sink.value).not.toContain("\u001B[36m");
-    expect(sink.value.split("\n").every((line) => sanitizeTerminalText(line).length <= 40)).toBe(
-      true,
-    );
+    expect(sink.value.split("\n").every((line) => visibleLineLength(line) < 40)).toBe(true);
   });
 
   test("never clears or renders when interaction is unavailable", async () => {

@@ -94,16 +94,23 @@ function homePreamble(
 ): string[] {
   const angleX = 0.38 + Math.sin(frame * 0.035) * 0.12;
   const angleY = frame * 0.045;
+  // Avoid writing into the terminal's final column. Many terminals immediately
+  // wrap after that cell, which makes an otherwise width-exact frame appear as
+  // an extra blank line and breaks subsequent cursor-based redraws.
+  const availableColumns = Math.max(19, capabilities.columns - 1);
 
-  if (capabilities.columns < 76) {
-    const width = Math.max(20, Math.min(34, capabilities.columns - 4));
+  if (availableColumns < 76) {
+    const width = Math.max(16, Math.min(34, availableColumns - 4));
     const core = renderLinkCoreFrame({ angleX, angleY, width, height: 12 });
     return [
-      ...core.map((line) => style.accent(center(line, capabilities.columns), capabilities)),
+      ...core.map((line) => style.accent(center(line, availableColumns), capabilities)),
       "",
-      style.strong(center("ADB READY", capabilities.columns), capabilities),
-      style.dim(center("Android sessions. Kept ready.", capabilities.columns), capabilities),
-      style.dim(center(`v${version}`, capabilities.columns), capabilities),
+      style.strong(center("ADB READY", availableColumns), capabilities),
+      style.dim(
+        center(fit("Android sessions. Kept ready.", availableColumns).trimEnd(), availableColumns),
+        capabilities,
+      ),
+      style.dim(center(`v${version}`, availableColumns), capabilities),
       "",
     ];
   }
@@ -131,7 +138,8 @@ const COMPACT_WORDMARK = [
 
 function compactSessionPreamble(capabilities: TerminalCapabilities): string[] {
   const unicode = capabilities.unicode;
-  const width = Math.max(20, Math.min(45, capabilities.columns));
+  const availableColumns = Math.max(19, capabilities.columns - 1);
+  const width = Math.max(19, Math.min(45, availableColumns));
   const inner = width - 4;
   const top = unicode ? `╭${"─".repeat(width - 2)}╮` : `+${"-".repeat(width - 2)}+`;
   const bottom = unicode ? `╰${"─".repeat(width - 2)}╯` : `+${"-".repeat(width - 2)}+`;

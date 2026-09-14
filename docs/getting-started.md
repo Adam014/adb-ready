@@ -27,6 +27,9 @@ version:
 npx adb-ready doctor
 ```
 
+Run `npx adb-ready` without a command for the interactive workflow home. Its
+layout automatically switches to a compact form in narrow terminal panes.
+
 The full source build can be tested from a repository checkout:
 
 ```bash

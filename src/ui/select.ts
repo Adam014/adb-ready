@@ -109,13 +109,16 @@ function renderMenu<T>(
 ): number {
   const { capabilities, sink } = options;
   const glyphs = symbols(capabilities);
+  // Reserving the final terminal cell prevents implicit line wrapping from
+  // corrupting cursor-based redraws in narrow PTYs.
+  const availableColumns = Math.max(19, capabilities.columns - 1);
   if (previousLineCount > 0) {
     sink.write(`\u001B[${String(previousLineCount)}F`);
   }
   const top = capabilities.unicode ? "╭─" : "+-";
   const bottom = capabilities.unicode ? "╰─" : "+-";
   const rail = capabilities.unicode ? "│" : "|";
-  const compact = capabilities.columns < 60;
+  const compact = availableColumns < 60;
   const help =
     options.help ??
     (capabilities.unicode ? "↑↓ move · 1-9 jump · enter open" : "up/down · 1-9 jump · enter open");
@@ -123,7 +126,7 @@ function renderMenu<T>(
   const lines = [...(options.preamble?.(frame) ?? [])];
   lines.push(
     `${style.dim(top, capabilities)} ${style.strong(
-      truncate(sanitizeTerminalText(options.title), Math.max(8, capabilities.columns - 4)),
+      truncate(sanitizeTerminalText(options.title), Math.max(8, availableColumns - 4)),
       capabilities,
     )}`,
   );
@@ -137,7 +140,7 @@ function renderMenu<T>(
     const recommended = option.recommended === true ? "  · recommended" : "";
     const label = truncate(
       `${sanitizeTerminalText(option.label)}${disabled}${recommended}`,
-      Math.max(8, capabilities.columns - 10),
+      Math.max(8, availableColumns - 10),
     );
     const styledLabel =
       option.disabled === true
@@ -147,14 +150,21 @@ function renderMenu<T>(
           : label;
     lines.push(`  ${pointer} ${number}  ${styledLabel}`);
     if (isSelected && option.description !== undefined) {
-      for (const description of wrap(option.description, Math.max(10, capabilities.columns - 9))) {
+      for (const description of wrap(option.description, Math.max(10, availableColumns - 9))) {
         lines.push(
           `  ${style.accent(rail, capabilities)}      ${style.dim(description, capabilities)}`,
         );
       }
     }
   });
-  lines.push(`${style.dim(bottom, capabilities)} ${style.dim(help, capabilities)}`);
+  const conciseHelp =
+    availableColumns < 32 ? (capabilities.unicode ? "↑↓ move · enter" : "up/down · enter") : help;
+  lines.push(
+    `${style.dim(bottom, capabilities)} ${style.dim(
+      truncate(conciseHelp, Math.max(8, availableColumns - 3)),
+      capabilities,
+    )}`,
+  );
   if (compact) {
     lines.push(`   ${style.dim(`esc ${escapeAction}`, capabilities)}`);
   } else {
