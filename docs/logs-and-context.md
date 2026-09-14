@@ -40,6 +40,10 @@ Available filters:
 | `--since TIMESTAMP` | Pass an Android logcat timestamp boundary |
 | `--max-records COUNT` | Bound records retained in the final result |
 
+The same tag cannot be passed to both `--tag` and `--exclude-tag`. ADB Ready
+rejects that contradictory request before accessing ADB so an exclusion can
+never appear to succeed while logcat returns the tag.
+
 Unparsed lines are preserved. Output arriving on `stderr` is not automatically
 classified as an error; severity comes from source semantics. Fatal Android
 exceptions, native crashes, ANRs, and React Native fatal errors become
