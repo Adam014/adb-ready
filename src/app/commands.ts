@@ -1635,6 +1635,21 @@ export async function runLogs(
 ): Promise<CommandExecution<LogsData>> {
   const context = createContext("logs", dependencies);
   const problems: Problem[] = [];
+  const excludedTags = new Set(options.excludeTags ?? []);
+  const conflictingTags = [...new Set((options.tags ?? []).filter((tag) => excludedTags.has(tag)))];
+  if (conflictingTags.length > 0) {
+    problems.push(
+      commandProblem(
+        ProblemCode.LogcatFailed,
+        "input.logs.tags",
+        "A log tag cannot be both included and excluded.",
+        "Remove each conflicting tag from either the include or exclude filter.",
+        context.commandId,
+        [{ source: "logs.options", field: "conflictingTags", value: conflictingTags }],
+      ),
+    );
+    return finish<LogsData>(context, null, problems);
+  }
   const executable = await resolveAdb(context, config, dependencies);
   if (executable === undefined) {
     problems.push(adbNotFoundProblem({ commandId: context.commandId }, config.adbPath));

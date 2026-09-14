@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Reject contradictory log-tag include and exclude filters before accessing
+  ADB instead of allowing logcat argument order to silently override exclusion.
 - Document every supported app-install and package-list action option in the
   focused command help, including filtering and install verification flags.
 - Make UI audits follow Android hierarchy semantics: inherit effective labels

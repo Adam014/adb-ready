@@ -346,6 +346,14 @@ describe("parseArguments", () => {
       ok: true,
       options: { command: "logs", logPid: 42 },
     });
+    expect(
+      parseArguments(["logs", "--tag", "ADBREADY_AUDIT", "--exclude-tag", "ADBREADY_AUDIT"]),
+    ).toEqual({
+      ok: false,
+      code: "CLI_USAGE",
+      message: "Log tag ADBREADY_AUDIT cannot be both included and excluded.",
+      option: "--exclude-tag",
+    });
     expect(parseArguments(["logs", "--package", "bad", "--pid", "1"])).toMatchObject({
       ok: false,
     });

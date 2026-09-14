@@ -56,6 +56,37 @@ function dependencies(requests: ProcessRequest[], packagePid = "321\n"): Command
 }
 
 describe("runLogs", () => {
+  test("rejects contradictory tag filters before locating or invoking ADB", async () => {
+    let located = false;
+    const execution = await runLogs(
+      { tags: ["ADBREADY_AUDIT"], excludeTags: ["ADBREADY_AUDIT"] },
+      {},
+      {
+        locateAdb: async () => {
+          located = true;
+          return "/sdk/adb";
+        },
+      },
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.InvalidInput);
+    expect(execution.result.data).toBeNull();
+    expect(execution.result.problems).toEqual([
+      expect.objectContaining({
+        code: ProblemCode.LogcatFailed,
+        category: "input.logs.tags",
+        evidence: [
+          {
+            source: "logs.options",
+            field: "conflictingTags",
+            value: ["ADBREADY_AUDIT"],
+          },
+        ],
+      }),
+    ]);
+    expect(located).toBeFalse();
+  });
+
   test("fails safely across setup, selection, validation, interruption, and logcat exit", async () => {
     const missing = await runLogs({}, {}, { locateAdb: async () => undefined });
     expect(missing.result.problems[0]?.code).toBe(ProblemCode.AdbNotFound);

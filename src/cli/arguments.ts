@@ -1460,6 +1460,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (logSince !== undefined && logTail !== undefined) {
     return failure("CLI_USAGE", "--since and --tail cannot be combined.");
   }
+  const conflictingLogTag = logTags.find((tag) => logExcludeTags.includes(tag));
+  if (conflictingLogTag !== undefined) {
+    return failure(
+      "CLI_USAGE",
+      `Log tag ${conflictingLogTag} cannot be both included and excluded.`,
+      "--exclude-tag",
+    );
+  }
   if (contextBudget !== undefined && command !== "context") {
     return failure("CLI_USAGE", "--budget can only be used with the context command.");
   }
