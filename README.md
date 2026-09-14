@@ -192,6 +192,8 @@ recover safely or return bounded failure evidence
 ```
 
 - Existing matching port mappings are reused; conflicts are not overwritten.
+- Routine successful health polls stay silent; only failures, recovery actions,
+  and meaningful session state changes become durable output.
 - Wireless and port recovery is bounded and independently verified.
 - An ADB server restart is never hidden inside recovery.
 - On exit, ADB Ready cleans only resources owned by that session.
