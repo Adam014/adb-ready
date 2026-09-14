@@ -549,6 +549,28 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       `${marker} Verification ${clean(data.verification)} · ${String(data.attempts)} attempt(s)`,
     );
     if (data.resolved !== undefined) {
+      if (data.matched !== undefined) {
+        const matchedLabel =
+          data.matched.text ??
+          data.matched.contentDescription ??
+          data.matched.resourceId ??
+          data.matched.className ??
+          "node";
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} Matched      ${clean(matchedLabel)} · ${clean(data.matched.ref)}`,
+        );
+      }
+      if (data.actionNode !== undefined && data.actionNode.ref !== data.matched?.ref) {
+        const actionLabel =
+          data.actionNode.text ??
+          data.actionNode.contentDescription ??
+          data.actionNode.resourceId ??
+          data.actionNode.className ??
+          "actionable container";
+        lines.push(
+          `${style.success(glyphs.success, capabilities)} Action node  ${clean(actionLabel)} · ${clean(data.actionNode.ref)}`,
+        );
+      }
       lines.push(
         `${style.success(glyphs.success, capabilities)} Point        ${String(data.resolved.x)},${String(data.resolved.y)}${data.resolved.ref === undefined ? "" : ` · ${clean(data.resolved.ref)}`}`,
       );
@@ -895,6 +917,12 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     }
     if (result.data.after !== undefined) {
       sink.write(`after_digest=${clean(result.data.after.digest)}\n`);
+    }
+    if (result.data.matched !== undefined) {
+      sink.write(`matched_ref=${clean(result.data.matched.ref)}\n`);
+    }
+    if (result.data.actionNode !== undefined) {
+      sink.write(`action_ref=${clean(result.data.actionNode.ref)}\n`);
     }
   }
   if (isSessionCommandData(result.data)) {

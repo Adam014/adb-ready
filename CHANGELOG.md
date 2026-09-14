@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Let unique text and description selectors target their nearest enabled
+  actionable ancestor while reporting both the matched label and action node.
 - Keep the interactive home and focused menus inside the detected terminal
   width, including real narrow PTYs, without implicit last-column wrapping.
 - Prevent a development session from reporting ready after its owned command

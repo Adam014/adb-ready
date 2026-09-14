@@ -12,6 +12,8 @@ const SCROLLER = `<?xml version="1.0"?><hierarchy><node resource-id="com.example
 const AUDIT = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Save" resource-id="com.example:id/save" clickable="true" enabled="true" bounds="[20,100][220,200]" /><node class="android.widget.ImageButton" clickable="true" enabled="true" bounds="[240,100][440,200]" /></node></hierarchy>`;
 const DUPLICATE = `<?xml version="1.0"?><hierarchy><node><node text="Same" clickable="true" enabled="true" bounds="[10,10][100,100]" /><node text="Same" clickable="true" enabled="true" bounds="[110,10][200,100]" /></node></hierarchy>`;
 const NON_ACTIONABLE = `<?xml version="1.0"?><hierarchy><node text="Label" enabled="true" bounds="[10,10][100,100]" /></hierarchy>`;
+const LABELED_ROW = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node resource-id="android:id/apps_row" clickable="true" enabled="true" bounds="[20,100][1060,240]"><node class="android.widget.LinearLayout" enabled="true" bounds="[63,100][1060,240]"><node text="Apps" resource-id="android:id/title" class="android.widget.TextView" enabled="true" bounds="[63,120][148,190]" /></node></node></node></hierarchy>`;
+const DESCRIBED_ROW = LABELED_ROW.replace('text="Apps"', 'content-desc="Open apps"');
 const NOT_EDITABLE = `<?xml version="1.0"?><hierarchy><node text="Label" resource-id="com.example:id/label" clickable="true" enabled="true" bounds="[10,10][100,100]" /></hierarchy>`;
 
 function processResult(request: ProcessRequest, stdout = "", exitCode = 0): ProcessResult {
@@ -189,6 +191,53 @@ describe("safe UI actions", () => {
     expect(requests).toContainEqual(
       expect.arrayContaining(["shell", "input", "tap", "120", "150"]),
     );
+  });
+
+  test("taps the nearest actionable ancestor of a unique text label", async () => {
+    const requests: string[][] = [];
+    const snapshot = parseUiHierarchy(LABELED_ROW);
+    const row = snapshot?.nodes.find(({ resourceId }) => resourceId === "android:id/apps_row");
+    const label = snapshot?.nodes.find(({ text }) => text === "Apps");
+    const execution = await runUiAction(
+      { action: "tap", selector: "text=Apps" },
+      {},
+      fixture([LABELED_ROW, AFTER], requests),
+    );
+
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        matched: { ref: label?.ref, text: "Apps", clickable: false },
+        actionNode: {
+          ref: row?.ref,
+          resourceId: "android:id/apps_row",
+          clickable: true,
+        },
+        resolved: { ref: row?.ref, x: 540, y: 170 },
+        verified: true,
+      },
+    });
+    expect(requests).toContainEqual(
+      expect.arrayContaining(["shell", "input", "tap", "540", "170"]),
+    );
+  });
+
+  test("resolves a unique content description through its actionable ancestor", async () => {
+    const execution = await runUiAction(
+      { action: "tap", selector: "desc=Open apps", dryRun: true },
+      {},
+      fixture([DESCRIBED_ROW]),
+    );
+
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        status: "planned",
+        matched: { contentDescription: "Open apps", clickable: false },
+        actionNode: { resourceId: "android:id/apps_row", clickable: true },
+        resolved: { x: 540, y: 170 },
+      },
+    });
   });
 
   test("fails a semantic assertion with structured current evidence", async () => {
