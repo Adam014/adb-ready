@@ -232,6 +232,8 @@ Android transport backend.
 - Stale UI references are rejected before input is sent.
 - Field replacement verifies values without confusing a declared Android hint
   for user-entered text.
+- Screen recordings require a readable MP4 and a real multi-frame timeline;
+  a filename and hash alone never count as verified video evidence.
 - Machine data stays on `stdout`; human diagnostics stay on `stderr`.
 
 [Review the complete threat model →](./docs/threat-model.md)

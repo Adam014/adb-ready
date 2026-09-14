@@ -22,6 +22,9 @@ breaking changes.
 
 ### Fixed
 
+- Reject unreadable or one-frame, zero-duration Android screen recordings
+  instead of publishing them as verified evidence, and report the measured
+  duration and frame count for valid recordings.
 - Recognize Android's separate accessibility hint when verifying `ui clear`,
   so an empty field displaying its placeholder is not reported as a failure.
 - Let unique text and description selectors target their nearest enabled

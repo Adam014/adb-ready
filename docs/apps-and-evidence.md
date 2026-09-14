@@ -134,6 +134,13 @@ symlink outside that root and never replaces an existing file unless `--force`
 is explicit. Files are written through a private temporary path and published
 only after validation.
 
+For a recording, validation means more than finding an MP4 filename or header:
+the container must be structurally readable and its video track must contain a
+non-zero timeline with multiple frames. The result reports the measured media
+duration and frame count. If Android emits a one-frame, zero-duration recording
+while the display is static, ADB Ready rejects it with `SCREEN_RECORD_EMPTY`
+instead of publishing unusable evidence; create visible activity and retry.
+
 Some multi-display Android builds, including foldables, emit a short textual
 warning before the screenshot bytes. ADB Ready removes only a bounded text
 preamble and still requires a valid PNG signature before publishing the file.
@@ -142,6 +149,7 @@ The result contains:
 
 - a project-relative path;
 - media type and byte size;
+- measured duration and video frame count for recordings;
 - SHA-256 digest;
 - selected target and capture-command provenance.
 

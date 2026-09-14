@@ -458,6 +458,22 @@ describe("result renderer", () => {
         expected: "SHA-256",
       },
       {
+        command: "capture screen-record",
+        data: {
+          kind: "screen-record",
+          selected,
+          evidence: {
+            path: "recording.mp4",
+            mediaType: "video/mp4",
+            bytes: 1_024,
+            sha256: "b".repeat(64),
+            durationMs: 2_510,
+            frameCount: 6,
+          },
+        },
+        expected: "Timeline 2.51s · 6 frames",
+      },
+      {
         command: "inspect app",
         data: {
           kind: "app",
@@ -621,6 +637,10 @@ describe("result renderer", () => {
         expect(human.value).toContain("Matched      Apps · ui:aaaaaaaaaaaa:2");
         expect(plain.value).toContain("matched_ref=ui:aaaaaaaaaaaa:2");
         expect(plain.value).toContain("action_ref=ui:aaaaaaaaaaaa:1");
+      }
+      if (item.command === "capture screen-record") {
+        expect(plain.value).toContain("media_duration_ms=2510");
+        expect(plain.value).toContain("video_frame_count=6");
       }
     }
 
