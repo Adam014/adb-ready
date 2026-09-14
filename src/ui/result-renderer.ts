@@ -356,6 +356,11 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
             `${style.success(glyphs.success, capabilities)} Service  Metro · ${clean(data.attachedService.endpoint)} · attached`,
             `${style.dim(glyphs.pending, capabilities)} Command  skipped · external server kept running`,
           ]),
+      ...(data.expoLaunch === undefined
+        ? []
+        : [
+            `${style.success(glyphs.success, capabilities)} Launch   ${clean(data.expoLaunch.applicationId)} · ${clean(data.expoLaunch.runtime)} · selected target`,
+          ]),
     );
     if (data.child !== undefined) {
       const childMarker =
@@ -797,6 +802,11 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`attached_service=${clean(developmentData.attachedService.kind)}\n`);
       sink.write(`attached_endpoint=${clean(developmentData.attachedService.endpoint)}\n`);
       sink.write(`attached_ownership=${clean(developmentData.attachedService.ownership)}\n`);
+    }
+    if (developmentData.expoLaunch !== undefined) {
+      sink.write(`expo_launch_runtime=${clean(developmentData.expoLaunch.runtime)}\n`);
+      sink.write(`expo_launch_app=${clean(developmentData.expoLaunch.applicationId)}\n`);
+      sink.write(`expo_launch_verified=${String(developmentData.expoLaunch.verified)}\n`);
     }
     sink.write(`port_count=${String(developmentData.ports.requested.length)}\n`);
     sink.write(

@@ -22,7 +22,11 @@ describe("project detection", () => {
         {
           [path.join(root, "package.json")]: JSON.stringify({
             packageManager: "pnpm@10.0.0",
-            dependencies: { expo: "latest", "react-native": "latest" },
+            dependencies: {
+              expo: "latest",
+              "expo-dev-client": "latest",
+              "react-native": "latest",
+            },
             scripts: { start: "expo start" },
           }),
           [path.join(root, "pnpm-lock.yaml")]: "",
@@ -34,6 +38,7 @@ describe("project detection", () => {
     expect(detected).toMatchObject({
       root,
       preset: "expo",
+      packageJson: { hasExpoDevClient: true },
       packageManager: { name: "bun", executable: "/bin/bun", source: "config" },
     });
   });

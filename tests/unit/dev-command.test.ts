@@ -46,6 +46,18 @@ function dependencies(runner: ProcessRunner): CommandDependencies {
     }),
     idFactory: () => `id-${String(++id)}`,
     clock: () => new Date("2026-09-10T10:00:00.000Z"),
+    resolveExpoLaunch: async ({ runtime, signal }) =>
+      signal?.aborted === true
+        ? { status: "aborted" }
+        : {
+            status: "resolved",
+            target: {
+              url: "demo://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081%2F",
+              runtime,
+              source: "open",
+              applicationId: "com.example.demo",
+            },
+          },
   };
 }
 
@@ -60,6 +72,9 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
   if (args.includes("host-features")) return result(request, { stdout: "shell_v2\n" });
   if (args.includes("mdns")) {
     return result(request, { stdout: "List of discovered mdns services\n" });
+  }
+  if (args.includes("resolve-activity")) {
+    return result(request, { stdout: "priority=0\ncom.example.demo/.MainActivity\n" });
   }
   return undefined;
 }
@@ -296,6 +311,238 @@ describe("runDev", () => {
     ).toEqual(["tcp:8081", "tcp:8000"]);
   });
 
+  test("launches Expo only on the selected transport without delegating Android selection", async () => {
+    const requests: ProcessRequest[] = [];
+    let mapped = false;
+    const deps = dependencies(async (request) => {
+      requests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(request, {
+          stdout:
+            "List of devices attached\nemulator-5554 device model:Pixel_9 transport_id:7\n10.0.0.9:41231 device model:Other_phone transport_id:8\n",
+        });
+      }
+      if (args.includes("ro.serialno")) {
+        return result(request, {
+          stdout: args.includes("emulator-5554") ? "EMULATOR-1\n" : "PHONE-2\n",
+        });
+      }
+      if (args.includes("host-features")) return result(request, { stdout: "shell_v2\n" });
+      if (args.includes("mdns")) {
+        return result(request, { stdout: "List of discovered mdns services\n" });
+      }
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      if (args.includes("resolve-activity")) {
+        return result(request, { stdout: "com.example.demo/.MainActivity\n" });
+      }
+      if (args.includes("am") && args.includes("start")) {
+        return result(request, { stdout: "Status: ok\n" });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: ["package.json dependency: expo"],
+      packageJson: {
+        path: "/workspace/app/package.json",
+        scripts: { start: "expo start -c" },
+        hasExpoDevClient: true,
+      },
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "package-json",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = async () => ({
+      status: "unavailable",
+      endpoint: "http://127.0.0.1:8081",
+    });
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        readiness: { all: [] },
+        logs: false,
+        watch: false,
+      },
+      { targetSelector: "emulator-5554" },
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(mapped).toBeFalse();
+    expect(execution.result.data?.command).toMatchObject({
+      executable: "/bin/npm",
+      args: ["run", "start"],
+    });
+    expect(execution.result.data?.expoLaunch).toMatchObject({
+      runtime: "custom",
+      applicationId: "com.example.demo",
+      verified: true,
+    });
+    const child = requests.find(({ executable }) => executable === "/bin/npm");
+    expect(child?.args).not.toContain("--android");
+    expect(child?.env?.ANDROID_SERIAL).toBe("emulator-5554");
+    const targetOperations = requests.filter(
+      ({ args }) => args?.includes("resolve-activity") || args?.includes("am"),
+    );
+    expect(targetOperations).toHaveLength(2);
+    expect(targetOperations.every(({ args }) => args?.[0] === "-t" && args[1] === "7")).toBeTrue();
+    expect(targetOperations.flatMap(({ args }) => args ?? [])).not.toContain("10.0.0.9:41231");
+  });
+
+  test("fails before ready when Expo cannot resolve or open the selected target", async () => {
+    for (const failure of ["url", "handler", "launch"] as const) {
+      let mapped = false;
+      const deps = dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (
+          probe !== undefined &&
+          !(failure === "handler" && request.args?.includes("resolve-activity"))
+        ) {
+          return probe;
+        }
+        const args = request.args ?? [];
+        if (args.includes("--no-rebind")) mapped = true;
+        if (args.includes("--remove")) mapped = false;
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        if (args.includes("resolve-activity")) return result(request, { stdout: "" });
+        if (args.includes("am") && args.includes("start")) {
+          return result(request, {
+            exitCode: failure === "launch" ? 1 : 0,
+            stderr: failure === "launch" ? "Error: activity not started\n" : "",
+          });
+        }
+        return result(request);
+      });
+      deps.detectProject = async () => ({
+        root: "/workspace/app",
+        preset: "expo",
+        presetEvidence: [],
+        packageManager: {
+          name: "npm",
+          executable: "/bin/npm",
+          source: "lockfile",
+          conflicts: [],
+        },
+      });
+      deps.probeMetroService = async () => ({
+        status: "unavailable",
+        endpoint: "http://127.0.0.1:8081",
+      });
+      if (failure === "url") {
+        deps.resolveExpoLaunch = async () => ({
+          status: "unavailable",
+          detail: "No supported endpoint was available.",
+        });
+      }
+
+      const execution = await runDev(
+        {
+          cwd: "/workspace/app",
+          preset: "expo",
+          command: { executable: "project-start", args: [] },
+          reversePorts: [{ device: 8081 }],
+          readiness: { all: [] },
+          logs: false,
+          watch: false,
+        },
+        {},
+        deps,
+      );
+
+      expect(execution.exitCode).toBe(ExitCode.ChildProcess);
+      expect(execution.result.data?.status).toBe("failed");
+      expect(execution.result.data?.expoLaunch).toBeUndefined();
+      expect(execution.result.problems).toContainEqual(
+        expect.objectContaining({ code: ProblemCode.ExpoLaunchFailed }),
+      );
+      expect(mapped).toBeFalse();
+      expect(
+        execution.result.data?.journal.events.some(
+          ({ type, data }) => type === "session.state.changed" && data?.to === "ready",
+        ),
+      ).toBeFalse();
+    }
+  });
+
+  test("stops an interrupted or unmapped Expo launch before reporting ready", async () => {
+    for (const failure of ["aborted", "mapping"] as const) {
+      let mapped = false;
+      const deps = dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (args.includes("--no-rebind")) mapped = true;
+        if (args.includes("--remove")) mapped = false;
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        return result(request);
+      });
+      deps.detectProject = async () => ({
+        root: "/workspace/app",
+        preset: "expo",
+        presetEvidence: [],
+        packageManager: {
+          name: "npm",
+          executable: "/bin/npm",
+          source: "lockfile",
+          conflicts: [],
+        },
+      });
+      deps.probeMetroService = async () => ({
+        status: "unavailable",
+        endpoint: "http://127.0.0.1:8081",
+      });
+      if (failure === "aborted") {
+        deps.resolveExpoLaunch = async () => ({ status: "aborted" });
+      }
+
+      const execution = await runDev(
+        {
+          cwd: "/workspace/app",
+          preset: "expo",
+          command: { executable: "project-start", args: [] },
+          reversePorts: failure === "mapping" ? [] : [{ device: 8081 }],
+          readiness: { all: [] },
+          logs: false,
+          watch: false,
+        },
+        {},
+        deps,
+      );
+
+      expect(execution.exitCode).toBe(
+        failure === "aborted" ? ExitCode.Interrupted : ExitCode.ChildProcess,
+      );
+      expect(execution.result.problems).toContainEqual(
+        expect.objectContaining({
+          code:
+            failure === "aborted" ? ProblemCode.OperationInterrupted : ProblemCode.ExpoLaunchFailed,
+        }),
+      );
+      expect(execution.result.data?.status).toBe(failure === "aborted" ? "interrupted" : "failed");
+      expect(mapped).toBeFalse();
+    }
+  });
+
   test("attaches to a verified existing Metro server without owning its process", async () => {
     const requests: ProcessRequest[] = [];
     let mapped = false;
@@ -316,6 +563,10 @@ describe("runDev", () => {
       if (args.includes("--list")) {
         return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
       }
+      if (args.includes("am") && args.includes("start")) {
+        setTimeout(() => controller.abort(), 0);
+        return result(request, { stdout: "Status: ok\n" });
+      }
       return result(request);
     });
     deps.detectProject = async () => ({
@@ -328,10 +579,10 @@ describe("runDev", () => {
         conflicts: [],
       },
     });
-    deps.probeMetroService = async () => {
-      queueMicrotask(() => controller.abort());
-      return { status: "available", endpoint: "http://127.0.0.1:8081" };
-    };
+    deps.probeMetroService = async () => ({
+      status: "available",
+      endpoint: "http://127.0.0.1:8081",
+    });
 
     const execution = await runDev(
       {
@@ -1165,7 +1416,7 @@ describe("runDev", () => {
         preset: "expo" as const,
         manager: "npm" as const,
         script: "start",
-        expected: ["run", "start", "--", "--android"],
+        expected: ["run", "start"],
       },
       {
         preset: "react-native" as const,
@@ -1204,12 +1455,12 @@ describe("runDev", () => {
       {
         preset: "expo" as const,
         manager: "npm" as const,
-        args: ["exec", "--", "expo", "start", "--android"],
+        args: ["exec", "--", "expo", "start"],
       },
       {
         preset: "expo" as const,
         manager: "bun" as const,
-        args: ["x", "expo", "start", "--android"],
+        args: ["x", "expo", "start"],
       },
       {
         preset: "react-native" as const,
