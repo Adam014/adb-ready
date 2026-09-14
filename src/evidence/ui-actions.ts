@@ -620,6 +620,7 @@ function compactNode(node: UiNode): NonNullable<UiActionData["matched"]> {
     depth: node.depth,
     ...(node.resourceId === undefined ? {} : { resourceId: node.resourceId }),
     ...(node.text === undefined ? {} : { text: node.text }),
+    ...(node.hintText === undefined ? {} : { hintText: node.hintText }),
     ...(node.contentDescription === undefined
       ? {}
       : { contentDescription: node.contentDescription }),
@@ -1240,11 +1241,18 @@ export async function runUiAction(
     (request.action === "fill" || request.action === "clear") &&
     resultingNode !== undefined &&
     !resultingNode.password;
+  const textIsHint =
+    textObservable &&
+    resultingNode.text !== undefined &&
+    resultingNode.hintText !== undefined &&
+    resultingNode.text === resultingNode.hintText;
   const textVerified =
     request.action === "fill" && textObservable
-      ? resultingNode.text === request.text
+      ? textIsHint && request.text === resultingNode.hintText
+        ? undefined
+        : resultingNode.text === request.text
       : request.action === "clear" && textObservable
-        ? resultingNode.text === undefined || resultingNode.text === ""
+        ? resultingNode.text === undefined || resultingNode.text === "" || textIsHint
         : undefined;
   if (textVerified === false) {
     problems.push(

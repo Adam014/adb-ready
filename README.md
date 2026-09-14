@@ -230,6 +230,8 @@ Android transport backend.
 - Session data is bounded, redacted, private to the local user, and never
   uploaded by ADB Ready.
 - Stale UI references are rejected before input is sent.
+- Field replacement verifies values without confusing a declared Android hint
+  for user-entered text.
 - Machine data stays on `stdout`; human diagnostics stay on `stderr`.
 
 [Review the complete threat model →](./docs/threat-model.md)

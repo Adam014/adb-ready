@@ -21,6 +21,7 @@ export interface UiNode {
   className?: string;
   resourceId?: string;
   text?: string;
+  hintText?: string;
   contentDescription?: string;
   packageName?: string;
   bounds?: UiBounds;
@@ -134,6 +135,7 @@ export function parseUiHierarchy(
         ? {}
         : { resourceId: values["resource-id"] }),
       ...(values.text === undefined || values.text === "" ? {} : { text: values.text }),
+      ...(values.hint === undefined || values.hint === "" ? {} : { hintText: values.hint }),
       ...(values["content-desc"] === undefined || values["content-desc"] === ""
         ? {}
         : { contentDescription: values["content-desc"] }),
