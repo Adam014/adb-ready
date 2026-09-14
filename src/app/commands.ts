@@ -21,6 +21,7 @@ import { EventBus } from "../core/event-bus.js";
 import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.js";
 import { redactText } from "../core/redaction.js";
 import { TextLineBuffer } from "../core/text-lines.js";
+import { type ExpoLaunchResolution, resolveExpoLaunch } from "../dev/expo-launch.js";
 import { type DevHook, type DevHookEvent, type HookRun, runHooks } from "../dev/hooks.js";
 import { type DiscoveredLocalService, discoverExpoLocalServices } from "../dev/local-services.js";
 import { type MetroServiceProbeResult, probeMetroService } from "../dev/metro-service.js";
@@ -72,6 +73,7 @@ import {
   isStableAdbSerial,
 } from "../target/model.js";
 import { type SelectedTarget, selectTarget } from "../target/selection.js";
+import { parseResolvedActivity } from "./android-app.js";
 
 export interface CommandConfig {
   adbPath?: string;
@@ -107,6 +109,7 @@ export interface CommandDependencies {
     port: number;
     signal?: AbortSignal;
   }) => Promise<MetroServiceProbeResult>;
+  resolveExpoLaunch?: typeof resolveExpoLaunch;
 }
 
 export interface CommandExecution<T> {
@@ -1980,6 +1983,14 @@ export interface DevData {
     endpoint: string;
     ownership: "external";
   };
+  expoLaunch?: {
+    url: string;
+    runtime: "custom" | "expo";
+    source: "link" | "open";
+    applicationId: string;
+    activity: string;
+    verified: true;
+  };
   child?: {
     exitCode: number | null;
     signal: NodeJS.Signals | null;
@@ -2077,7 +2088,7 @@ async function resolveDevCommand(
     ]);
   }
   const script = preset === "expo" ? "start" : "android";
-  const frameworkArgs = preset === "expo" ? ["--android"] : [];
+  const frameworkArgs: string[] = [];
   if (project.packageJson?.scripts[script] !== undefined) {
     return {
       ...packageScriptCommand(manager.name, manager.executable, script, frameworkArgs),
@@ -2087,7 +2098,7 @@ async function resolveDevCommand(
     manager.name,
     manager.executable,
     preset === "expo" ? "expo" : "react-native",
-    preset === "expo" ? ["start", "--android"] : ["run-android"],
+    preset === "expo" ? ["start"] : ["run-android"],
   );
 }
 
@@ -2149,9 +2160,150 @@ function metroServicePort(
   mappings: readonly { device: string; host: string }[],
 ): number | undefined {
   if (preset !== "expo" && preset !== "react-native") return undefined;
-  const mapping = mappings.find(({ device }) => device === "tcp:8081");
+  const mapping = mappings.find(({ device }) => device === "tcp:8081") ?? mappings[0];
   const port = mapping?.host.match(/^tcp:(\d+)$/u)?.[1];
   return port === undefined ? undefined : Number(port);
+}
+
+function expoDevicePort(mappings: readonly { device: string; host: string }[]): number | undefined {
+  const mapping = mappings.find(({ device }) => device === "tcp:8081") ?? mappings[0];
+  const port = mapping?.device.match(/^tcp:(\d+)$/u)?.[1];
+  return port === undefined ? undefined : Number(port);
+}
+
+async function launchExpoOnSelectedTarget(options: {
+  client: AdbClient;
+  target: import("../adb/client.js").AdbTargetSelector;
+  endpoint: string;
+  devicePort: number;
+  runtime: "custom" | "expo";
+  commandId: string;
+  problems: Problem[];
+  dependencies: CommandDependencies;
+  signal?: AbortSignal;
+}): Promise<DevData["expoLaunch"] | undefined> {
+  const resolution: ExpoLaunchResolution = await (
+    options.dependencies.resolveExpoLaunch ?? resolveExpoLaunch
+  )({
+    endpoint: options.endpoint,
+    runtime: options.runtime,
+    devicePort: options.devicePort,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  if (resolution.status === "aborted") {
+    options.problems.push(
+      commandProblem(
+        ProblemCode.OperationInterrupted,
+        "child.interrupted",
+        "The Expo launch was interrupted.",
+        "ADB Ready did not open the project on any Android target.",
+        options.commandId,
+      ),
+    );
+    return undefined;
+  }
+  if (resolution.status === "unavailable") {
+    options.problems.push(
+      commandProblem(
+        ProblemCode.ExpoLaunchFailed,
+        "child.expo-launch",
+        "Expo did not provide a valid Android launch URL.",
+        `${resolution.detail} Ensure the configured host port belongs to the Expo development server.`,
+        options.commandId,
+        [{ source: "expo.dev-server", field: "endpoint", value: options.endpoint }],
+      ),
+    );
+    return undefined;
+  }
+
+  const resolved = await options.client.targetCommand(
+    options.target,
+    "expo-activity-resolve",
+    "Resolving the Expo URL handler on the selected target",
+    [
+      "shell",
+      "cmd",
+      "package",
+      "resolve-activity",
+      "--brief",
+      "-a",
+      "android.intent.action.VIEW",
+      "-d",
+      resolution.target.url,
+    ],
+    parseResolvedActivity,
+    options.signal,
+  );
+  if (!processSucceeded(resolved.process) || resolved.value === undefined) {
+    options.problems.push(
+      commandProblem(
+        ProblemCode.ExpoLaunchFailed,
+        "child.expo-launch",
+        "No app on the selected target can open this Expo project.",
+        resolution.target.runtime === "custom"
+          ? "Install the project's Android development build on the selected target, then retry."
+          : "Install or update Expo Go on the selected target, then retry.",
+        options.commandId,
+        [
+          { source: "expo.launch", field: "runtime", value: resolution.target.runtime },
+          ...(resolution.target.applicationId === undefined
+            ? []
+            : [
+                {
+                  source: "expo.launch",
+                  field: "applicationId",
+                  value: resolution.target.applicationId,
+                },
+              ]),
+        ],
+      ),
+    );
+    return undefined;
+  }
+
+  const component = `${resolved.value.applicationId}/${resolved.value.activity}`;
+  const launched = await options.client.targetCommand(
+    options.target,
+    "expo-target-launch",
+    `Opening the Expo project on ${options.target.serial}`,
+    [
+      "shell",
+      "am",
+      "start",
+      "-W",
+      "-a",
+      "android.intent.action.VIEW",
+      "-d",
+      resolution.target.url,
+      "-n",
+      component,
+    ],
+    (output) => output,
+    options.signal,
+  );
+  if (!processSucceeded(launched.process) || /\b(?:Error|Exception):/iu.test(launched.value)) {
+    options.problems.push(
+      commandProblem(
+        ProblemCode.ExpoLaunchFailed,
+        "child.expo-launch",
+        "The Expo project could not be opened on the selected target.",
+        "Android Activity Manager rejected the target-scoped launch request.",
+        options.commandId,
+        [
+          { source: "adb.expo-target-launch", field: "exitCode", value: launched.process.exitCode },
+          { source: "expo.launch", field: "applicationId", value: resolved.value.applicationId },
+        ],
+      ),
+    );
+    return undefined;
+  }
+
+  return {
+    ...resolution.target,
+    applicationId: resolved.value.applicationId,
+    activity: resolved.value.activity,
+    verified: true,
+  };
 }
 
 interface ResolvedDevDefinition {
@@ -2349,6 +2501,20 @@ export async function runDevOfflinePlan(
       title: `Verify ${assertion.kind} readiness`,
       risk: "read-only" as const,
     })),
+    ...(preset === "expo"
+      ? [
+          {
+            id: "resolve-expo-launch",
+            title: "Resolve Expo's Android deep link from the verified Metro server",
+            risk: "read-only" as const,
+          },
+          {
+            id: "launch-expo-target",
+            title: "Open the Expo project only on the selected Android target",
+            risk: "device-reversible" as const,
+          },
+        ]
+      : []),
     ...hookSteps("onReady"),
     ...(options.verification === undefined
       ? []
@@ -2701,6 +2867,7 @@ export async function runDev(
     envKeys: [...new Set(["ANDROID_SERIAL", ...Object.keys(childCommand.env ?? {})])].sort(),
   };
   let attachedService: DevData["attachedService"];
+  let expoLaunch: DevData["expoLaunch"];
   const baseData = () => ({
     sessionId,
     adbPath: redactedPath(executable),
@@ -2721,6 +2888,7 @@ export async function runDev(
     command: commandData,
     localServices,
     ...(attachedService === undefined ? {} : { attachedService }),
+    ...(expoLaunch === undefined ? {} : { expoLaunch }),
   });
   let recoverySummary: SessionWatchSummary = {
     checks: 0,
@@ -2832,6 +3000,22 @@ export async function runDev(
         title: `Verify ${assertion.kind} readiness`,
         risk: "read-only" as const,
       })),
+      ...(preset === "expo"
+        ? [
+            {
+              id: "resolve-expo-launch",
+              title: "Resolve Expo's Android deep link from the verified Metro server",
+              risk: "read-only" as const,
+            },
+            {
+              id: "launch-expo-target",
+              title: "Open the Expo project only on the selected Android target",
+              risk: "device-reversible" as const,
+              executable: redactedPath(executable),
+              args: [...selectorArgs, "shell", "am", "start", "-W", "<resolved-expo-url>"],
+            },
+          ]
+        : []),
       ...hookPlanSteps("onReady"),
       ...(options.verification === undefined
         ? []
@@ -3278,7 +3462,36 @@ export async function runDev(
       data: { attempts: readiness.attempts, durationMs: readiness.durationMs },
     });
   }
-  const readyHooksSucceeded = readiness.ready && (await runHookPhase("onReady"));
+  if (readiness.ready && preset === "expo") {
+    const hostPort = metroServicePort(preset, normalizedPorts.mappings);
+    const devicePort = expoDevicePort(normalizedPorts.mappings);
+    if (hostPort === undefined || devicePort === undefined) {
+      problems.push(
+        commandProblem(
+          ProblemCode.ExpoLaunchFailed,
+          "child.expo-launch",
+          "The Expo development-server mapping is missing.",
+          "Map a device port to the Expo Metro host port with --port, then retry.",
+          context.commandId,
+        ),
+      );
+    } else {
+      expoLaunch = await launchExpoOnSelectedTarget({
+        client,
+        target,
+        endpoint: attachedService?.endpoint ?? `http://127.0.0.1:${String(hostPort)}`,
+        devicePort,
+        runtime: project.packageJson?.hasExpoDevClient === true ? "custom" : "expo",
+        commandId: context.commandId,
+        problems,
+        dependencies,
+        ...(signal === undefined ? {} : { signal }),
+      });
+    }
+  }
+  const expoLaunchSucceeded = preset !== "expo" || expoLaunch !== undefined;
+  const readyHooksSucceeded =
+    readiness.ready && expoLaunchSucceeded && (await runHookPhase("onReady"));
   if (!readyHooksSucceeded) childController?.abort();
   if (readyHooksSucceeded) {
     transition(

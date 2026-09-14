@@ -325,6 +325,14 @@ describe("result renderer", () => {
       preset: "expo",
       ports: { requested: [], created: [], reused: [] },
       command: { executable: "npm", args: ["run", "start"] },
+      expoLaunch: {
+        url: "demo://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081",
+        runtime: "custom",
+        source: "open",
+        applicationId: "com.example.demo",
+        activity: ".MainActivity",
+        verified: true,
+      },
       child: { exitCode: 0, signal: null },
       readiness: { ready: true, assertions: [{ status: "passed" }] },
       verification: { passed: true, timedOut: false, exitCode: 0 },
@@ -640,6 +648,14 @@ describe("result renderer", () => {
           },
         ],
         command: { executable: "npm", args: ["run", "start"] },
+        expoLaunch: {
+          url: "demo://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081",
+          runtime: "custom",
+          source: "open",
+          applicationId: "com.example.demo",
+          activity: ".MainActivity",
+          verified: true,
+        },
         attachedService: {
           kind: "metro",
           endpoint: "http://127.0.0.1:8081",
@@ -661,5 +677,9 @@ describe("result renderer", () => {
     expect(plain.value).toContain("attached_service=metro\n");
     expect(plain.value).toContain("attached_ownership=external\n");
     expect(plain.value).toContain("discovered_local_ports=8000\n");
+    expect(human.value).toContain("Launch   com.example.demo · custom · selected target");
+    expect(plain.value).toContain("expo_launch_runtime=custom\n");
+    expect(plain.value).toContain("expo_launch_app=com.example.demo\n");
+    expect(plain.value).toContain("expo_launch_verified=true\n");
   });
 });

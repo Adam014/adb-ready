@@ -123,9 +123,12 @@ npx adb-ready devices
 npx adb-ready dev
 ```
 
-Expo, React Native, Flutter, Capacitor, Gradle, and custom commands all run
-against the same selected target through `ANDROID_SERIAL`. Add local services
-with repeated `--port` flags or replace the detected command after `--`:
+Expo, React Native, Flutter, Capacitor, Gradle, and custom commands all receive
+the same selected target through `ANDROID_SERIAL`. Expo sessions go further:
+ADB Ready starts Metro without Expo's all-device auto-open path, resolves the
+project deep link from the verified server, and opens it only on the selected
+ADB transport. Add local services with repeated `--port` flags or replace the
+detected command after `--`:
 
 ```bash
 adb-ready dev --port 8081 --port 8000

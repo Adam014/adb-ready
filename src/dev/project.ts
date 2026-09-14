@@ -19,6 +19,7 @@ export interface ProjectDetection {
     name?: string;
     packageManager?: string;
     scripts: Record<string, string>;
+    hasExpoDevClient?: boolean;
   };
   preset?: DevPreset;
   presetEvidence: string[];
@@ -258,6 +259,7 @@ export async function detectProject(options: DetectProjectOptions): Promise<Proj
             ...(typeof packageDocument.name === "string" ? { name: packageDocument.name } : {}),
             ...(packageManagerField === undefined ? {} : { packageManager: packageManagerField }),
             scripts,
+            hasExpoDevClient: dependencies["expo-dev-client"] !== undefined,
           },
         }),
     ...(preset === undefined ? {} : { preset }),

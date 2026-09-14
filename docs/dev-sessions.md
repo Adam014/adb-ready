@@ -8,7 +8,7 @@ local diagnostic record.
 
 | Preset | Detection | Default command | Default reverse port |
 | --- | --- | --- | --- |
-| Expo | `expo` dependency | project `start` script with `--android`, otherwise Expo CLI | `8081` |
+| Expo | `expo` dependency | project `start` script without framework device selection, otherwise `expo start` | `8081` |
 | React Native | `react-native` dependency | project `android` script, otherwise React Native CLI | `8081` |
 | Flutter | `pubspec.yaml` | `flutter run -d <selected-target>` | none |
 | Capacitor | `@capacitor/android` or `@capacitor/core` dependency | Capacitor CLI for the selected target | none |
@@ -28,7 +28,7 @@ adb-ready dev --preset gradle --device emulator-5554
 An exact command after `--` wins over preset command resolution:
 
 ```bash
-adb-ready dev -- bun x expo start --host lan --port 8081 --android
+adb-ready dev -- bun x expo start --host lan --port 8081
 ```
 
 No shell is inserted. Quoting, wildcard, pipe, and substitution syntax are
@@ -39,6 +39,8 @@ therefore passed as literal arguments instead of being executed unexpectedly.
 One selected transport is used for the entire session:
 
 - every direct ADB command uses its exact serial or transport ID;
+- Expo's default workflow resolves its deep link from Metro and opens it through
+  that exact transport instead of delegating target selection to Expo;
 - the child command receives `ANDROID_SERIAL`;
 - hooks receive `ANDROID_SERIAL`, `ADB_READY_SESSION_ID`,
   `ADB_READY_PRESET`, and `ADB_READY_TARGET_ID`; and
@@ -117,6 +119,28 @@ An attached Metro server remains externally owned:
 Run Metro in its original terminal when you need its native reload or developer
 controls. A newly started Metro process continues to receive its controls
 directly through ADB Ready.
+
+## Expo target isolation
+
+Expo's `--android` startup path can enumerate and mutate every attached Android
+transport, even when `ANDROID_SERIAL` names one device. ADB Ready therefore
+does not add `--android` to detected Expo commands. After Metro passes
+readiness, ADB Ready:
+
+1. asks Expo's public `/_expo/open` endpoint for the Android deep link, with a
+   bounded `/_expo/link` fallback for Expo 55;
+2. routes local-network Metro URLs through the verified reverse mapping while
+   preserving public tunnel URLs;
+3. resolves the installed URL handler on the selected transport; and
+4. opens that exact component with target-scoped ADB before reporting ready.
+
+Missing Expo Go/development builds, malformed server responses, and rejected
+launches fail as `EXPO_LAUNCH_FAILED`; ADB Ready does not silently try another
+device. A command supplied after `--` remains an explicit open-world override,
+so omit `--android` when ADB Ready should retain launch ownership. Expo's native
+`a`/`shift+a` shortcuts likewise belong to Expo and can invoke its own device
+selection; the ADB Ready control bar intentionally advertises only target-safe
+runtime controls.
 
 ## Health and recovery
 

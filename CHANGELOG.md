@@ -22,6 +22,10 @@ breaking changes.
 
 ### Fixed
 
+- Keep Expo's automatic Android launch on the one selected ADB transport: start
+  Metro without Expo's all-device `--android` path, resolve the official launch
+  URL with an Expo 55-compatible fallback, and open it through target-scoped
+  ADB before reporting the session ready.
 - Prevent an Expo development session from reporting ready while a detected
   localhost API is unreachable from the selected Android target.
 - Make `adb-ready help version` follow the same focused-help contract as every

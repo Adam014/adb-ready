@@ -36,6 +36,7 @@ adb-ready context --since 5m --only problems,recovery,logs
 | `SESSION_PERSISTENCE_FAILED` | The private session record could not be written | Check user-state directory permissions and capacity |
 | `CHILD_PROCESS_FAILED` | The project command exited unsuccessfully | Inspect child output, targeted logs, and preserved exit code |
 | `DEVELOPMENT_SERVICE_CONFLICT` | Metro's configured host port belongs to another service | Stop that service or map device port `8081` to the actual Metro host port |
+| `EXPO_LAUNCH_FAILED` | Expo could not provide a valid link or the selected target has no matching runtime | Install the project development build or Expo Go on that target, then retry |
 
 ## ADB is installed but not found
 
