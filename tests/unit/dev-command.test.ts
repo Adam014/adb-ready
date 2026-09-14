@@ -1394,12 +1394,33 @@ describe("runDev", () => {
         if (args.includes("--list")) {
           return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
         }
-        if (request.executable === "broken-dev") return result(request, { exitCode: 17 });
+        if (request.executable === "broken-dev") {
+          const stderr = "CommandError: required development build is not installed\n";
+          request.onStderrChunk?.(new TextEncoder().encode(stderr));
+          return result(request, { exitCode: 17, stderr });
+        }
         return result(request);
       }),
     );
     expect(execution.exitCode).toBe(17);
     expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.ChildProcessFailed);
+    expect(execution.result.problems.at(-1)).toMatchObject({
+      summary: "The development command failed before the session became ready.",
+      detail: "CommandError: required development build is not installed",
+      evidence: expect.arrayContaining([
+        {
+          source: "child",
+          field: "diagnostic",
+          value: "CommandError: required development build is not installed",
+        },
+      ]),
+    });
+    expect(execution.result.data?.reachedReady).toBeFalse();
+    expect(
+      execution.result.data?.journal.events.some(
+        ({ type, data }) => type === "session.state.changed" && data?.to === "ready",
+      ),
+    ).toBeFalse();
     expect(execution.result.data?.ports.cleaned).toBe(true);
   });
 

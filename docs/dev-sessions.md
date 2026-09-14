@@ -154,6 +154,13 @@ Successful readiness and health polls are background work: they do not compete
 with framework logs and are not retained in the durable session journal.
 Failures, state changes, and recovery actions remain visible and recorded.
 
+Readiness checks and the complete session gate are separate. A host port or
+custom assertion may pass without proving that the framework launch succeeded.
+ADB Ready emits `ready` only after every configured check and target-specific
+launch succeeds while the owned development command is not already failing. If
+that command fails first, its actionable redacted error is promoted into the
+final problem instead of briefly presenting the session as ready.
+
 Recovery waits for a bounded stabilization period, attempts to reacquire the
 same target, restores only missing session mappings, restarts the targeted log
 stream when necessary, and verifies the complete state independently.

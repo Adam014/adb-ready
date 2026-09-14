@@ -375,7 +375,9 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     }
     if (data.readiness !== undefined) {
       lines.push(
-        `${data.readiness.ready ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Ready    ${data.readiness.ready ? "verified" : "not verified"} · ${String(data.readiness.assertions.filter(({ status }) => status === "passed").length)}/${String(data.readiness.assertions.length)} checks`,
+        data.readiness.assertions.length === 0
+          ? `${style.dim(glyphs.pending, capabilities)} Checks   none configured`
+          : `${data.readiness.ready ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Checks   ${data.readiness.ready ? "passed" : "not passed"} · ${String(data.readiness.assertions.filter(({ status }) => status === "passed").length)}/${String(data.readiness.assertions.length)}`,
       );
     }
     if (data.verification !== undefined) {
@@ -818,8 +820,14 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`child_exit_code=${String(developmentData.child.exitCode)}\n`);
     }
     if (developmentData.readiness !== undefined) {
-      sink.write(`ready=${String(developmentData.readiness.ready)}\n`);
+      sink.write(`readiness_checks_passed=${String(developmentData.readiness.ready)}\n`);
     }
+    const reachedReady =
+      developmentData.reachedReady ??
+      developmentData.journal.events.some(
+        ({ type, data }) => type === "session.state.changed" && data?.to === "ready",
+      );
+    sink.write(`reached_ready=${String(reachedReady)}\n`);
     if (developmentData.verification !== undefined) {
       sink.write(`verification_passed=${String(developmentData.verification.passed)}\n`);
       sink.write(`verification_exit_code=${String(developmentData.verification.exitCode)}\n`);

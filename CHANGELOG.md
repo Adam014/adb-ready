@@ -22,6 +22,9 @@ breaking changes.
 
 ### Fixed
 
+- Prevent a development session from reporting ready after its owned command
+  has already exited; distinguish passed readiness checks from the complete
+  session-ready gate and promote the first actionable child error.
 - Keep successful readiness and health polling silent in human output and out
   of the durable session journal while retaining failures and state changes.
 - Keep Expo's automatic Android launch on the one selected ADB transport: start
