@@ -15,18 +15,24 @@ import {
 const created: string[] = [];
 const fixture = fileURLToPath(new URL("../fixtures/agent-task-child.ts", import.meta.url));
 
+async function removeFixtureDirectory(directory: string): Promise<void> {
+  const retryable = new Set(["EBUSY", "ENOTEMPTY", "EPERM"]);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform !== "win32" || !retryable.has(code ?? "") || attempt >= 20) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
 afterEach(async () => {
-  await Promise.all(
-    created.splice(0).map(
-      async (directory) =>
-        await rm(directory, {
-          recursive: true,
-          force: true,
-          maxRetries: process.platform === "win32" ? 5 : 0,
-          retryDelay: 100,
-        }),
-    ),
-  );
+  await Promise.all(created.splice(0).map(removeFixtureDirectory));
 });
 
 async function temporary(): Promise<{ directory: string; project: string; state: string }> {
