@@ -496,10 +496,15 @@ describe("result renderer", () => {
           verification: "ui-changed",
           attempts: 1,
           resolved: { ref: "ui:aaaaaaaaaaaa:1", x: 10, y: 20 },
+          matched: { ref: "ui:aaaaaaaaaaaa:2", text: "Apps" },
+          actionNode: {
+            ref: "ui:aaaaaaaaaaaa:1",
+            className: "android.widget.LinearLayout",
+          },
           before: { digest: "a".repeat(64) },
           after: { digest: "b".repeat(64) },
         },
-        expected: "UI digest",
+        expected: "Action node",
       },
       {
         command: "sessions list",
@@ -612,6 +617,11 @@ describe("result renderer", () => {
       renderResult(envelope, { format: "plain", capabilities, sink: plain });
       expect(human.value).toContain(item.expected);
       expect(plain.value).toContain(`command=${item.command}`);
+      if (item.command === "ui tap") {
+        expect(human.value).toContain("Matched      Apps · ui:aaaaaaaaaaaa:2");
+        expect(plain.value).toContain("matched_ref=ui:aaaaaaaaaaaa:2");
+        expect(plain.value).toContain("action_ref=ui:aaaaaaaaaaaa:1");
+      }
     }
 
     const devHuman = new MemorySink();

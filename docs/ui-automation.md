@@ -47,8 +47,11 @@ adb-ready ui long-press 'id=com.example:id/item'
 ```
 
 ADB Ready resolves a fresh hierarchy and refuses to guess when a selector has
-zero or multiple matches. Prefer a current reference when the exact observed
-snapshot matters:
+zero or multiple matches. When unique text or a content description belongs to
+a non-clickable label inside an enabled clickable row, ADB Ready taps the
+nearest actionable ancestor. Structured results report both the label that
+matched and the action node that received the tap. Prefer a current reference
+when the exact observed snapshot matters:
 
 ```bash
 adb-ready ui tap ui:7c4a31b8d2ef:14

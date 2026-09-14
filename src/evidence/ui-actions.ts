@@ -96,6 +96,7 @@ export interface UiActionData {
   after?: UiSnapshotSummary;
   input: Record<string, boolean | number | string>;
   resolved?: { ref?: string; x: number; y: number };
+  actionNode?: UiNode;
   verification:
     | "planned"
     | "query-completed"
@@ -302,6 +303,17 @@ function validatePoint(
   return true;
 }
 
+function actionPoint(
+  node: UiNode,
+  action: "long-press" | "tap",
+): { ref: string; x: number; y: number } | undefined {
+  const applicable =
+    node.enabled &&
+    (action === "long-press" ? node.longClickable : node.clickable || node.checkable);
+  if (!applicable) return undefined;
+  return nodeCenter(node);
+}
+
 function resolveRef(
   ref: string,
   action: "long-press" | "tap",
@@ -335,13 +347,8 @@ function resolveRef(
     return undefined;
   }
   const node = snapshot.nodes.find(({ ref: candidate }) => candidate === ref);
-  const applicable =
-    node?.enabled === true &&
-    (action === "long-press" ? node.longClickable : node.clickable || node.checkable) &&
-    node.bounds !== undefined &&
-    node.bounds.right > node.bounds.left &&
-    node.bounds.bottom > node.bounds.top;
-  if (!applicable || node?.bounds === undefined) {
+  const point = node === undefined ? undefined : actionPoint(node, action);
+  if (point === undefined) {
     problems.push(
       problem(
         "UI_REF_NOT_ACTIONABLE",
@@ -353,11 +360,24 @@ function resolveRef(
     );
     return undefined;
   }
-  return {
-    ref,
-    x: Math.floor((node.bounds.left + node.bounds.right) / 2),
-    y: Math.floor((node.bounds.top + node.bounds.bottom) / 2),
-  };
+  return point;
+}
+
+function nearestActionableAncestor(
+  node: UiNode,
+  action: "long-press" | "tap",
+  snapshot: UiHierarchySnapshot,
+): { node: UiNode; point: { ref: string; x: number; y: number } } | undefined {
+  const nodeIndex = snapshot.nodes.findIndex(({ ref }) => ref === node.ref);
+  let ancestorDepth = node.depth - 1;
+  for (let index = nodeIndex - 1; index >= 0 && ancestorDepth >= 0; index -= 1) {
+    const candidate = snapshot.nodes[index];
+    if (candidate === undefined || candidate.depth !== ancestorDepth) continue;
+    const point = actionPoint(candidate, action);
+    if (point !== undefined) return { node: candidate, point };
+    ancestorDepth -= 1;
+  }
+  return undefined;
 }
 
 function resolveSelector(
@@ -367,32 +387,41 @@ function resolveSelector(
   snapshot: UiHierarchySnapshot,
   commandId: string,
   problems: Problem[],
-): { ref: string; x: number; y: number; matched: UiNode } | undefined {
+):
+  | {
+      ref: string;
+      x: number;
+      y: number;
+      matched: UiNode;
+      actionNode: UiNode;
+    }
+  | undefined {
   const node = selectUniqueNode(selector, occurrence, snapshot, commandId, problems);
   if (node === undefined) return undefined;
-  const applicable =
-    node.enabled &&
-    (action === "long-press" ? node.longClickable : node.clickable || node.checkable) &&
-    node.bounds !== undefined &&
-    node.bounds.right > node.bounds.left &&
-    node.bounds.bottom > node.bounds.top;
-  if (!applicable || node.bounds === undefined) {
+  const directPoint = actionPoint(node, action);
+  const selectorField = normalizeSelector(selector)?.field;
+  const ancestor =
+    directPoint === undefined && (selectorField === "text" || selectorField === "desc")
+      ? nearestActionableAncestor(node, action, snapshot)
+      : undefined;
+  const point = directPoint ?? ancestor?.point;
+  const actionNode = directPoint === undefined ? ancestor?.node : node;
+  if (point === undefined || actionNode === undefined) {
     problems.push(
       problem(
         "UI_SELECTOR_NOT_ACTIONABLE",
         "input.ui.selector",
         `The selected UI node is not ${action === "tap" ? "clickable" : "long-clickable"}.`,
-        "Match an enabled actionable node or inspect the hierarchy for a better selector.",
+        "Match an enabled actionable node, or use a unique text or description inside one.",
         commandId,
       ),
     );
     return undefined;
   }
   return {
-    ref: node.ref,
-    x: Math.floor((node.bounds.left + node.bounds.right) / 2),
-    y: Math.floor((node.bounds.top + node.bounds.bottom) / 2),
+    ...point,
     matched: node,
+    actionNode,
   };
 }
 
@@ -909,6 +938,7 @@ export async function runUiAction(
   let input: UiActionData["input"];
   let resolved: UiActionData["resolved"];
   let matched: UiActionData["matched"];
+  let actionNode: UiActionData["actionNode"];
   let matchedNode: UiNode | undefined;
   const followingSteps: Array<{ id: string; title: string; args: string[] }> = [];
 
@@ -930,6 +960,7 @@ export async function runUiAction(
       resolved =
         selected === undefined ? undefined : { ref: selected.ref, x: selected.x, y: selected.y };
       matched = selected === undefined ? undefined : compactNode(selected.matched);
+      actionNode = selected === undefined ? undefined : compactNode(selected.actionNode);
       matchedNode = selected?.matched;
       input = {
         selector: selectorLabel(request.selector),
@@ -1170,6 +1201,7 @@ export async function runUiAction(
         input,
         ...(resolved === undefined ? {} : { resolved }),
         ...(matched === undefined ? {} : { matched }),
+        ...(actionNode === undefined ? {} : { actionNode }),
         verification: "planned",
         plan: { schemaVersion: SCHEMA_VERSION, dryRun: true, steps },
       },
@@ -1250,6 +1282,7 @@ export async function runUiAction(
       input,
       ...(resolved === undefined ? {} : { resolved }),
       ...(matched === undefined ? {} : { matched }),
+      ...(actionNode === undefined ? {} : { actionNode }),
       verification,
       ...(verified
         ? {}
