@@ -18,9 +18,13 @@ export interface Symbols {
   end: string;
 }
 
+/** Removes terminal escape sequences while preserving printable layout spacing. */
+export function stripTerminalSequences(value: string): string {
+  return value.replace(ANSI_PATTERN, "");
+}
+
 export function sanitizeTerminalText(value: string): string {
-  return value
-    .replace(ANSI_PATTERN, "")
+  return stripTerminalSequences(value)
     .replaceAll("\r", " ")
     .replaceAll("\n", " ")
     .replaceAll("\t", " ")

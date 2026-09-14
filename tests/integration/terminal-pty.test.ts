@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { stripTerminalSequences } from "../../src/ui/style.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const supportedPlatform = process.platform === "darwin" || process.platform === "linux";
@@ -22,6 +23,7 @@ async function runPty(
   command: readonly string[],
   waitFor: string,
   input: string,
+  columns = 80,
 ): Promise<PtyResult> {
   return await new Promise<PtyResult>((resolve, reject) => {
     const child = spawn(
@@ -33,6 +35,7 @@ async function runPty(
           ...process.env,
           ADB_READY_PTY_WAIT_FOR: waitFor,
           ADB_READY_PTY_INPUT_HEX: Buffer.from(input).toString("hex"),
+          ADB_READY_PTY_COLUMNS: String(columns),
           ADB_READY_REDUCED_MOTION: "1",
           CI: undefined,
           LANG: process.env.LANG ?? "C.UTF-8",
@@ -60,6 +63,10 @@ async function runPty(
       resolve({ output, exitCode, signal });
     });
   });
+}
+
+function visibleLines(value: string): string[] {
+  return stripTerminalSequences(value).replaceAll("\r", "").split("\n");
 }
 
 function expectRestored(result: PtyResult): void {
@@ -93,4 +100,22 @@ ptyTest("restores the real terminal after Ctrl-C in raw mode", async () => {
 
   expectRestored(result);
   expect(result.output).toContain("Fixture result: cancelled. No target was changed.");
+});
+
+ptyTest("keeps the interactive home within a narrow real terminal", async () => {
+  const columns = 56;
+  const result = await runPty(
+    [process.execPath, "run", "src/cli.ts"],
+    "WHAT DO YOU WANT TO DO?",
+    "\u001B",
+    columns,
+  );
+
+  expectRestored(result);
+  expect(result.output).toContain("ADB READY");
+  expect(result.output).not.toContain("RUN    one target + project");
+  const renderedHome = visibleLines(result.output).filter(
+    (line) => !line.startsWith("PTY_DRIVER_STATE "),
+  );
+  expect(Math.max(...renderedHome.map((line) => [...line].length))).toBeLessThan(columns);
 });

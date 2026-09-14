@@ -22,7 +22,9 @@ def main() -> int:
     wait_for = os.environ["ADB_READY_PTY_WAIT_FOR"].encode()
     input_bytes = bytes.fromhex(os.environ["ADB_READY_PTY_INPUT_HEX"])
     master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    rows = int(os.environ.get("ADB_READY_PTY_ROWS", "24"))
+    columns = int(os.environ.get("ADB_READY_PTY_COLUMNS", "80"))
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
     initial = termios.tcgetattr(slave)
     child = subprocess.Popen(
         command,
