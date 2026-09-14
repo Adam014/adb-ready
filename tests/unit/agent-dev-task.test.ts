@@ -17,7 +17,15 @@ const fixture = fileURLToPath(new URL("../fixtures/agent-task-child.ts", import.
 
 afterEach(async () => {
   await Promise.all(
-    created.splice(0).map(async (directory) => await rm(directory, { recursive: true })),
+    created.splice(0).map(
+      async (directory) =>
+        await rm(directory, {
+          recursive: true,
+          force: true,
+          maxRetries: process.platform === "win32" ? 5 : 0,
+          retryDelay: 100,
+        }),
+    ),
   );
 });
 
