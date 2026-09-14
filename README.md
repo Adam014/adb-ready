@@ -84,7 +84,8 @@ narrow split panes, without relying on horizontal scrolling.
   install, launch, restart, deep-link, and inspect the project app.
 - [**Verify the UI**](./docs/ui-automation.md) — find semantic elements, act
   by intent—including labels inside clickable containers and content-directed
-  scrolling—assert state, and capture the screen.
+  scrolling—assert state, audit effective accessibility labels, and capture the
+  screen.
 - [**Debug with evidence**](./docs/logs-and-context.md) — keep focused logs,
   session history, screenshots, recordings, and redacted context together.
 - [**Automate a real device**](./docs/automation.md#run-one-bounded-verification)

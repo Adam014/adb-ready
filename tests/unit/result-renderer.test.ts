@@ -523,6 +523,49 @@ describe("result renderer", () => {
         expected: "Action node",
       },
       {
+        command: "ui audit",
+        data: {
+          action: "audit",
+          selected,
+          status: "observed",
+          verified: true,
+          verification: "query-completed",
+          attempts: 1,
+          audit: {
+            actionableNodes: 2,
+            labeledNodes: 1,
+            stableIdNodes: 1,
+            findingCount: 2,
+            findingsTruncated: false,
+            findings: [
+              {
+                code: "UI_ACTIONABLE_UNLABELED",
+                severity: "warning",
+                confidence: "high",
+                summary: "Actionable control has no effective human-readable label.",
+                rationale: "No label exists in the effective hierarchy.",
+                node: { ref: "ui:aaaaaaaaaaaa:1", className: "android.widget.ImageButton" },
+              },
+              {
+                code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
+                severity: "info",
+                confidence: "high",
+                summary: "Actionable control has no resource ID.",
+                rationale: "Only a digest-scoped reference identifies this control.",
+                effectiveLabel: {
+                  source: "descendant",
+                  kind: "text",
+                  value: "Notifications",
+                  ref: "ui:aaaaaaaaaaaa:2",
+                },
+                node: { ref: "ui:aaaaaaaaaaaa:1", className: "android.widget.ImageButton" },
+              },
+            ],
+          },
+        },
+        expected: "Labels       1/2 controls have an effective label",
+      },
+      {
         command: "sessions list",
         data: {
           action: "list",
@@ -637,6 +680,13 @@ describe("result renderer", () => {
         expect(human.value).toContain("Matched      Apps · ui:aaaaaaaaaaaa:2");
         expect(plain.value).toContain("matched_ref=ui:aaaaaaaaaaaa:2");
         expect(plain.value).toContain("action_ref=ui:aaaaaaaaaaaa:1");
+      }
+      if (item.command === "ui audit") {
+        expect(human.value).toContain("UI_ACTIONABLE_UNLABELED · high confidence");
+        expect(human.value).toContain("Notifications");
+        expect(human.value).toContain("Stable IDs   1/2 controls · 1 advisory finding(s)");
+        expect(plain.value).toContain("audit_actionable_nodes=2");
+        expect(plain.value).toContain("audit_finding_count=2");
       }
       if (item.command === "capture screen-record") {
         expect(plain.value).toContain("media_duration_ms=2510");

@@ -554,6 +554,46 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       `${marker} Action       ${clean(data.action)} · ${clean(data.status)}`,
       `${marker} Verification ${clean(data.verification)} · ${String(data.attempts)} attempt(s)`,
     );
+    if (data.audit !== undefined) {
+      const warningCount = data.audit.actionableNodes - data.audit.labeledNodes;
+      const advisoryCount = data.audit.actionableNodes - data.audit.stableIdNodes;
+      const warnings = data.audit.findings.filter(({ severity }) => severity === "warning");
+      const visible = [
+        ...warnings,
+        ...data.audit.findings.filter(({ severity }) => severity === "info"),
+      ].slice(0, options.verbose === true ? 20 : 5);
+      lines.push(
+        `${warningCount === 0 ? style.success(glyphs.success, capabilities) : style.warning(glyphs.warning, capabilities)} Labels       ${String(data.audit.labeledNodes)}/${String(data.audit.actionableNodes)} controls have an effective label`,
+        `${data.audit.stableIdNodes === data.audit.actionableNodes ? style.success(glyphs.success, capabilities) : style.accent(glyphs.active, capabilities)} Stable IDs   ${String(data.audit.stableIdNodes)}/${String(data.audit.actionableNodes)} controls · ${String(advisoryCount)} advisory finding(s)`,
+      );
+      if (visible.length > 0) {
+        lines.push("", style.strong(`Findings (${String(data.audit.findingCount)})`, capabilities));
+        visible.forEach((finding, index) => {
+          const branch = index === visible.length - 1 ? glyphs.end : glyphs.branch;
+          const findingStyle = finding.severity === "warning" ? style.warning : style.accent;
+          const label =
+            finding.effectiveLabel?.value ??
+            finding.node.resourceId ??
+            finding.node.contentDescription ??
+            finding.node.text ??
+            finding.node.className ??
+            finding.node.ref;
+          lines.push(
+            `${style.dim(branch, capabilities)} ${findingStyle(clean(finding.code), capabilities)} · ${clean(finding.confidence)} confidence · ${clean(label)}`,
+            `  ${clean(finding.summary)}`,
+            `  ${style.dim(clean(finding.rationale), capabilities)}`,
+          );
+        });
+        if (data.audit.findingCount > visible.length) {
+          lines.push(
+            style.dim(
+              `  ${String(data.audit.findingCount - visible.length)} more; use --verbose or --json`,
+              capabilities,
+            ),
+          );
+        }
+      }
+    }
     if (data.resolved !== undefined) {
       if (data.matched !== undefined) {
         const matchedLabel =
@@ -924,6 +964,13 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`verified=${String(result.data.verified)}\n`);
     sink.write(`verification=${clean(result.data.verification)}\n`);
     sink.write(`attempts=${String(result.data.attempts)}\n`);
+    if (result.data.audit !== undefined) {
+      sink.write(`audit_actionable_nodes=${String(result.data.audit.actionableNodes)}\n`);
+      sink.write(`audit_labeled_nodes=${String(result.data.audit.labeledNodes)}\n`);
+      sink.write(`audit_stable_id_nodes=${String(result.data.audit.stableIdNodes)}\n`);
+      sink.write(`audit_finding_count=${String(result.data.audit.findingCount)}\n`);
+      sink.write(`audit_findings_truncated=${String(result.data.audit.findingsTruncated)}\n`);
+    }
     if (result.data.before !== undefined) {
       sink.write(`before_digest=${clean(result.data.before.digest)}\n`);
     }

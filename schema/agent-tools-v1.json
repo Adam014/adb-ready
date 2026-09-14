@@ -128,7 +128,7 @@
     },
     {
       "name": "audit_ui",
-      "description": "Audit the current screen for enabled actionable nodes without human-readable labels or stable automation IDs.",
+      "description": "Audit real Android controls for effective labels and stable automation IDs, with bounded findings, confidence, and rule rationale.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",

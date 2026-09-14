@@ -22,6 +22,10 @@ breaking changes.
 
 ### Fixed
 
+- Make UI audits follow Android hierarchy semantics: inherit effective labels
+  through control descendants and actionable ancestors, exclude structural
+  focus and scrolling containers, and explain every finding with confidence
+  and rule rationale.
 - Make `ui scroll` directions describe content navigation—such as `down`
   revealing content below—while keeping `ui swipe` directions as physical
   finger gestures.

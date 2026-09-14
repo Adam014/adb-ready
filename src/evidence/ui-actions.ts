@@ -117,8 +117,18 @@ export interface UiActionData {
 export interface UiAuditFinding {
   code: "UI_ACTIONABLE_UNLABELED" | "UI_ACTIONABLE_WITHOUT_STABLE_ID";
   severity: "info" | "warning";
+  confidence: "high" | "medium";
   summary: string;
+  rationale: string;
+  effectiveLabel?: UiEffectiveLabel;
   node: UiNode;
+}
+
+export interface UiEffectiveLabel {
+  source: "ancestor" | "descendant" | "self";
+  kind: "content-description" | "hint" | "text";
+  value: string;
+  ref: string;
 }
 
 export interface UiAuditReport {
@@ -662,25 +672,90 @@ function correspondingNode(node: UiNode, snapshot: UiHierarchySnapshot): UiNode 
   );
 }
 
-function auditSnapshot(snapshot: UiHierarchySnapshot): UiAuditReport {
-  const controls = snapshot.nodes.filter(
-    (node) =>
-      node.enabled && (node.clickable || node.checkable || node.focusable || node.longClickable),
+function auditControl(node: UiNode): boolean {
+  const editable = /(?:^|\.)(?:AutoCompleteTextView|EditText)$/u.test(node.className ?? "");
+  const visible =
+    node.bounds !== undefined &&
+    node.bounds.right > node.bounds.left &&
+    node.bounds.bottom > node.bounds.top;
+  return (
+    visible && node.enabled && (node.clickable || node.checkable || node.longClickable || editable)
   );
+}
+
+function ownLabel(node: UiNode): Omit<UiEffectiveLabel, "source"> | undefined {
+  const candidates = [
+    { kind: "content-description" as const, value: node.contentDescription },
+    { kind: "text" as const, value: node.text },
+    { kind: "hint" as const, value: node.hintText },
+  ];
+  const label = candidates.find(({ value }) => value !== undefined && value.trim() !== "");
+  return label?.value === undefined
+    ? undefined
+    : { kind: label.kind, value: label.value.trim(), ref: node.ref };
+}
+
+function subtreeEnd(nodes: UiNode[], index: number): number {
+  const node = nodes[index];
+  if (node === undefined) return index + 1;
+  let end = index + 1;
+  while (end < nodes.length && (nodes[end]?.depth ?? -1) > node.depth) end += 1;
+  return end;
+}
+
+function subtreeLabel(nodes: UiNode[], index: number): UiEffectiveLabel | undefined {
+  const end = subtreeEnd(nodes, index);
+  for (let candidateIndex = index; candidateIndex < end; candidateIndex += 1) {
+    const node = nodes[candidateIndex];
+    const label = node === undefined ? undefined : ownLabel(node);
+    if (label !== undefined) {
+      return { ...label, source: candidateIndex === index ? "self" : "descendant" };
+    }
+  }
+  return undefined;
+}
+
+function effectiveLabel(nodes: UiNode[], index: number): UiEffectiveLabel | undefined {
+  const local = subtreeLabel(nodes, index);
+  if (local !== undefined) return local;
+  const node = nodes[index];
+  if (node === undefined) return undefined;
+  let ancestorDepth = node.depth - 1;
+  for (
+    let candidateIndex = index - 1;
+    candidateIndex >= 0 && ancestorDepth >= 0;
+    candidateIndex -= 1
+  ) {
+    const candidate = nodes[candidateIndex];
+    if (candidate === undefined || candidate.depth !== ancestorDepth) continue;
+    const inherited = auditControl(candidate) ? subtreeLabel(nodes, candidateIndex) : undefined;
+    if (inherited !== undefined) return { ...inherited, source: "ancestor" };
+    ancestorDepth -= 1;
+  }
+  return undefined;
+}
+
+function auditSnapshot(snapshot: UiHierarchySnapshot): UiAuditReport {
+  const controls = snapshot.nodes
+    .map((node, index) => ({ node, index }))
+    .filter(({ node }) => auditControl(node));
   const findings: UiAuditFinding[] = [];
   let labeledNodes = 0;
   let stableIdNodes = 0;
-  for (const node of controls) {
-    const labeled =
-      (node.text !== undefined && node.text.trim() !== "") ||
-      (node.contentDescription !== undefined && node.contentDescription.trim() !== "");
+  for (const { node, index } of controls) {
+    const label = effectiveLabel(snapshot.nodes, index);
+    const labeled = label !== undefined;
     const stableId = node.resourceId !== undefined && node.resourceId.trim() !== "";
     if (labeled) labeledNodes += 1;
     else {
       findings.push({
         code: "UI_ACTIONABLE_UNLABELED",
         severity: "warning",
-        summary: "Enabled actionable node has no visible text or content description.",
+        confidence: snapshot.complete ? "high" : "medium",
+        summary: "Actionable control has no effective human-readable label.",
+        rationale: snapshot.complete
+          ? "No non-empty text, hint, or content description exists on the control, in its descendants, or on an actionable ancestor."
+          : "No non-empty text, hint, or content description was found in the returned partial hierarchy; inspect a complete hierarchy before treating this as definitive.",
         node: compactNode(node),
       });
     }
@@ -689,7 +764,15 @@ function auditSnapshot(snapshot: UiHierarchySnapshot): UiAuditReport {
       findings.push({
         code: "UI_ACTIONABLE_WITHOUT_STABLE_ID",
         severity: "info",
-        summary: "Enabled actionable node has no resource ID for a stable automation selector.",
+        confidence: "high",
+        summary: "Actionable control has no resource ID for a stable automation selector.",
+        rationale:
+          label === undefined
+            ? "Without a resource ID or effective label, only a digest-scoped reference or coordinates identify this control."
+            : label.kind === "hint"
+              ? "A human-readable hint exists, but it is not a stable automation selector; expose a resource ID for deterministic targeting."
+              : `Its effective ${label.kind === "text" ? "text" : "content description"} remains usable as a semantic selector, but a resource ID is more resilient to copy changes.`,
+        ...(label === undefined ? {} : { effectiveLabel: label }),
         node: compactNode(node),
       });
     }
