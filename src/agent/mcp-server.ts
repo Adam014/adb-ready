@@ -892,7 +892,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "scroll_ui",
-    "Scroll the screen or one unique semantic scroll container in a display-relative direction, then compare UI state.",
+    "Navigate content in a display-relative direction within the screen or one unique semantic scroll container, then compare UI state.",
     z.object({
       ...targetHandleShape,
       direction: z.enum(["down", "left", "right", "up"]),

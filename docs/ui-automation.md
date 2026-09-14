@@ -101,14 +101,16 @@ appending to an unknown value.
 ```bash
 adb-ready ui swipe up
 adb-ready ui swipe 900 1200 180 1200
-adb-ready ui scroll up 'id=com.example:id/results'
+adb-ready ui scroll down 'id=com.example:id/results'
 adb-ready ui type "person@example.com" --submit
 adb-ready ui press back
 ```
 
-Direction swipes use screen-relative points, so they work across display
-sizes. `scroll` can constrain that gesture to one enabled accessibility node
-whose `scrollable` property is true; without a selector it uses the screen.
+Direction swipes describe the physical finger gesture and use screen-relative
+points, so they work across display sizes. `scroll` describes content/viewport
+navigation instead: `scroll down` reveals content below by sending an upward
+finger gesture. It can constrain that navigation to one enabled accessibility
+node whose `scrollable` property is true; without a selector it uses the screen.
 Supported keys are `back`, `home`, `enter`, `menu`, `volume-up`, and
 `volume-down`.
 

@@ -291,6 +291,8 @@ id=, text=, desc=, or package= values; MCP additionally supports structured
 contains and prefix matching with state qualifiers. Typed text uses a
 conservative shell-safe character set. fill and clear require Android's safe
 key-combination capability and verify the observable field value afterward.
+Scroll directions describe content navigation (down reveals content below);
+swipe directions describe the physical finger gesture.
 `,
   devices: `Usage: adb-ready devices [options]
 
