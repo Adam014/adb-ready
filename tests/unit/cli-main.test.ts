@@ -343,6 +343,31 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
+  test("documents every app and package-list action option in focused help", async () => {
+    const blocked: CliDependencies = {
+      loadConfig: async () => {
+        throw new Error("must not load");
+      },
+      locateAdb: async () => {
+        throw new Error("must not locate ADB");
+      },
+    };
+    const appStreams = io();
+    const appsStreams = io();
+
+    expect(await runCli(["help", "app"], appStreams, blocked)).toBe(ExitCode.Success);
+    expect(appStreams.output.value).toContain("--replace");
+    expect(appStreams.output.value).toContain("--grant-runtime-permissions");
+    expect(appStreams.output.value).toContain("--activity COMPONENT");
+    expect(appStreams.output.value).toContain("--allow-destructive");
+
+    expect(await runCli(["help", "apps"], appsStreams, blocked)).toBe(ExitCode.Success);
+    expect(appsStreams.output.value).toContain("--filter TEXT");
+    expect(appsStreams.output.value).toContain("--user");
+    expect(appsStreams.output.value).toContain("--system");
+    expect(appsStreams.output.value).toContain("--all");
+  });
+
   test("reads local session history without loading project configuration or ADB", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-session-"));
     try {

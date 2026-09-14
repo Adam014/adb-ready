@@ -163,7 +163,7 @@ snippet because their configuration is user-scoped or client-defined.
   app: `Usage:
   adb-ready app resolve [APP_ID] [options]
   adb-ready app info [APP_ID] [options]
-  adb-ready app install APK [SPLIT_APK...] [--package APP_ID] [options]
+  adb-ready app install APK [SPLIT_APK...] [options]
   adb-ready app launch [APP_ID] [--activity ACTIVITY] [options]
   adb-ready app stop [APP_ID] [options]
   adb-ready app restart [APP_ID] [--activity ACTIVITY] [options]
@@ -172,11 +172,24 @@ snippet because their configuration is user-scoped or client-defined.
 
 Resolves one project application with provenance and runs verified lifecycle
 operations against the same deterministic Android target.
+
+Action options:
+  --package APP_ID             Verify this package after installation
+  --replace                    Replace an already installed application
+  --grant-runtime-permissions  Grant requested runtime permissions on install
+  --activity COMPONENT         Launch this explicit activity component
+  --allow-destructive          Confirm clear-data or uninstall non-interactively
 `,
-  apps: `Usage: adb-ready apps list [--user|--system|--all] [options]
+  apps: `Usage: adb-ready apps list [options]
 
 Lists packages from one deterministic Android target. User-installed packages
 are shown by default.
+
+List options:
+  --user                List user-installed packages (default)
+  --system              List system packages
+  --all                 List user and system packages
+  --filter TEXT         Keep package names containing this text
 `,
   capture: `Usage:
   adb-ready capture screenshot [--out PATH] [--force]
