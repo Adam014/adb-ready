@@ -22,6 +22,9 @@ breaking changes.
 
 ### Fixed
 
+- Stop reporting an available host package manager as detected project
+  metadata in Flutter, Gradle, and other non-JavaScript projects, and omit the
+  irrelevant setting from generated native-project configuration.
 - Report missing Flutter and Gradle launchers as framework prerequisites with
   the attempted launcher and actionable setup guidance instead of an
   unspecified development-command error.

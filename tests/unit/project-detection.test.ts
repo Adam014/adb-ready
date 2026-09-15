@@ -141,6 +141,14 @@ describe("project detection", () => {
       ).preset,
     ).toBe("gradle");
     expect((await detectProject({ cwd: unknownRoot, ...fixture({}) })).preset).toBeUndefined();
+    expect(
+      (
+        await detectProject({
+          cwd: nativeRoot,
+          ...fixture({ [path.join(nativeRoot, "gradlew")]: "" }, ["npm"]),
+        })
+      ).packageManager,
+    ).toEqual({ conflicts: [] });
   });
 
   test("detects Flutter and Capacitor before their generated Android Gradle projects", async () => {
