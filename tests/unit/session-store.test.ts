@@ -118,6 +118,50 @@ describe("SessionRecorder", () => {
     }
   });
 
+  test("preserves unrelated diagnostic identifiers after observing a short transport ID", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-sessions-redaction-"));
+    try {
+      const bus = new EventBus(() => new Date("2026-09-13T10:00:00.000Z"));
+      const recorder = await SessionRecorder.create(
+        bus,
+        {
+          sessionId: "af644c67-3270-4c89",
+          command: "dev",
+          startedAt: "2026-09-13T10:00:00.000Z",
+        },
+        { directory },
+      );
+      bus.emit({
+        type: "adb.operation.started",
+        source: "adb",
+        severity: "debug",
+        message: "Running target-scoped ADB operation",
+        correlation: { commandId: "command-1", sessionId: "af644c67-3270-4c89" },
+        data: { args: ["-t", "32", "shell", "getprop", "ro.serialno"] },
+      });
+      bus.emit({
+        type: "hook.completed",
+        source: "hook",
+        severity: "info",
+        message: "Hook completed for session af644c67-3270-4c89",
+        correlation: { commandId: "command-1", sessionId: "af644c67-3270-4c89" },
+      });
+      await recorder.finish({
+        status: "completed",
+        finishedAt: "2026-09-13T10:01:00.000Z",
+      });
+
+      const events = await readSessionEvents("af644c67-3270-4c89", { directory });
+      expect(events.ok).toBeTrue();
+      if (!events.ok) return;
+      expect(events.value[0]?.data?.args).toEqual(["-t", "32", "shell", "getprop", "ro.serialno"]);
+      expect(events.value[1]?.message).toContain("af644c67-3270-4c89");
+      expect(events.value[1]?.message).not.toContain("[REDACTED]");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("reports an event persistence failure instead of claiming a complete session", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-sessions-failure-"));
     try {

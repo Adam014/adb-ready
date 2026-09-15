@@ -22,6 +22,9 @@ breaking changes.
 
 ### Fixed
 
+- Preserve unrelated diagnostic text when a short numeric ADB transport ID is
+  observed; transport IDs remain operational evidence and short private
+  literals match only complete identifier tokens.
 - Parse complete Android 16 lock-screen and foreground-activity state during
   strict readiness checks, and show actionable per-assertion failure details in
   human session output.

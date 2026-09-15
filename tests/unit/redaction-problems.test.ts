@@ -55,6 +55,22 @@ describe("redactText", () => {
       "build 149108 and port 8081",
     );
   });
+
+  test("bounds short literals so they cannot corrupt larger identifiers", () => {
+    const result = redactText("transport 32 session af644c67-3270-4c89", {
+      homeDirectory: "/none",
+      additionalLiterals: ["32"],
+    });
+
+    expect(result.value).toBe("transport [REDACTED] session af644c67-3270-4c89");
+    expect(result.replacements).toBe(1);
+    expect(
+      redactText("USB-1 USB-1-PRO", {
+        homeDirectory: "/none",
+        additionalLiterals: ["USB-1"],
+      }).value,
+    ).toBe("[REDACTED] USB-1-PRO");
+  });
 });
 
 describe("problem classification", () => {
