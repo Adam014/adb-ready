@@ -126,14 +126,17 @@ export async function watchSession(options: SessionWatchOptions): Promise<Sessio
 
   while (!options.signal.aborted) {
     if (!(await sleep(intervalMs, options.signal))) break;
+    if (options.signal.aborted) break;
     let health: SessionHealth;
     try {
       health = await options.observe(options.signal);
     } catch (error) {
+      if (options.signal.aborted) break;
       summary.failed = true;
       options.onEvent?.({ type: "watch.failed", detail: failureDetail(error) });
       return summary;
     }
+    if (options.signal.aborted) break;
     summary.checks += 1;
     summary.lastHealth = health;
     options.onEvent?.({ type: "health.checked", health });
@@ -156,6 +159,7 @@ export async function watchSession(options: SessionWatchOptions): Promise<Sessio
       summary.recoveryAttempts += 1;
       options.onEvent?.({ type: "recovery.started", health: lastHealth, attempt });
       if (!(await sleep(recoveryDelayMs(policy, attempt), options.signal))) break;
+      if (options.signal.aborted) break;
       let outcome: RecoveryOutcome;
       try {
         outcome = await options.recover(lastHealth, attempt, options.signal);
@@ -168,6 +172,7 @@ export async function watchSession(options: SessionWatchOptions): Promise<Sessio
       try {
         verified = await options.observe(options.signal);
       } catch (error) {
+        if (options.signal.aborted) break;
         machine.transition("degraded", "recovery verification failed unexpectedly");
         options.onEvent?.({
           type: "recovery.failed",
@@ -177,6 +182,7 @@ export async function watchSession(options: SessionWatchOptions): Promise<Sessio
         });
         continue;
       }
+      if (options.signal.aborted) break;
       summary.checks += 1;
       summary.lastHealth = verified;
       options.onEvent?.({ type: "health.checked", health: verified, attempt });

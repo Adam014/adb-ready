@@ -128,6 +128,42 @@ describe("AdbClient", () => {
     expect(events.at(-1)?.data).not.toHaveProperty("retention");
   });
 
+  test("marks a background probe cancelled by its owner as transient", async () => {
+    const controller = new AbortController();
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    const events: Array<{ type: string; severity: string; message: string; data?: unknown }> = [];
+    bus.subscribe((event) => events.push(event));
+    const client = new AdbClient({
+      executable: "adb",
+      bus,
+      correlation: { commandId: "command-1" },
+      runner: async (request) => {
+        controller.abort();
+        return processResult({
+          args: [...(request.args ?? [])],
+          exitCode: null,
+          signal: "SIGTERM",
+          aborted: true,
+        });
+      },
+      idFactory: () => "operation-1",
+      presentation: "background",
+    });
+
+    await client.getState("R5CT-001", controller.signal);
+
+    expect(events.at(-1)).toMatchObject({
+      type: "operation.failed",
+      severity: "debug",
+      message: "Verifying Android target R5CT-001 cancelled",
+      data: {
+        presentation: "background",
+        retention: "transient",
+        aborted: true,
+      },
+    });
+  });
+
   test("keeps client version independent from a configured remote server", async () => {
     const requests: ProcessRequest[] = [];
     const runner: ProcessRunner = async (request) => {

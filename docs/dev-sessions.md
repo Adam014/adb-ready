@@ -211,6 +211,9 @@ than intercepting or redefining it:
 - Other presets state that framework input is active without promising
   unsupported shortcuts.
 - `Ctrl+C` stops the owned child and performs the normal verified cleanup.
+- Health monitoring is stopped and awaited before intentional child or port
+  teardown, so cancellation cannot be recorded as a device degradation or a
+  recovery attempt.
 
 The control bar is never rendered by `run`, JSON/NDJSON output, redirected
 streams, CI, `--non-interactive`, or `--quiet`. This keeps scripts deterministic

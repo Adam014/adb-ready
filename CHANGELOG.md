@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Stop and await development-session health monitoring before intentional
+  teardown, preventing cancelled probes from creating false recovery evidence.
 - Omit a missing Android package `versionName` from structured app information
   instead of serializing Android's `null` sentinel as a real version string.
 - Stop reporting an available host package manager as detected project

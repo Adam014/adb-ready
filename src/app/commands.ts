@@ -4133,6 +4133,9 @@ export async function runDev(
     sessionAbortPromise,
   ]);
   signal?.removeEventListener("abort", notifySessionAbort);
+  watchController.abort();
+  recoverySummary = await watchPromise;
+  signal?.removeEventListener("abort", abortWatcher);
   if (firstCompletion === "watch-failed" || firstCompletion === "signal") {
     childController?.abort();
     verificationController.abort();
@@ -4176,9 +4179,6 @@ export async function runDev(
     });
   }
   const child = await childPromise;
-  watchController.abort();
-  recoverySummary = await watchPromise;
-  signal?.removeEventListener("abort", abortWatcher);
   signal?.removeEventListener("abort", abortChild);
   childStdout.flush();
   childStderr.flush();
