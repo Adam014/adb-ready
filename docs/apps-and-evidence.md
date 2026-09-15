@@ -15,6 +15,9 @@ adb-ready app info
 
 Resolution prefers an explicit `APP_ID`, then project configuration and
 detected Android project metadata. Every resolved result includes provenance.
+Unavailable optional package metadata, such as an application without an
+Android `versionName`, is omitted from structured output instead of being
+reported as a literal sentinel value.
 If equally valid candidates remain, ADB Ready asks for an explicit choice
 instead of selecting the first package.
 

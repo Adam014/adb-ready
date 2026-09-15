@@ -79,7 +79,8 @@ export function parseAndroidLockState(output: string): AndroidLockState | undefi
 
 export function parsePackageInfo(applicationId: string, output: string): AndroidPackageInfo {
   const sourcePath = output.match(/\bcodePath=([^\s]+)/u)?.[1];
-  const versionName = output.match(/\bversionName=([^\s]+)/u)?.[1];
+  const versionNameText = output.match(/\bversionName=([^\s]+)/u)?.[1];
+  const versionName = versionNameText === "null" ? undefined : versionNameText;
   const versionCodeText = output.match(/\bversionCode=(\d+)/u)?.[1];
   const minSdkText = output.match(/\bminSdk=(\d+)/u)?.[1];
   const targetSdkText = output.match(/\btargetSdk=(\d+)/u)?.[1];

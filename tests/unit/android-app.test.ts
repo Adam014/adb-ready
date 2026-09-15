@@ -64,4 +64,20 @@ describe("Android app parsers", () => {
       lastUpdateTime: "2026-09-10 09:00:00",
     });
   });
+
+  test("omits Android's null sentinel for a missing version name", () => {
+    const info = parsePackageInfo(
+      "com.example.app",
+      "Package [com.example.app]\n codePath=/data/app/example\n versionCode=42 targetSdk=36\n versionName=null\n",
+    );
+
+    expect(info).toEqual({
+      applicationId: "com.example.app",
+      installed: true,
+      sourcePath: "/data/app/example",
+      versionCode: 42,
+      targetSdk: 36,
+    });
+    expect(JSON.stringify(info)).not.toContain('"versionName"');
+  });
 });
