@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cli = path.join(root, "dist", "cli.js");
 const temporary = mkdtempSync(path.join(tmpdir(), "adb-ready-mcp-"));
+const removeOptions = { force: true, recursive: true, maxRetries: 10, retryDelay: 100 };
 const fakeAdb = path.join(temporary, process.platform === "win32" ? "fake-adb.exe" : "fake-adb");
 const compiledAdb = spawnSync(
   "bun",
@@ -124,7 +125,7 @@ const requiredTools = [
 
 /** @param {{ name: string, executable: string, args: string[] }} runtime @param {string} protocolVersion */
 async function verifyRuntime(runtime, protocolVersion) {
-  rmSync(path.join(temporary, ".adb-ready"), { force: true, recursive: true });
+  rmSync(path.join(temporary, ".adb-ready"), removeOptions);
   const child = spawn(runtime.executable, runtime.args, {
     cwd: temporary,
     env: {
@@ -308,5 +309,5 @@ try {
     }
   }
 } finally {
-  rmSync(temporary, { force: true, recursive: true });
+  rmSync(temporary, removeOptions);
 }
