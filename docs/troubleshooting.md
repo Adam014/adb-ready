@@ -34,6 +34,7 @@ adb-ready context --since 5m --only problems,recovery,logs
 | `UI_NOT_IDLE` | Android UI Automator could not observe a quiet accessibility window | Pause continuous UI changes or navigate to a stable screen, then retry |
 | `SESSION_RECOVERY_FAILED` | The bounded target/port recovery budget was exhausted | Inspect `problems`, network state, and saved recovery events |
 | `SESSION_PERSISTENCE_FAILED` | The private session record could not be written | Check user-state directory permissions and capacity |
+| `FRAMEWORK_LAUNCHER_NOT_FOUND` | The detected Flutter or Gradle project has no runnable launcher | Install Flutter and expose `flutter` on PATH, or restore the project's checked-in Gradle Wrapper |
 | `CHILD_PROCESS_FAILED` | The project command exited unsuccessfully | Inspect child output, targeted logs, and preserved exit code |
 | `DEVELOPMENT_SERVICE_CONFLICT` | Metro's configured host port belongs to another service | Stop that service or map device port `8081` to the actual Metro host port |
 | `EXPO_LAUNCH_FAILED` | Expo could not provide a valid link or the selected target has no matching runtime | Install the project development build or Expo Go on that target, then retry |

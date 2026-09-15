@@ -1593,10 +1593,20 @@ describe("runDev", () => {
     }
   });
 
-  test("rejects unavailable native tools and malformed reverse ports offline", async () => {
+  test("reports unavailable native framework launchers with actionable evidence", async () => {
     const nativeFixtures = [
-      { preset: "flutter" as const, locate: async () => undefined },
-      { preset: "gradle" as const, locate: async () => undefined },
+      {
+        preset: "flutter" as const,
+        locate: async () => undefined,
+        summary: "The Flutter executable was not found.",
+        attemptedField: "attemptedExecutable",
+      },
+      {
+        preset: "gradle" as const,
+        locate: async () => undefined,
+        summary: "No runnable Gradle Wrapper was found.",
+        attemptedField: "attemptedLaunchers",
+      },
     ];
     for (const fixture of nativeFixtures) {
       const root = await mkdtemp(path.join(tmpdir(), `adb-ready-${fixture.preset}-`));
@@ -1610,14 +1620,65 @@ describe("runDev", () => {
         });
         deps.locateExecutable = fixture.locate;
         const execution = await runDevOfflinePlan({ cwd: root }, deps);
+        expect(execution.exitCode).toBe(ExitCode.Environment);
         expect(execution.result.problems).toContainEqual(
-          expect.objectContaining({ code: ProblemCode.DevCommandNotFound }),
+          expect.objectContaining({
+            code: ProblemCode.FrameworkLauncherNotFound,
+            category: "environment.framework",
+            summary: fixture.summary,
+            evidence: expect.arrayContaining([
+              expect.objectContaining({
+                source: "project",
+                field: "preset",
+                value: fixture.preset,
+              }),
+              expect.objectContaining({ field: fixture.attemptedField }),
+            ]),
+            actions: [expect.objectContaining({ kind: "documentation", automatic: false })],
+          }),
         );
       } finally {
         await rm(root, { recursive: true, force: true });
       }
     }
 
+    const explicitFlutterDeps = dependencies(async (request) => result(request));
+    explicitFlutterDeps.detectProject = async () => ({
+      root: "/workspace/empty",
+      presetEvidence: [],
+      packageManager: { conflicts: [] },
+    });
+    explicitFlutterDeps.locateExecutable = async () => undefined;
+    const explicitFlutter = await runDevOfflinePlan(
+      { cwd: "/workspace/empty", preset: "flutter" },
+      explicitFlutterDeps,
+    );
+    expect(explicitFlutter.result.problems).toContainEqual(
+      expect.objectContaining({
+        code: ProblemCode.FrameworkLauncherNotFound,
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ field: "preset", value: "flutter" }),
+        ]),
+      }),
+    );
+
+    const customDeps = dependencies(async (request) => result(request));
+    customDeps.detectProject = async () => ({
+      root: "/workspace/custom",
+      preset: "custom",
+      presetEvidence: [],
+      packageManager: { conflicts: [] },
+    });
+    const custom = await runDevOfflinePlan(
+      { cwd: "/workspace/custom", preset: "custom" },
+      customDeps,
+    );
+    expect(custom.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.DevCommandNotFound }),
+    );
+  });
+
+  test("rejects malformed reverse ports offline", async () => {
     const deps = dependencies(async (request) => result(request));
     const execution = await runDevOfflinePlan(
       {
