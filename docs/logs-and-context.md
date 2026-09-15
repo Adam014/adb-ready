@@ -125,6 +125,9 @@ Before persistence or export, ADB Ready:
 - redacts known token, credential, pairing-code, URL, and path patterns;
 - replaces observed device and project identities with short SHA-256
   fingerprints;
+- preserves operational transport IDs and bounds short literal matches to
+  complete identifier tokens, preventing unrelated timestamps, ports, hashes,
+  and correlation IDs from being altered;
 - honors additional environment names configured in
   `dev.journal.redactEnvironment`;
 - bounds both the in-memory journal and saved session history; and

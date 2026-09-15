@@ -231,7 +231,7 @@ function privateValues(event: AdbReadyEvent): string[] {
   if (Array.isArray(args)) {
     for (let index = 0; index < args.length; index += 1) {
       const argument = args[index];
-      if ((argument === "-s" || argument === "-t") && typeof args[index + 1] === "string") {
+      if (argument === "-s" && typeof args[index + 1] === "string") {
         values.add(args[index + 1] as string);
       }
       if ((argument === "connect" || argument === "pair") && typeof args[index + 1] === "string") {

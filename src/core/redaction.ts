@@ -11,9 +11,19 @@ export interface RedactionOptions {
 }
 
 const REDACTED = "[REDACTED]";
+const UNBOUNDED_LITERAL_MINIMUM_LENGTH = 8;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function additionalLiteralExpression(literal: string): RegExp {
+  const escaped = escapeRegExp(literal);
+  if ([...literal].length >= UNBOUNDED_LITERAL_MINIMUM_LENGTH) {
+    return new RegExp(escaped, "gu");
+  }
+  const identityCharacter = "[\\p{L}\\p{N}_.:()_-]";
+  return new RegExp(`(?<!${identityCharacter})${escaped}(?!${identityCharacter})`, "gu");
 }
 
 function replaceAndCount(
@@ -81,7 +91,7 @@ export function redactText(input: string, options: RedactionOptions = {}): Redac
     if (literal === "") {
       continue;
     }
-    const result = replaceAndCount(value, new RegExp(escapeRegExp(literal), "gu"), REDACTED);
+    const result = replaceAndCount(value, additionalLiteralExpression(literal), REDACTED);
     value = result.value;
     replacements += result.replacements;
   }
