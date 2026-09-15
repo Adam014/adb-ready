@@ -18,6 +18,8 @@ export interface ForegroundActivity {
   activity: string;
 }
 
+export type AndroidLockState = "locked" | "unlocked";
+
 export function parsePackageList(output: string): AndroidPackage[] {
   const packages: AndroidPackage[] = [];
   const seen = new Set<string>();
@@ -52,6 +54,7 @@ export function parseForegroundActivity(output: string): ForegroundActivity | un
   const patterns = [
     /\bmResumedActivity:\s+ActivityRecord\{[^}]*\s([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)\/(\S+?)(?:\s|\})/u,
     /\btopResumedActivity=ActivityRecord\{[^}]*\s([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)\/(\S+?)(?:\s|\})/u,
+    /\btopResumedActivity=([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)\/(\S+)/u,
   ];
   for (const pattern of patterns) {
     const match = output.match(pattern);
@@ -60,6 +63,18 @@ export function parseForegroundActivity(output: string): ForegroundActivity | un
     }
   }
   return undefined;
+}
+
+export function parseAndroidLockState(output: string): AndroidLockState | undefined {
+  const matches = output.matchAll(
+    /^\s*(?:showing|mIsShowing|isKeyguardShowing|mKeyguardShowing|isStatusBarKeyguard|mShowingLockscreen)\s*[=:]\s*(true|false)\s*$/gimu,
+  );
+  let observed = false;
+  for (const match of matches) {
+    observed = true;
+    if (match[1]?.toLowerCase() === "true") return "locked";
+  }
+  return observed ? "unlocked" : undefined;
 }
 
 export function parsePackageInfo(applicationId: string, output: string): AndroidPackageInfo {

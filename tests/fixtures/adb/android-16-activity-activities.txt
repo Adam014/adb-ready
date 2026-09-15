@@ -1,0 +1,6 @@
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{42 #80 type=standard A=10100:com.example.app}
+    topResumedActivity=ActivityRecord{213615947 u0 com.example.app/.MainActivity t80}
+    * Hist #0: ActivityRecord{213615947 u0 com.example.app/.MainActivity t80}
+  ResumedActivity: ActivityRecord{213615947 u0 com.example.app/.MainActivity t80}

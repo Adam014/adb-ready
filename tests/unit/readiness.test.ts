@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { AdbClient } from "../../src/adb/client.js";
@@ -148,6 +149,14 @@ describe("waitForReadiness", () => {
 
 describe("ADB readiness probes", () => {
   const target = { serial: "USB-1", transportId: "7" };
+  const android16Policy = readFileSync(
+    new URL("../fixtures/adb/android-16-window-policy-unlocked.txt", import.meta.url),
+    "utf8",
+  );
+  const android16Activities = readFileSync(
+    new URL("../fixtures/adb/android-16-activity-activities.txt", import.meta.url),
+    "utf8",
+  );
 
   test("checks host, HTTP, and bounded log assertions independently", async () => {
     const lines = ["Metro ready", "ordinary log"];
@@ -237,7 +246,7 @@ describe("ADB readiness probes", () => {
   });
 
   test("checks Android boot, lock, process, foreground, and activity state", async () => {
-    let lockState = "isStatusBarKeyguard=false";
+    let lockState = android16Policy;
     const probe = createAdbReadinessProbe({
       client: client((request) => {
         const args = request.args ?? [];
@@ -247,10 +256,7 @@ describe("ADB readiness probes", () => {
           return processResult(request, args.includes("com.example.app") ? "321 322\n" : "", 0);
         }
         if (args.includes("activities")) {
-          return processResult(
-            request,
-            "mResumedActivity: ActivityRecord{42 u0 com.example.app/.MainActivity t12}\n",
-          );
+          return processResult(request, android16Activities);
         }
         return processResult(request);
       }),
@@ -281,6 +287,35 @@ describe("ADB readiness probes", () => {
     expect(await probe({ kind: "activity", value: "OtherActivity" })).toMatchObject({
       status: "failed",
     });
+  });
+
+  test("passes an Android 16 strict app-state contract from full dumpsys output", async () => {
+    const observed: Array<readonly string[]> = [];
+    const probe = createAdbReadinessProbe({
+      client: client((request) => {
+        const args = request.args ?? [];
+        observed.push(args);
+        if (args.includes("policy")) return processResult(request, android16Policy);
+        if (args.includes("activities")) return processResult(request, android16Activities);
+        return processResult(request);
+      }),
+      target,
+    });
+
+    const result = await waitForReadiness(
+      [
+        { kind: "unlocked" },
+        { kind: "foreground", package: "com.example.app" },
+        { kind: "activity", value: ".MainActivity" },
+      ],
+      probe,
+    );
+
+    expect(result).toMatchObject({ ready: true, attempts: 1, timedOut: false });
+    expect(result.assertions.map(({ status }) => status)).toEqual(["passed", "passed", "passed"]);
+    expect(
+      observed.every((args) => args.includes("-t") && args.includes("7") && args.includes("shell")),
+    ).toBeTrue();
   });
 
   test("checks semantic UI state and preserves unsupported and failure outcomes", async () => {

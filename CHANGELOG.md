@@ -22,6 +22,9 @@ breaking changes.
 
 ### Fixed
 
+- Parse complete Android 16 lock-screen and foreground-activity state during
+  strict readiness checks, and show actionable per-assertion failure details in
+  human session output.
 - Apply `logs --tail` after logcat filtering, and overlap snapshot-to-follow
   handoff so a live filtered tail neither loses nor repeats setup-time records.
 - Reject contradictory log-tag include and exclude filters before accessing

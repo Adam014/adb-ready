@@ -1,6 +1,6 @@
 import { connect } from "node:net";
 import type { AdbClient, AdbTargetSelector } from "../adb/client.js";
-import { parseForegroundActivity } from "../app/android-app.js";
+import { parseAndroidLockState, parseForegroundActivity } from "../app/android-app.js";
 import type { Problem } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import { parseUiHierarchy, type UiNode } from "../evidence/ui-hierarchy.js";
@@ -231,31 +231,27 @@ export function createAdbReadinessProbe(options: AdbReadinessProbeOptions): Read
         );
       }
       if (assertion.kind === "unlocked") {
-        const observation = await options.client.shell(
+        const observation = await options.client.targetCommand(
           options.target,
-          ["dumpsys", "window", "policy"],
+          "readiness-lock-state",
+          "Reading Android lock-screen state",
+          ["shell", "dumpsys", "window", "policy"],
+          parseAndroidLockState,
           signal,
+          { maxBufferBytes: 4 * 1024 * 1024 },
         );
         if (!succeeded(observation.process) || observation.value === undefined) {
-          return result("failed", "Lock-screen state could not be read.");
+          return succeeded(observation.process)
+            ? result(
+                "unsupported",
+                "This Android build does not expose a recognized lock-screen state.",
+              )
+            : result("failed", "Lock-screen state could not be read.");
         }
-        const output = observation.value;
-        const locked = /(?:isStatusBarKeyguard|mShowingLockscreen|showing)\s*[=:]\s*true/iu.test(
-          output,
+        return result(
+          observation.value === "locked" ? "failed" : "passed",
+          observation.value === "locked" ? "The target is locked." : "The target is unlocked.",
         );
-        const known =
-          /(?:isStatusBarKeyguard|mShowingLockscreen|showing)\s*[=:]\s*(?:true|false)/iu.test(
-            output,
-          );
-        return !known
-          ? result(
-              "unsupported",
-              "This Android build does not expose a recognized lock-screen state.",
-            )
-          : result(
-              locked ? "failed" : "passed",
-              locked ? "The target is locked." : "The target is unlocked.",
-            );
       }
       if (assertion.kind === "process") {
         const observation = await options.client.shell(
@@ -272,14 +268,18 @@ export function createAdbReadinessProbe(options: AdbReadinessProbeOptions): Read
         );
       }
       if (assertion.kind === "foreground" || assertion.kind === "activity") {
-        const observation = await options.client.shell(
+        const observation = await options.client.targetCommand(
           options.target,
-          ["dumpsys", "activity", "activities"],
+          "readiness-foreground",
+          "Reading the foreground Android activity",
+          ["shell", "dumpsys", "activity", "activities"],
+          parseForegroundActivity,
           signal,
+          { maxBufferBytes: 4 * 1024 * 1024 },
         );
         const foreground =
           succeeded(observation.process) && observation.value !== undefined
-            ? parseForegroundActivity(observation.value)
+            ? observation.value
             : undefined;
         if (foreground === undefined)
           return result("failed", "The foreground activity could not be resolved.");

@@ -335,7 +335,20 @@ describe("result renderer", () => {
         verified: true,
       },
       child: { exitCode: 0, signal: null },
-      readiness: { ready: true, assertions: [{ status: "passed" }] },
+      readiness: {
+        ready: true,
+        attempts: 1,
+        durationMs: 1,
+        timedOut: false,
+        assertions: [
+          {
+            assertion: { kind: "boot" },
+            status: "passed",
+            detail: "Android boot completed.",
+            durationMs: 1,
+          },
+        ],
+      },
       verification: { passed: true, timedOut: false, exitCode: 0 },
       journal: { events: [], dropped: 0 },
       recovery: { failed: false, recoveries: 0 },
@@ -727,6 +740,41 @@ describe("result renderer", () => {
       { format: "human", capabilities, sink: noChecks },
     );
     expect(noChecks.value).toContain("Checks   none configured");
+
+    const failedChecks = new MemorySink();
+    renderResult(
+      {
+        ...result,
+        command: "dev",
+        data: {
+          ...session,
+          readiness: {
+            ready: false,
+            attempts: 1,
+            durationMs: 1,
+            timedOut: false,
+            assertions: [
+              {
+                assertion: { kind: "foreground", package: "com.example.app" },
+                status: "failed",
+                detail: "Foreground activity is com.android.settings/.Settings.",
+                durationMs: 1,
+              },
+              {
+                assertion: { kind: "unlocked" },
+                status: "unsupported",
+                detail: "This Android build does not expose a recognized lock-screen state.",
+                durationMs: 1,
+              },
+            ],
+          },
+        },
+      },
+      { format: "human", capabilities, sink: failedChecks },
+    );
+    expect(failedChecks.value).toContain("foreground com.example.app · failed");
+    expect(failedChecks.value).toContain("Foreground activity is com.android.settings/.Settings.");
+    expect(failedChecks.value).toContain("unlocked · unsupported");
 
     const markdown = new MemorySink();
     renderResult(

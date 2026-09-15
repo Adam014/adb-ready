@@ -161,6 +161,12 @@ launch succeeds while the owned development command is not already failing. If
 that command fails first, its actionable redacted error is promoted into the
 final problem instead of briefly presenting the session as ready.
 
+Foreground, activity, and unlocked checks parse the complete target-scoped
+Android state returned by `dumpsys`, including current Android 16 fields. When a
+contract does not pass, human output identifies every failed or unsupported
+assertion with its observed detail; JSON and NDJSON retain every assertion
+result for CI and agents.
+
 Recovery waits for a bounded stabilization period, attempts to reacquire the
 same target, restores only missing session mappings, restarts the targeted log
 stream when necessary, and verifies the complete state independently.
