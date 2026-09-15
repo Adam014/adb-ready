@@ -985,7 +985,7 @@ describe("runCli", () => {
       if (args.includes("dumpsys") && args.includes("package")) {
         return result(
           request,
-          "Package [com.example.app]\n codePath=/data/app/example\n versionCode=1 targetSdk=36\n versionName=1.0.0\n pkgFlags=[ DEBUGGABLE ]\n",
+          "Package [com.example.app]\n codePath=/data/app/example\n versionCode=1 targetSdk=36\n versionName=null\n pkgFlags=[ DEBUGGABLE ]\n",
         );
       }
       if (args.includes("activity") && args.includes("activities")) {
@@ -1003,14 +1003,16 @@ describe("runCli", () => {
     );
 
     expect(exitCode).toBe(ExitCode.Success);
-    expect(JSON.parse(streams.output.value)).toMatchObject({
+    const payload = JSON.parse(streams.output.value);
+    expect(payload).toMatchObject({
       command: "app info",
       ok: true,
       data: {
         selected: { transport: { serial: "USB-1" } },
-        package: { applicationId: "com.example.app", installed: true, versionName: "1.0.0" },
+        package: { applicationId: "com.example.app", installed: true },
       },
     });
+    expect(payload.data.package).not.toHaveProperty("versionName");
     expect(streams.error.value).toBe("");
   });
 

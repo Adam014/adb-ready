@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Omit a missing Android package `versionName` from structured app information
+  instead of serializing Android's `null` sentinel as a real version string.
 - Stop reporting an available host package manager as detected project
   metadata in Flutter, Gradle, and other non-JavaScript projects, and omit the
   irrelevant setting from generated native-project configuration.
