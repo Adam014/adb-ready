@@ -528,6 +528,7 @@ export class SessionRecorder {
   #record(event: AdbReadyEvent): void {
     if (this.#closed) return;
     for (const value of privateValues(event)) this.#privateLiterals.add(value);
+    if (event.data?.retention === "transient") return;
     const safe = redactEvent(event, this.#privateLiterals, this.#options.redaction ?? {});
     const line = `${JSON.stringify(safe)}\n`;
     const bytes = Buffer.byteLength(line);

@@ -37,14 +37,16 @@ describe("watchSession", () => {
             missingPorts: [{ device: "tcp:8081", host: "tcp:8081" }],
           };
         }
-        controller.abort();
         return HEALTHY;
       },
       recover: async (_health, attempt) => ({
         changedTarget: attempt === 1,
         detail: "target reconnected and mapping restored",
       }),
-      onEvent: ({ type }) => events.push(type),
+      onEvent: ({ type }) => {
+        events.push(type);
+        if (type === "recovery.completed") controller.abort();
+      },
     });
 
     expect(summary).toMatchObject({
@@ -100,6 +102,41 @@ describe("watchSession", () => {
 
     expect(observations).toBe(0);
     expect(summary.failed).toBeFalse();
+  });
+
+  test("discards an in-flight observation when teardown cancels it", async () => {
+    const controller = new AbortController();
+    const events: string[] = [];
+    let recoveries = 0;
+    const summary = await watchSession({
+      signal: controller.signal,
+      intervalMs: 1,
+      sleep: async () => true,
+      observe: async () => {
+        controller.abort();
+        return {
+          ...HEALTHY,
+          targetReady: false,
+          missingPorts: [{ device: "tcp:8081", host: "tcp:8081" }],
+        };
+      },
+      recover: async () => {
+        recoveries += 1;
+        return { changedTarget: false };
+      },
+      onEvent: ({ type }) => events.push(type),
+    });
+
+    expect(summary).toEqual({
+      checks: 0,
+      degradations: 0,
+      recoveryAttempts: 0,
+      recoveries: 0,
+      targetChanges: 0,
+      failed: false,
+    });
+    expect(recoveries).toBe(0);
+    expect(events).toEqual([]);
   });
 
   test("converts unexpected observer failures into a bounded watch failure", async () => {

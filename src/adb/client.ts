@@ -367,19 +367,30 @@ export class AdbClient {
       (result.exitCode === 0 ||
         (result.exitCode !== null && options.acceptExitCodes?.includes(result.exitCode) === true) ||
         (options.acceptIdleStop === true && result.stoppedAfterIdle));
+    const backgroundCancellation = background && result.aborted && signal?.aborted === true;
 
     this.#options.bus.emit({
       type: succeeded ? "operation.completed" : "operation.failed",
       source: `adb.${operation}`,
-      severity: succeeded ? (background ? "debug" : "info") : "error",
-      message: succeeded ? `${message} completed` : `${message} failed`,
+      severity: succeeded
+        ? background
+          ? "debug"
+          : "info"
+        : backgroundCancellation
+          ? "debug"
+          : "error",
+      message: succeeded
+        ? `${message} completed`
+        : backgroundCancellation
+          ? `${message} cancelled`
+          : `${message} failed`,
       correlation,
       data: {
         ...processMetadata(result),
         ...(background
           ? {
               presentation: "background",
-              ...(succeeded
+              ...(succeeded || backgroundCancellation
                 ? { retention: "transient" }
                 : {
                     executable: redactText(this.#options.executable).value,

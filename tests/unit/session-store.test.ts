@@ -66,6 +66,14 @@ describe("SessionRecorder", () => {
         message: "token=very-secret-value private-marker",
         correlation: { commandId: "command-1", sessionId: "session-1" },
       });
+      bus.emit({
+        type: "health.checked",
+        source: "recovery",
+        severity: "debug",
+        message: "Routine health check",
+        correlation: { commandId: "command-1", sessionId: "session-1" },
+        data: { presentation: "background", retention: "transient" },
+      });
       const finished = await recorder.finish({
         status: "completed",
         finishedAt: "2026-09-10T10:02:00.000Z",

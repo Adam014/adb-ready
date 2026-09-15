@@ -1302,6 +1302,96 @@ describe("runDev", () => {
     );
   });
 
+  test("does not diagnose intentional run teardown as a recovery degradation", async () => {
+    let mapped = false;
+    let healthProbeStarted: (() => void) | undefined;
+    const healthProbe = new Promise<void>((resolve) => {
+      healthProbeStarted = resolve;
+    });
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--no-rebind")) mapped = true;
+      if (args.includes("--remove")) mapped = false;
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8181 tcp:8181\n" : "" });
+      }
+      if (args.includes("get-state")) {
+        healthProbeStarted?.();
+        return await new Promise<ProcessResult>((resolve) => {
+          const aborted = () =>
+            resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true }));
+          if (request.signal?.aborted === true) aborted();
+          else request.signal?.addEventListener("abort", aborted, { once: true });
+        });
+      }
+      if (request.executable === "dev-service") {
+        return await new Promise<ProcessResult>((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+            { once: true },
+          );
+        });
+      }
+      if (request.executable === "smoke-test") {
+        await healthProbe;
+        return result(request, {
+          exitCode: null,
+          signal: "SIGTERM",
+          timedOut: true,
+        });
+      }
+      return result(request);
+    });
+    deps.sleep = async () => true;
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: [] },
+        verification: { command: { executable: "smoke-test", args: [] }, timeoutMs: 1_000 },
+        reversePorts: [{ device: 8181 }],
+        logs: false,
+        watchIntervalMs: 1,
+        recovery: { initialDelayMs: 1, maxDelayMs: 1 },
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.result.data).toMatchObject({
+      status: "failed",
+      ports: { cleaned: true },
+      verification: { passed: false, timedOut: true },
+      recovery: {
+        checks: 0,
+        degradations: 0,
+        recoveryAttempts: 0,
+        recoveries: 0,
+        failed: false,
+      },
+    });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.VerificationFailed }),
+    );
+    expect(execution.result.problems).not.toContainEqual(
+      expect.objectContaining({ code: ProblemCode.SessionRecoveryFailed }),
+    );
+    expect(execution.result.data?.journal.events.map(({ type }) => type)).not.toContain(
+      "session.degraded",
+    );
+    expect(execution.result.data?.journal.events).not.toContainEqual(
+      expect.objectContaining({
+        type: "operation.failed",
+        data: expect.objectContaining({ presentation: "background", aborted: true }),
+      }),
+    );
+  });
+
   test("persists a finalized private session when storage is enabled", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-dev-session-"));
     try {
