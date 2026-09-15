@@ -58,6 +58,16 @@ async function awaitStatus(
   throw new Error(`Managed task did not become ${expected}`);
 }
 
+async function awaitFileTimestampChange(file: string, previous: string): Promise<string> {
+  const timeoutAt = Date.now() + 2_000;
+  while (Date.now() < timeoutAt) {
+    const current = JSON.parse(await readFile(file, "utf8"));
+    if (current.updatedAt !== previous) return current.updatedAt;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Agent task heartbeat did not update its persisted timestamp within 2 seconds");
+}
+
 async function recordFile(project: string, state: string, handle: string): Promise<string> {
   const canonical = await realpath(project);
   const identity = process.platform === "win32" ? canonical.toLowerCase() : canonical;
@@ -343,12 +353,7 @@ describe("agent development tasks", () => {
       const activatedAt = JSON.parse(await readFile(file, "utf8")).updatedAt;
       await new Promise((resolve) => setTimeout(resolve, 2));
       heartbeat?.();
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const current = JSON.parse(await readFile(file, "utf8"));
-        if (current.updatedAt !== activatedAt) break;
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      }
-      expect(JSON.parse(await readFile(file, "utf8")).updatedAt).not.toBe(activatedAt);
+      expect(await awaitFileTimestampChange(file, activatedAt)).not.toBe(activatedAt);
       await activation?.finish(0);
     } finally {
       globalThis.setInterval = originalSetInterval;
