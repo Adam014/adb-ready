@@ -238,7 +238,7 @@ export async function detectProject(options: DetectProjectOptions): Promise<Proj
       }
     } else if (foundLockfiles.size > 1) {
       packageManager = { conflicts: [...foundLockfiles].sort() };
-    } else {
+    } else if (packageDocument !== undefined) {
       for (const name of FALLBACK_ORDER) {
         const executable = await locate(name);
         if (executable !== undefined) {

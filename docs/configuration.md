@@ -81,6 +81,12 @@ existing file unless `--force` is explicit. Use `--dry-run` first.
 Unknown keys and invalid nested values fail validation rather than being
 silently ignored.
 
+`init` detects and writes `packageManager` only for Expo, React Native, and
+Capacitor presets, where it selects the project CLI. Flutter and native Gradle
+use their own launchers, so an unrelated package-manager executable available
+on the host is not recorded as project configuration. An explicit
+`--package-manager` override is still preserved.
+
 ## Profiles
 
 Profiles can inherit from one named parent. Cycles and missing references are

@@ -178,6 +178,49 @@ describe("project configuration commands", () => {
     });
   });
 
+  test("omits incidental package managers from native project initialization", async () => {
+    for (const preset of ["flutter", "gradle"] as const) {
+      const execution = await runInit(
+        { cwd: `/workspace/${preset}`, dryRun: true },
+        {
+          detectProject: async () => ({
+            root: `/workspace/${preset}`,
+            preset,
+            presetEvidence: [preset],
+            packageManager: {
+              name: "npm",
+              executable: "/bin/npm",
+              source: "executable",
+              conflicts: [],
+            },
+          }),
+        },
+      );
+
+      expect(execution.result.data).toMatchObject({ detectedPreset: preset });
+      expect(execution.result.data).not.toHaveProperty("detectedPackageManager");
+      expect(execution.result.data?.document).not.toMatchObject({
+        dev: { packageManager: expect.anything() },
+      });
+    }
+
+    const explicit = await runInit(
+      { cwd: "/workspace/flutter", preset: "flutter", packageManager: "bun", dryRun: true },
+      {
+        detectProject: async () => ({
+          root: "/workspace/flutter",
+          preset: "flutter",
+          presetEvidence: ["Flutter pubspec.yaml"],
+          packageManager: { conflicts: [] },
+        }),
+      },
+    );
+    expect(explicit.result.data?.document).toMatchObject({
+      dev: { preset: "flutter", packageManager: "bun" },
+    });
+    expect(explicit.result.data).not.toHaveProperty("detectedPackageManager");
+  });
+
   test("persists an explicit opt-out without inspecting Expo environment files", async () => {
     let discoveryCalls = 0;
     const execution = await runInit(

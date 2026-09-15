@@ -104,6 +104,10 @@ function safeLocation(location: string | undefined): string | undefined {
   return redactText(path.basename(location)).value;
 }
 
+function presetUsesPackageManager(preset: DevPreset | undefined): boolean {
+  return preset === "capacitor" || preset === "expo" || preset === "react-native";
+}
+
 export function projectConfigDocument(options: {
   preset?: DevPreset;
   packageManager?: PackageManagerName;
@@ -144,7 +148,10 @@ export async function runInit(
       : { explicitPackageManager: options.packageManager }),
   });
   const preset = options.preset ?? project.preset;
-  const packageManager = options.packageManager ?? project.packageManager.name;
+  const detectedPackageManager = presetUsesPackageManager(preset)
+    ? project.packageManager.name
+    : undefined;
+  const packageManager = options.packageManager ?? detectedPackageManager;
   let discoveredLocalServices: DiscoveredLocalService[] = [];
   if (preset === "expo" && options.autoReverseLocalhost !== false) {
     try {
@@ -212,9 +219,7 @@ export async function runInit(
         status: "planned",
         path: displayPath,
         ...(project.preset === undefined ? {} : { detectedPreset: project.preset }),
-        ...(project.packageManager.name === undefined
-          ? {}
-          : { detectedPackageManager: project.packageManager.name }),
+        ...(detectedPackageManager === undefined ? {} : { detectedPackageManager }),
         discoveredLocalServices,
         document,
       },
@@ -263,9 +268,7 @@ export async function runInit(
       status: exists ? "replaced" : "created",
       path: displayPath,
       ...(project.preset === undefined ? {} : { detectedPreset: project.preset }),
-      ...(project.packageManager.name === undefined
-        ? {}
-        : { detectedPackageManager: project.packageManager.name }),
+      ...(detectedPackageManager === undefined ? {} : { detectedPackageManager }),
       discoveredLocalServices,
       document,
     },
