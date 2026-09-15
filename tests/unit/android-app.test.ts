@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  parseAndroidLockState,
   parseForegroundActivity,
   parsePackageInfo,
   parsePackageList,
@@ -28,6 +29,20 @@ describe("Android app parsers", () => {
         "mResumedActivity: ActivityRecord{42 u0 com.example.app/.MainActivity t12}",
       ),
     ).toEqual({ applicationId: "com.example.app", activity: ".MainActivity" });
+    expect(parseForegroundActivity("topResumedActivity=com.example.app/.MainActivity\n")).toEqual({
+      applicationId: "com.example.app",
+      activity: ".MainActivity",
+    });
+  });
+
+  test("parses current and legacy Android lock-screen state fields", () => {
+    expect(
+      parseAndroidLockState(
+        "WINDOW MANAGER POLICY STATE\n  KeyguardServiceDelegate\n    showing=false\n  KeyguardStateMonitor\n    mIsShowing=false\n",
+      ),
+    ).toBe("unlocked");
+    expect(parseAndroidLockState("mShowingLockscreen=true\n")).toBe("locked");
+    expect(parseAndroidLockState("OEM state unavailable\n")).toBeUndefined();
   });
 
   test("parses stable package metadata and debuggable state", () => {

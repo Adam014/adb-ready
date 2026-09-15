@@ -1,0 +1,10 @@
+WINDOW MANAGER POLICY STATE (dumpsys window policy)
+  KeyguardServiceDelegate
+    showing=false
+    showingAndNotOccluded=false
+    inputRestricted=false
+  KeyguardStateMonitor
+    mIsShowing=false
+    mSimSecure=false
+  isKeyguardShowing=false
+  mKeyguardShowing=false

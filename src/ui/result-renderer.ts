@@ -18,6 +18,7 @@ import type {
   SessionCommandData,
 } from "../app/session-commands.js";
 import type { AutomationRunData } from "../automation/evidence-bundle.js";
+import type { ReadinessAssertion } from "../automation/readiness.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
@@ -41,6 +42,20 @@ export interface ResultRenderOptions {
 
 function clean(value: unknown): string {
   return sanitizeTerminalText(String(value));
+}
+
+function readinessAssertionLabel(assertion: ReadinessAssertion): string {
+  if (assertion.kind === "activity") return `activity ${assertion.value}`;
+  if (assertion.kind === "foreground") return `foreground ${assertion.package}`;
+  if (assertion.kind === "host-port") {
+    return `host-port ${assertion.host ?? "127.0.0.1"}:${String(assertion.port)}`;
+  }
+  if (assertion.kind === "http") return `http ${assertion.url}`;
+  if (assertion.kind === "log")
+    return `${assertion.absent === true ? "log absent" : "log"} ${assertion.contains}`;
+  if (assertion.kind === "process") return `process ${assertion.package}`;
+  if (assertion.kind === "ui") return `ui ${assertion.selector}`;
+  return assertion.kind;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -379,6 +394,16 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
           ? `${style.dim(glyphs.pending, capabilities)} Checks   none configured`
           : `${data.readiness.ready ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Checks   ${data.readiness.ready ? "passed" : "not passed"} · ${String(data.readiness.assertions.filter(({ status }) => status === "passed").length)}/${String(data.readiness.assertions.length)}`,
       );
+      for (const assertion of data.readiness.assertions) {
+        if (assertion.status === "passed") continue;
+        const marker =
+          assertion.status === "failed"
+            ? style.failure(glyphs.failure, capabilities)
+            : style.warning(glyphs.warning, capabilities);
+        lines.push(
+          `  ${marker} ${clean(readinessAssertionLabel(assertion.assertion))} · ${clean(assertion.status)} · ${clean(assertion.detail)}`,
+        );
+      }
     }
     if (data.verification !== undefined) {
       lines.push(
