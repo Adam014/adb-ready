@@ -36,13 +36,17 @@ Available filters:
 | `--exclude-tag TAG` | Suppress a tag; repeat to exclude more |
 | `--level PRIORITY` | Minimum `V`, `D`, `I`, `W`, `E`, `F`, `A`, or silent `S` priority |
 | `--buffer NAME` | Read `main`, `system`, or `crash`; repeat for more |
-| `--tail COUNT` | Begin with the most recent record count |
+| `--tail COUNT` | Begin with the most recent matching record count |
 | `--since TIMESTAMP` | Pass an Android logcat timestamp boundary |
 | `--max-records COUNT` | Bound records retained in the final result |
 
 The same tag cannot be passed to both `--tag` and `--exclude-tag`. ADB Ready
 rejects that contradictory request before accessing ADB so an exclusion can
 never appear to succeed while logcat returns the tag.
+
+`--tail` is applied after package, process, tag, priority, and buffer filters.
+With a live stream, ADB Ready snapshots the matching history and overlaps the
+follow boundary so records written during setup are neither lost nor repeated.
 
 Unparsed lines are preserved. Output arriving on `stderr` is not automatically
 classified as an error; severity comes from source semantics. Fatal Android

@@ -206,14 +206,115 @@ describe("runLogs", () => {
       "main",
       "-b",
       "crash",
-      "-t",
-      "50",
+      "-d",
       "--pid=321",
       "ChattyTag:S",
       "DemoTag:D",
       "*:S",
     ]);
     expect(streamed.join("\n")).not.toContain("secret-value");
+  });
+
+  test("applies tail after logcat tag filtering", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = dependencies(requests);
+    const baseRunner = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("logcat")) {
+        requests.push(request);
+        const output = request.args.includes("-d")
+          ? "09-10 10:00:00.000  321  322 I Wanted: first\n" +
+            "09-10 10:00:01.000  321  322 I Wanted: second\n"
+          : "";
+        request.onStdoutChunk?.(new TextEncoder().encode(output));
+        return result(request, output);
+      }
+      if (baseRunner === undefined) throw new Error("missing fixture runner");
+      return await baseRunner(request);
+    };
+
+    const execution = await runLogs({ tags: ["Wanted"], tail: 1, dump: true }, {}, deps);
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.records).toEqual([
+      expect.objectContaining({ tag: "Wanted", message: "second" }),
+    ]);
+    const logcat = requests.find(({ args }) => args?.includes("logcat"));
+    expect(logcat?.args).toContain("-d");
+    const logcatIndex = logcat?.args?.indexOf("logcat") ?? -1;
+    const logcatOptions = logcat?.args?.slice(logcatIndex + 1);
+    expect(logcatOptions).not.toContain("-t");
+    expect(logcatOptions).not.toContain("1");
+  });
+
+  test("starts a live filtered tail without gaps or replay duplicates", async () => {
+    const requests: ProcessRequest[] = [];
+    const streamed: string[] = [];
+    const deps = dependencies(requests);
+    const baseRunner = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("date")) {
+        requests.push(request);
+        return result(request, "1789034401.000\n");
+      }
+      if (request.args?.includes("logcat")) {
+        requests.push(request);
+        const snapshot = request.args.includes("-d");
+        const output = snapshot
+          ? "09-10 10:00:00.000  321  322 I Wanted: old\n" +
+            "09-10 10:00:02.000  321  322 I Wanted: during-snapshot\n"
+          : "--------- beginning of main\n" +
+            "09-10 10:00:02.000  321  322 I Wanted: during-snapshot\n" +
+            "09-10 10:00:03.000  321  322 I Wanted: live\n";
+        request.onStdoutChunk?.(new TextEncoder().encode(output));
+        return result(request, output);
+      }
+      if (baseRunner === undefined) throw new Error("missing fixture runner");
+      return await baseRunner(request);
+    };
+
+    const execution = await runLogs(
+      { tags: ["Wanted"], tail: 2, onLine: (line) => streamed.push(line) },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.records.map(({ message }) => message)).toEqual([
+      "old",
+      "during-snapshot",
+      "live",
+    ]);
+    expect(streamed).toHaveLength(3);
+    const logcats = requests.filter(({ args }) => args?.includes("logcat"));
+    expect(logcats).toHaveLength(2);
+    expect(logcats[0]?.args).toContain("-d");
+    expect(logcats[1]?.args).toContain("-T");
+    expect(logcats[1]?.args).toContain("1789034401.000");
+  });
+
+  test("fails a live tail when a gap-free device-time boundary is unavailable", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = dependencies(requests);
+    const baseRunner = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("date")) {
+        requests.push(request);
+        return result(request, "unsupported date output\n");
+      }
+      if (baseRunner === undefined) throw new Error("missing fixture runner");
+      return await baseRunner(request);
+    };
+
+    const execution = await runLogs({ tags: ["Wanted"], tail: 2 }, {}, deps);
+
+    expect(execution.exitCode).toBe(ExitCode.AdbOperation);
+    expect(execution.result.data).toBeNull();
+    expect(execution.result.problems.at(-1)).toMatchObject({
+      code: ProblemCode.LogcatFailed,
+      category: "logcat.tail-boundary",
+    });
+    expect(requests.some(({ args }) => args?.includes("logcat"))).toBeFalse();
   });
 
   test("uses a restart-stable package UID when the device exposes it", async () => {
