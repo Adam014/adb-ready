@@ -323,7 +323,7 @@ Log options:
   --exclude-tag TAG      Suppress a log tag; repeat for more tags
   --level PRIORITY       V, D, I, W, E, F, A, or S (default: I)
   --buffer NAME          Read main, system, or crash; repeat for more
-  --tail COUNT           Start with the most recent record count
+  --tail COUNT           Start with the most recent matching record count
   --since TIMESTAMP      Start at an Android logcat timestamp
   --dump                 Read the current buffer and exit instead of following
   --max-records COUNT    Bound records retained in the final result

@@ -22,6 +22,8 @@ breaking changes.
 
 ### Fixed
 
+- Apply `logs --tail` after logcat filtering, and overlap snapshot-to-follow
+  handoff so a live filtered tail neither loses nor repeats setup-time records.
 - Reject contradictory log-tag include and exclude filters before accessing
   ADB instead of allowing logcat argument order to silently override exclusion.
 - Document every supported app-install and package-list action option in the

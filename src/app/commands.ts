@@ -1781,7 +1781,8 @@ export async function runLogs(
   const findings: LogsData["findings"] = [];
   const findingCodes = new Set<string>();
   let dropped = 0;
-  const lines = new TextLineBuffer((raw) => {
+  const recordLine = (raw: string) => {
+    if (raw === "" || /^-+ beginning of /u.test(raw)) return;
     const safeRaw = redactText(raw).value;
     const parsed = parseLogcatThreadtimeLine(safeRaw);
     const record: LogRecord = {
@@ -1837,35 +1838,108 @@ export async function runLogs(
       },
     });
     options.onLine?.(safeRaw);
-  });
+  };
   const runner = dependencies.runner ?? runProcess;
   const selectorArgs =
     target.transportId === undefined ? ["-s", target.serial] : ["-t", target.transportId];
-  const processResult = await runner({
-    executable,
-    args: [
-      ...(config.adbHost === undefined ? [] : ["-H", config.adbHost]),
-      ...(config.adbPort === undefined ? [] : ["-P", String(config.adbPort)]),
-      ...selectorArgs,
-      "logcat",
-      "-v",
-      "threadtime",
-      ...buffers.flatMap((buffer) => ["-b", buffer]),
-      ...(options.tail === undefined && options.since === undefined
+  const adbPrefix = [
+    ...(config.adbHost === undefined ? [] : ["-H", config.adbHost]),
+    ...(config.adbPort === undefined ? [] : ["-P", String(config.adbPort)]),
+    ...selectorArgs,
+  ];
+  const logcatArgs = (window: readonly string[]) => [
+    ...adbPrefix,
+    "logcat",
+    "-v",
+    "threadtime",
+    ...buffers.flatMap((buffer) => ["-b", buffer]),
+    ...window,
+    ...(resolvedUid === undefined ? [] : [`--uid=${String(resolvedUid)}`]),
+    ...(resolvedPid === undefined ? [] : [`--pid=${String(resolvedPid)}`]),
+    ...filters,
+  ];
+  const runLogcat = async (
+    window: readonly string[],
+    lineBuffer: TextLineBuffer,
+  ): Promise<ProcessResult> =>
+    await runner({
+      executable,
+      args: logcatArgs(window),
+      ...(signal === undefined ? {} : { signal }),
+      maxBufferBytes: 4 * 1024 * 1024,
+      onStdoutChunk: (chunk) => lineBuffer.push(chunk),
+      onStderrChunk: (chunk) => lineBuffer.push(chunk),
+    });
+
+  const setupProcesses: ProcessResult[] = [];
+  let processResult: ProcessResult;
+  if (options.tail === undefined) {
+    const lines = new TextLineBuffer(recordLine);
+    processResult = await runLogcat(
+      options.since === undefined
         ? options.dump
           ? ["-d"]
           : ["-T", "1"]
-        : [options.dump ? "-t" : "-T", String(options.tail ?? options.since)]),
-      ...(resolvedUid === undefined ? [] : [`--uid=${String(resolvedUid)}`]),
-      ...(resolvedPid === undefined ? [] : [`--pid=${String(resolvedPid)}`]),
-      ...filters,
-    ],
-    ...(signal === undefined ? {} : { signal }),
-    maxBufferBytes: 4 * 1024 * 1024,
-    onStdoutChunk: (chunk) => lines.push(chunk),
-    onStderrChunk: (chunk) => lines.push(chunk),
-  });
-  lines.flush();
+        : [options.dump ? "-t" : "-T", options.since],
+      lines,
+    );
+    lines.flush();
+  } else {
+    const tailCount = options.tail;
+    let followBoundary = "1";
+    if (!options.dump) {
+      const boundaryResult = await runner({
+        executable,
+        args: [...adbPrefix, "shell", "date", "+%s.000"],
+        ...(signal === undefined ? {} : { signal }),
+        maxBufferBytes: 1_024,
+      });
+      const value = boundaryResult.stdout.trim();
+      if (!processSucceeded(boundaryResult) || !/^\d{9,}\.\d{3}$/u.test(value)) {
+        problems.push(
+          commandProblem(
+            ProblemCode.LogcatFailed,
+            "logcat.tail-boundary",
+            "ADB Ready could not establish a gap-free log tail boundary.",
+            "Verify that the selected target supports the Android date command and retry.",
+            context.commandId,
+          ),
+        );
+        return finish<LogsData>(context, null, problems);
+      }
+      followBoundary = value;
+      setupProcesses.push(boundaryResult);
+    }
+
+    const recentLines: string[] = [];
+    const snapshotLines = new TextLineBuffer((raw) => {
+      if (raw === "" || /^-+ beginning of /u.test(raw)) return;
+      recentLines.push(raw);
+      while (recentLines.length > tailCount) recentLines.shift();
+    });
+    const snapshotResult = await runLogcat(["-d"], snapshotLines);
+    snapshotLines.flush();
+    for (const line of recentLines) recordLine(line);
+
+    if (options.dump || !processSucceeded(snapshotResult)) {
+      processResult = snapshotResult;
+    } else {
+      setupProcesses.push(snapshotResult);
+      const replayed = new Map<string, number>();
+      for (const line of recentLines) replayed.set(line, (replayed.get(line) ?? 0) + 1);
+      const liveLines = new TextLineBuffer((raw) => {
+        const remaining = replayed.get(raw) ?? 0;
+        if (remaining > 0) {
+          if (remaining === 1) replayed.delete(raw);
+          else replayed.set(raw, remaining - 1);
+          return;
+        }
+        recordLine(raw);
+      });
+      processResult = await runLogcat(["-T", followBoundary], liveLines);
+      liveLines.flush();
+    }
+  }
   if (processResult.aborted && signal?.aborted === true) {
     problems.push(
       commandProblem(
@@ -1903,9 +1977,15 @@ export async function runLogs(
       process: {
         exitCode: processResult.exitCode,
         signal: processResult.signal,
-        durationMs: processResult.durationMs,
-        stdoutTruncated: processResult.stdoutTruncated,
-        stderrTruncated: processResult.stderrTruncated,
+        durationMs:
+          setupProcesses.reduce((total, process) => total + process.durationMs, 0) +
+          processResult.durationMs,
+        stdoutTruncated:
+          setupProcesses.some(({ stdoutTruncated }) => stdoutTruncated) ||
+          processResult.stdoutTruncated,
+        stderrTruncated:
+          setupProcesses.some(({ stderrTruncated }) => stderrTruncated) ||
+          processResult.stderrTruncated,
       },
     },
     problems,
