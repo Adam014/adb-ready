@@ -11,6 +11,7 @@ const cli = path.join(root, "dist", "cli.js");
 const fakeAdbSource = path.join(root, "tests", "fixtures", "fake-adb.ts");
 const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const temporary = mkdtempSync(path.join(tmpdir(), "adb-ready-runtime-"));
+const removeOptions = { force: true, recursive: true, maxRetries: 10, retryDelay: 100 };
 const fakeAdb = path.join(temporary, process.platform === "win32" ? "fake-adb.exe" : "fake-adb");
 
 const compiledAdb = spawnSync("bun", ["build", fakeAdbSource, "--compile", "--outfile", fakeAdb], {
@@ -171,5 +172,5 @@ try {
     );
   }
 } finally {
-  rmSync(temporary, { force: true, recursive: true });
+  rmSync(temporary, removeOptions);
 }

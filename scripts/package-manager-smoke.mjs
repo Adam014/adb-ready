@@ -177,5 +177,10 @@ try {
     throw new Error("no package manager compatibility check could run");
   }
 } finally {
-  await rm(temporary, { recursive: true, force: true });
+  await rm(temporary, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
