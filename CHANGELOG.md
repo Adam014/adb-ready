@@ -22,6 +22,9 @@ breaking changes.
 
 ### Fixed
 
+- Report missing Flutter and Gradle launchers as framework prerequisites with
+  the attempted launcher and actionable setup guidance instead of an
+  unspecified development-command error.
 - Preserve unrelated diagnostic text when a short numeric ADB transport ID is
   observed; transport IDs remain operational evidence and short private
   literals match only complete identifier tokens.

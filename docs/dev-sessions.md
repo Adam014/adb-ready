@@ -15,6 +15,11 @@ local diagnostic record.
 | Gradle | wrapper or Gradle build file | wrapper `installDebug` | none |
 | Custom | explicit config or `--` | exact executable and argument array | none |
 
+Flutter requires the Flutter SDK's `flutter` executable on `PATH`. Native
+Gradle projects use their checked-in `gradlew` or `gradlew.bat` Wrapper; ADB
+Ready reports either missing prerequisite directly instead of suggesting an
+unrelated custom command.
+
 Select a preset when detection is intentionally unavailable or ambiguous:
 
 ```bash

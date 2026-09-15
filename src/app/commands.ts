@@ -2411,6 +2411,65 @@ interface ResolvedDevDefinition {
   localServices: DiscoveredLocalService[];
 }
 
+function missingFrameworkLauncherProblem(
+  preset: DevPreset,
+  commandId: string,
+): Problem | undefined {
+  if (preset === "flutter") {
+    return {
+      ...commandProblem(
+        ProblemCode.FrameworkLauncherNotFound,
+        "environment.framework",
+        "The Flutter executable was not found.",
+        "Install the Flutter SDK, add its bin directory to PATH, and confirm `flutter doctor` succeeds before retrying. Setup: https://docs.flutter.dev/install",
+        commandId,
+        [
+          { source: "project", field: "preset", value: preset },
+          { source: "host", field: "attemptedExecutable", value: "flutter" },
+        ],
+      ),
+      actions: [
+        {
+          id: "install_flutter_sdk",
+          title: "Install Flutter and add its bin directory to PATH",
+          kind: "documentation",
+          risk: "none",
+          automatic: false,
+        },
+      ],
+    };
+  }
+  if (preset === "gradle") {
+    return {
+      ...commandProblem(
+        ProblemCode.FrameworkLauncherNotFound,
+        "environment.framework",
+        "No runnable Gradle Wrapper was found.",
+        "Restore the project's gradlew, gradlew.bat, and Gradle Wrapper files. Existing Gradle projects should run through their checked-in Wrapper.",
+        commandId,
+        [
+          { source: "project", field: "preset", value: preset },
+          {
+            source: "project",
+            field: "attemptedLaunchers",
+            value: ["gradlew", "gradlew.bat", "gradle/wrapper/gradle-wrapper.jar"],
+          },
+        ],
+      ),
+      actions: [
+        {
+          id: "restore_gradle_wrapper",
+          title: "Restore the project's Gradle Wrapper files",
+          kind: "documentation",
+          risk: "none",
+          automatic: false,
+        },
+      ],
+    };
+  }
+  return undefined;
+}
+
 async function resolveDevDefinition(
   options: DevOptions,
   dependencies: CommandDependencies,
@@ -2476,14 +2535,19 @@ async function resolveDevDefinition(
     targetSerial,
   );
   if (childCommand === undefined || childCommand.executable.trim() === "") {
+    const frameworkProblem =
+      options.command === undefined
+        ? missingFrameworkLauncherProblem(preset, commandId)
+        : undefined;
     problems.push(
-      commandProblem(
-        ProblemCode.DevCommandNotFound,
-        "input.dev.command",
-        "No runnable development command was found.",
-        "Configure an executable and argument array or pass a custom command after --.",
-        commandId,
-      ),
+      frameworkProblem ??
+        commandProblem(
+          ProblemCode.DevCommandNotFound,
+          "input.dev.command",
+          "No runnable development command was found.",
+          "Configure an executable and argument array or pass a custom command after --.",
+          commandId,
+        ),
     );
     return { problems };
   }
