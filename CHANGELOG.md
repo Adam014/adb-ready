@@ -9,6 +9,13 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Model optional Android tooling as typed `supported`, `unavailable`,
+  `incompatible`, or `unverified` capabilities and build deterministic,
+  non-mutating plans for autonomous target, deployment, verifier, evidence,
+  and owned-resource cleanup workflows.
+
 ## [0.4.0] - 2026-09-15
 
 ### Added
