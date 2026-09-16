@@ -32,6 +32,15 @@ breaking changes.
 - Preserve bounded, redacted native verifier stdout and stderr in every run
   evidence bundle, including structured preparation failures after cleanup.
 
+## [0.4.1] - 2026-09-16
+
+### Fixed
+
+- Resolve Expo Go and development-client launch URLs through Expo's supported
+  `/_expo/link` redirect without probing an unhandled route that could consume
+  the request timeout, and report distinct timeout, connection, response, and
+  unsafe-redirect failures.
+
 ## [0.4.0] - 2026-09-15
 
 ### Added
