@@ -7,7 +7,7 @@ export type ExpoRuntime = "custom" | "expo";
 export interface ExpoLaunchTarget {
   url: string;
   runtime: ExpoRuntime;
-  source: "link" | "open";
+  source: "link";
   applicationId?: string;
 }
 
@@ -33,10 +33,6 @@ export interface ResolveExpoLaunchOptions {
 
 function aborted(signal?: AbortSignal): boolean {
   return signal?.aborted === true;
-}
-
-function validApplicationId(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(value);
 }
 
 function parseLaunchUrl(value: unknown): URL | undefined {
@@ -147,36 +143,7 @@ async function requestExpo(url: string, signal: AbortSignal): Promise<ExpoRespon
   };
 }
 
-function parseOpenResponse(
-  response: ExpoResponse,
-  requestedRuntime: ExpoRuntime,
-  devicePort: number,
-): ExpoLaunchTarget | undefined {
-  if (response.status !== 200) return undefined;
-  let document: unknown;
-  try {
-    document = JSON.parse(response.body);
-  } catch {
-    return undefined;
-  }
-  if (typeof document !== "object" || document === null || Array.isArray(document)) {
-    return undefined;
-  }
-  const record = document as Record<string, unknown>;
-  const runtime = record.runtime;
-  if (runtime !== requestedRuntime) return undefined;
-  const parsedUrl = parseLaunchUrl(record.url);
-  if (parsedUrl === undefined) return undefined;
-  const applicationId = record.appId;
-  return {
-    url: routeThroughReverse(parsedUrl, devicePort).toString(),
-    runtime: requestedRuntime,
-    source: "open",
-    ...(validApplicationId(applicationId) ? { applicationId } : {}),
-  };
-}
-
-function parseLegacyResponse(
+function parseLinkResponse(
   response: ExpoResponse,
   runtime: ExpoRuntime,
   devicePort: number,
@@ -218,33 +185,31 @@ export async function resolveExpoLaunch(
     timeoutMs,
   );
   try {
-    const openUrl = new URL("/_expo/open", endpoint);
-    openUrl.searchParams.set("platform", "android");
-    openUrl.searchParams.set("runtime", options.runtime);
+    const linkUrl = new URL("/_expo/link", endpoint);
+    linkUrl.searchParams.set("platform", "android");
+    if (options.runtime === "custom") linkUrl.searchParams.set("choice", "expo-dev-client");
     try {
-      const response = await request(openUrl.toString(), controller.signal);
-      const target = parseOpenResponse(response, options.runtime, options.devicePort);
+      const response = await request(linkUrl.toString(), controller.signal);
+      const target = parseLinkResponse(response, options.runtime, options.devicePort);
       if (target !== undefined) return { status: "resolved", target };
+      return {
+        status: "unavailable",
+        detail:
+          response.status !== 307
+            ? `Expo /_expo/link returned HTTP ${String(response.status)} instead of a redirect.`
+            : response.location === undefined
+              ? "Expo /_expo/link returned a redirect without a Location header."
+              : "Expo /_expo/link returned an invalid or unsafe Android launch URL.",
+      };
     } catch {
       if (aborted(options.signal)) return { status: "aborted" };
+      return {
+        status: "unavailable",
+        detail: controller.signal.aborted
+          ? `Expo /_expo/link did not respond within ${String(timeoutMs)}ms.`
+          : "Expo /_expo/link could not be reached.",
+      };
     }
-
-    const legacyUrl = new URL("/_expo/link", endpoint);
-    legacyUrl.searchParams.set("platform", "android");
-    if (options.runtime === "custom") legacyUrl.searchParams.set("choice", "expo-dev-client");
-    try {
-      const response = await request(legacyUrl.toString(), controller.signal);
-      const target = parseLegacyResponse(response, options.runtime, options.devicePort);
-      if (target !== undefined) return { status: "resolved", target };
-    } catch {
-      if (aborted(options.signal)) return { status: "aborted" };
-    }
-
-    return {
-      status: "unavailable",
-      detail:
-        "Metro did not provide a valid Android launch URL through /_expo/open or the compatible /_expo/link endpoint.",
-    };
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", abort);
