@@ -15,6 +15,9 @@ breaking changes.
   `incompatible`, or `unverified` capabilities and build deterministic,
   non-mutating plans for autonomous target, deployment, verifier, evidence,
   and owned-resource cleanup workflows.
+- Reuse or start one exact existing Android virtual device, prove ADB, boot,
+  package-manager, and unlock readiness, and stop only emulator processes that
+  the active workflow owns.
 
 ## [0.4.0] - 2026-09-15
 
