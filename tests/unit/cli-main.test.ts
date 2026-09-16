@@ -908,6 +908,650 @@ describe("runCli", () => {
     expect(remembered).toMatchObject({ serial: "USB-1", hardwareSerial: "PHONE-1" });
   });
 
+  test("runs one autonomous AVD, artifact deployment, verifier, evidence, and owned cleanup flow", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-autonomous-run-"));
+    const streams = io();
+    streams.cwd = root;
+    const fixture = dependencies(
+      "List of devices attached\nemulator-5554 device model:Pixel_9 transport_id:7\n",
+    );
+    fixture.loadConfig = async (options) => ({
+      ok: true,
+      config: {
+        values: {
+          timeoutMs: 5_000,
+          devPreset: "custom",
+          devCommand: { executable: "dev-service", args: ["start"] },
+          devReversePorts: [],
+          devLogs: false,
+          devWatch: false,
+          ...options?.cli,
+        },
+        provenance: { timeoutMs: { source: "default" } },
+        files: {},
+      },
+    });
+    fixture.detectAndroidCapabilities = async () => ({
+      sdk: { status: "supported", root: "/sdk", candidates: ["/sdk"], detail: "ready" },
+      tools: [
+        {
+          id: "emulator",
+          status: "supported",
+          detail: "ready",
+          invocation: { executable: "/sdk/emulator/emulator", argsPrefix: [] },
+        },
+        {
+          id: "bundletool",
+          status: "supported",
+          detail: "ready",
+          invocation: { executable: "bundletool", argsPrefix: [] },
+        },
+        { id: "java", status: "supported", detail: "ready" },
+        { id: "avdmanager", status: "unavailable", detail: "unused" },
+        { id: "android-cli", status: "unavailable", detail: "optional" },
+        { id: "gradle", status: "unavailable", detail: "unused" },
+        { id: "external-verifier", status: "supported", detail: "ready" },
+      ],
+    });
+    const stages: string[] = [];
+    fixture.prepareAvd = async () => ({
+      ok: true,
+      avd: {
+        name: "Pixel_9_API_36",
+        serial: "emulator-5554",
+        port: 5554,
+        ownership: "owned",
+        pid: 123,
+        readiness: {
+          adb: true,
+          boot: true,
+          packageManager: true,
+          unlocked: true,
+          attempts: 2,
+          durationMs: 500,
+        },
+        release: async () => {
+          stages.push("cleanup");
+          return { attempted: true, stopped: true, forced: false, detail: "stopped" };
+        },
+      },
+    });
+    fixture.inspectAndroidTargetProfile = async () => {
+      stages.push("profile");
+      return {
+        ok: true,
+        profile: {
+          serial: "emulator-5554",
+          abis: ["arm64-v8a"],
+          density: "480",
+          locales: ["en-US", "en"],
+        },
+      };
+    };
+    fixture.resolveAndroidArtifact = async () => {
+      stages.push("resolve");
+      return {
+        ok: true,
+        artifact: {
+          kind: "apk",
+          files: [path.join(root, "app-debug.apk")],
+          applicationId: "com.example.ready",
+          variant: "debug",
+          versionCode: 42,
+          versionName: "1.0.0",
+          filters: [{ filterType: "ABI", value: "arm64-v8a" }],
+          provenance: { kind: "agp-output-metadata", source: path.join(root, "metadata.json") },
+        },
+      };
+    };
+    fixture.deployAndroidArtifact = async () => {
+      stages.push("deploy");
+      return {
+        ok: true,
+        deployment: {
+          artifactKind: "apk",
+          applicationId: "com.example.ready",
+          serial: "emulator-5554",
+          installed: true,
+          launchable: true,
+          activity: ".MainActivity",
+          versionCode: 42,
+          versionName: "1.0.0",
+          temporaryApkSetCreated: false,
+          temporaryApkSetCleaned: false,
+        },
+      };
+    };
+    fixture.runner = async (request) => {
+      const args = request.args ?? [];
+      if (args.includes("devices"))
+        return result(
+          request,
+          "List of devices attached\nemulator-5554 device model:Pixel_9 transport_id:7\n",
+        );
+      if (args.includes("ro.serialno")) return result(request, "EMULATOR-1\n");
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("--list")) return result(request, "");
+      if (request.executable === "dev-service") {
+        stages.push("project");
+        return await new Promise<ProcessResult>((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                ...result(request, ""),
+                exitCode: null,
+                signal: "SIGTERM",
+                aborted: true,
+              }),
+            { once: true },
+          );
+        });
+      }
+      if (request.executable === "maestro") {
+        stages.push("verifier");
+        expect(request.env?.ANDROID_SERIAL).toBe("emulator-5554");
+        return result(request, "Flow passed\n");
+      }
+      return result(request, "");
+    };
+
+    try {
+      const exitCode = await runCli(
+        [
+          "run",
+          "--avd",
+          "Pixel_9_API_36",
+          "--deploy",
+          "--variant",
+          "debug",
+          "--package",
+          "com.example.ready",
+          "--json",
+          "--non-interactive",
+          "--",
+          "maestro",
+          "--device={target.serial}",
+          "test",
+          ".maestro/smoke.yaml",
+        ],
+        streams,
+        fixture,
+      );
+      const payload = JSON.parse(streams.output.value);
+
+      expect(exitCode).toBe(ExitCode.Success);
+      expect(stages).toEqual(["profile", "resolve", "deploy", "project", "verifier", "cleanup"]);
+      expect(payload).toMatchObject({
+        command: "run",
+        ok: true,
+        data: {
+          outcome: "success",
+          session: { selected: { transport: { serial: "[REDACTED]" } } },
+          automation: {
+            avd: { name: "Pixel_9_API_36", ownership: "owned", cleanup: { stopped: true } },
+            targetProfile: { abis: ["arm64-v8a"] },
+            artifact: { kind: "apk", variant: "debug" },
+            deployment: { applicationId: "com.example.ready", installed: true },
+          },
+        },
+      });
+      expect(
+        await readFile(path.join(root, payload.data.evidence.path, "result.json"), "utf8"),
+      ).toContain('"temporaryApkSetCleaned": false');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("retains an evidence bundle when autonomous capability preflight fails", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-autonomous-preflight-"));
+    const streams = io();
+    streams.cwd = root;
+    const fixture = dependencies();
+    fixture.locateAdb = async () => undefined;
+    try {
+      expect(
+        await runCli(
+          ["run", "--deploy", "--json", "--non-interactive", "--", "maestro", "test"],
+          streams,
+          fixture,
+        ),
+      ).toBe(ExitCode.Environment);
+      const payload = JSON.parse(streams.output.value);
+      expect(payload).toMatchObject({
+        ok: false,
+        problems: [{ code: "AUTONOMOUS_ADB_REQUIRED" }],
+        data: { outcome: "infrastructure-failure", session: null },
+      });
+      expect(
+        await readFile(path.join(root, payload.data.evidence.path, "manifest.json"), "utf8"),
+      ).toContain('"outcome": "infrastructure-failure"');
+
+      const dryRunStreams = io();
+      dryRunStreams.cwd = root;
+      expect(
+        await runCli(
+          ["run", "--deploy", "--dry-run", "--json", "--non-interactive", "--", "maestro", "test"],
+          dryRunStreams,
+          fixture,
+        ),
+      ).toBe(ExitCode.Environment);
+      expect(JSON.parse(dryRunStreams.output.value)).toMatchObject({
+        data: null,
+        problems: [{ code: "AUTONOMOUS_ADB_REQUIRED" }],
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("fails with evidence before AVD mutation when emulator capability is unavailable", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-autonomous-emulator-"));
+    const streams = io();
+    streams.cwd = root;
+    const fixture = dependencies();
+    fixture.detectAndroidCapabilities = async () => ({
+      sdk: { status: "supported", root: "/sdk", candidates: ["/sdk"], detail: "ready" },
+      tools: [
+        {
+          id: "emulator",
+          status: "unavailable",
+          detail: "Android Emulator is missing.",
+          next: "Install it from SDK Manager.",
+        },
+        { id: "bundletool", status: "unavailable", detail: "optional" },
+        { id: "java", status: "unavailable", detail: "optional" },
+        { id: "avdmanager", status: "unavailable", detail: "unused" },
+        { id: "android-cli", status: "unavailable", detail: "optional" },
+        { id: "gradle", status: "unavailable", detail: "unused" },
+        { id: "external-verifier", status: "supported", detail: "ready" },
+      ],
+    });
+    fixture.prepareAvd = async () => {
+      throw new Error("unsupported emulator must not be started");
+    };
+    try {
+      expect(
+        await runCli(
+          ["run", "--avd", "Pixel", "--json", "--non-interactive", "--", "test"],
+          streams,
+          fixture,
+        ),
+      ).toBe(ExitCode.Environment);
+      expect(JSON.parse(streams.output.value)).toMatchObject({
+        problems: [{ code: "AVD_EMULATOR_REQUIRED" }],
+        data: { evidence: { outcome: "infrastructure-failure" } },
+      });
+
+      const preparationStreams = io();
+      preparationStreams.cwd = root;
+      fixture.detectAndroidCapabilities = async () => ({
+        sdk: { status: "supported", root: "/sdk", candidates: ["/sdk"], detail: "ready" },
+        tools: [
+          {
+            id: "emulator",
+            status: "supported",
+            detail: "ready",
+            invocation: { executable: "/sdk/emulator/emulator", argsPrefix: [] },
+          },
+          { id: "bundletool", status: "unavailable", detail: "optional" },
+          { id: "java", status: "unavailable", detail: "optional" },
+          { id: "avdmanager", status: "unavailable", detail: "unused" },
+          { id: "android-cli", status: "unavailable", detail: "optional" },
+          { id: "gradle", status: "unavailable", detail: "unused" },
+          { id: "external-verifier", status: "supported", detail: "ready" },
+        ],
+      });
+      fixture.prepareAvd = async () => ({
+        ok: false,
+        failure: {
+          code: "AVD_NOT_FOUND",
+          summary: "The requested AVD does not exist.",
+          detail: "No matching configured AVD was found.",
+          next: "Choose an existing AVD.",
+        },
+      });
+      expect(
+        await runCli(
+          ["run", "--avd", "Pixel", "--json", "--non-interactive", "--", "test"],
+          preparationStreams,
+          fixture,
+        ),
+      ).toBe(ExitCode.Target);
+      expect(JSON.parse(preparationStreams.output.value)).toMatchObject({
+        problems: [{ code: "AVD_NOT_FOUND" }],
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("plans the complete autonomous workflow without starting, resolving, or deploying", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    fixture.loadConfig = async (options) => ({
+      ok: true,
+      config: {
+        values: {
+          timeoutMs: 5_000,
+          devPreset: "custom",
+          devCommand: { executable: "dev-service", args: ["start"] },
+          devReversePorts: [],
+          devLogs: false,
+          devWatch: false,
+          ...options?.cli,
+        },
+        provenance: { timeoutMs: { source: "default" } },
+        files: {},
+      },
+    });
+    fixture.detectAndroidCapabilities = async () => ({
+      sdk: { status: "supported", root: "/sdk", candidates: ["/sdk"], detail: "ready" },
+      tools: [
+        {
+          id: "emulator",
+          status: "supported",
+          detail: "ready",
+          invocation: { executable: "/sdk/emulator/emulator", argsPrefix: [] },
+        },
+        { id: "bundletool", status: "unavailable", detail: "optional" },
+        { id: "java", status: "unavailable", detail: "optional" },
+        { id: "avdmanager", status: "unavailable", detail: "unused" },
+        { id: "android-cli", status: "unavailable", detail: "optional" },
+        { id: "gradle", status: "unavailable", detail: "unused" },
+        { id: "external-verifier", status: "supported", detail: "ready" },
+      ],
+    });
+    fixture.prepareAvd = async () => {
+      throw new Error("dry-run must not start an emulator");
+    };
+    fixture.resolveAndroidArtifact = async () => {
+      throw new Error("dry-run must not inspect artifacts");
+    };
+    fixture.deployAndroidArtifact = async () => {
+      throw new Error("dry-run must not deploy an artifact");
+    };
+
+    expect(
+      await runCli(
+        [
+          "run",
+          "--avd",
+          "Pixel_9_API_36",
+          "--artifact",
+          "app-debug.apk",
+          "--dry-run",
+          "--json",
+          "--non-interactive",
+          "--",
+          "maestro",
+          "test",
+          ".maestro/smoke.yaml",
+        ],
+        streams,
+        fixture,
+      ),
+    ).toBe(ExitCode.Success);
+    expect(
+      JSON.parse(streams.output.value).data.plan.steps.map(({ id }: { id: string }) => id),
+    ).toEqual([
+      "resolve-avd",
+      "start-avd-if-needed",
+      "wait-for-avd-readiness",
+      "resolve-artifact",
+      "deploy-artifact",
+      "verify-deployment",
+      "start-project",
+      "wait-for-project-readiness",
+      "run-verifier",
+      "retain-evidence",
+      "cleanup-owned-resources",
+    ]);
+
+    const blockedStreams = io();
+    expect(
+      await runCli(
+        [
+          "run",
+          "--avd",
+          "Pixel_9_API_36",
+          "--artifact",
+          "app.aab",
+          "--dry-run",
+          "--json",
+          "--non-interactive",
+          "--",
+          "maestro",
+          "test",
+        ],
+        blockedStreams,
+        fixture,
+      ),
+    ).toBe(ExitCode.Environment);
+    expect(JSON.parse(blockedStreams.output.value)).toMatchObject({
+      ok: false,
+      problems: [{ code: "AUTONOMOUS_BUNDLETOOL_REQUIRED" }, { code: "AUTONOMOUS_JAVA_REQUIRED" }],
+    });
+  });
+
+  test("retains failure evidence and stops an owned AVD when deployment preparation fails", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-autonomous-failure-"));
+    const streams = io();
+    streams.cwd = root;
+    const fixture = dependencies(
+      "List of devices attached\nemulator-5554 device model:Pixel_9 transport_id:7\n",
+    );
+    fixture.loadConfig = async (options) => ({
+      ok: true,
+      config: {
+        values: {
+          timeoutMs: 5_000,
+          devPreset: "custom",
+          devCommand: { executable: "dev-service", args: ["start"] },
+          devReversePorts: [],
+          devLogs: false,
+          devWatch: false,
+          ...options?.cli,
+        },
+        provenance: { timeoutMs: { source: "default" } },
+        files: {},
+      },
+    });
+    fixture.detectAndroidCapabilities = async () => ({
+      sdk: { status: "supported", root: "/sdk", candidates: ["/sdk"], detail: "ready" },
+      tools: [
+        {
+          id: "emulator",
+          status: "supported",
+          detail: "ready",
+          invocation: { executable: "/sdk/emulator/emulator", argsPrefix: [] },
+        },
+        { id: "bundletool", status: "unavailable", detail: "optional" },
+        { id: "java", status: "unavailable", detail: "optional" },
+        { id: "avdmanager", status: "unavailable", detail: "unused" },
+        { id: "android-cli", status: "unavailable", detail: "optional" },
+        { id: "gradle", status: "unavailable", detail: "unused" },
+        { id: "external-verifier", status: "supported", detail: "ready" },
+      ],
+    });
+    let released = 0;
+    fixture.prepareAvd = async () => ({
+      ok: true,
+      avd: {
+        name: "Pixel_9_API_36",
+        serial: "emulator-5554",
+        port: 5554,
+        ownership: "owned",
+        pid: 123,
+        readiness: {
+          adb: true,
+          boot: true,
+          packageManager: true,
+          unlocked: true,
+          attempts: 1,
+          durationMs: 100,
+        },
+        release: async () => {
+          released += 1;
+          return { attempted: true, stopped: false, forced: true, detail: "still running" };
+        },
+      },
+    });
+    fixture.inspectAndroidTargetProfile = async () => ({
+      ok: false,
+      failure: {
+        code: "TARGET_PROFILE_UNAVAILABLE",
+        summary: "The target profile is unavailable.",
+        detail: "ADB rejected the profile probe.",
+        next: "Restore the selected target and retry.",
+      },
+    });
+
+    try {
+      expect(
+        await runCli(
+          [
+            "run",
+            "--avd",
+            "Pixel_9_API_36",
+            "--deploy",
+            "--json",
+            "--non-interactive",
+            "--",
+            "maestro",
+            "test",
+            ".maestro/smoke.yaml",
+          ],
+          streams,
+          fixture,
+        ),
+      ).toBe(ExitCode.AdbOperation);
+      const payload = JSON.parse(streams.output.value);
+      expect(released).toBe(1);
+      expect(payload).toMatchObject({
+        ok: false,
+        problems: [{ code: "TARGET_PROFILE_UNAVAILABLE" }, { code: "AVD_CLEANUP_FAILED" }],
+        data: {
+          outcome: "infrastructure-failure",
+          automation: { avd: { ownership: "owned", cleanup: { stopped: false } } },
+        },
+      });
+      expect(
+        await readFile(path.join(root, payload.data.evidence.path, "manifest.json"), "utf8"),
+      ).toContain("verifier-stderr.txt");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("classifies artifact resolution and every deployment failure boundary", async () => {
+    const cases = [
+      {
+        name: "resolution",
+        exitCode: ExitCode.InvalidInput,
+        code: "ARTIFACT_AMBIGUOUS",
+      },
+      {
+        name: "tool",
+        exitCode: ExitCode.Environment,
+        code: "DEPLOYMENT_TOOL_REQUIRED",
+        stage: "input",
+      },
+      {
+        name: "identity",
+        exitCode: ExitCode.InvalidInput,
+        code: "DEPLOYMENT_IDENTITY_CONFLICT",
+        stage: "identity",
+      },
+      {
+        name: "adb",
+        exitCode: ExitCode.AdbOperation,
+        code: "DEPLOYMENT_INSTALL_FAILED",
+        stage: "install",
+      },
+    ] as const;
+
+    for (const item of cases) {
+      const root = await mkdtemp(path.join(tmpdir(), `adb-ready-${item.name}-`));
+      const streams = io();
+      streams.cwd = root;
+      const fixture = dependencies(
+        "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+      );
+      fixture.detectAndroidCapabilities = async () => ({
+        sdk: { status: "supported", root: "/sdk", candidates: ["/sdk"], detail: "ready" },
+        tools: [
+          { id: "emulator", status: "unavailable", detail: "unused" },
+          { id: "bundletool", status: "unavailable", detail: "optional" },
+          { id: "java", status: "unavailable", detail: "optional" },
+          { id: "avdmanager", status: "unavailable", detail: "unused" },
+          { id: "android-cli", status: "unavailable", detail: "optional" },
+          { id: "gradle", status: "unavailable", detail: "unused" },
+          { id: "external-verifier", status: "supported", detail: "ready" },
+        ],
+      });
+      fixture.inspectAndroidTargetProfile = async () => ({
+        ok: true,
+        profile: { serial: "USB-1", abis: ["arm64-v8a"], locales: [] },
+      });
+      fixture.resolveAndroidArtifact = async () =>
+        item.name === "resolution"
+          ? {
+              ok: false,
+              failure: {
+                code: "ARTIFACT_AMBIGUOUS",
+                summary: "Multiple artifacts match.",
+                detail: "Two debug APKs were found.",
+                next: "Pass one exact artifact.",
+                candidates: ["one.apk", "two.apk"],
+              },
+            }
+          : {
+              ok: true,
+              artifact: {
+                kind: "apk",
+                files: [path.join(root, "app.apk")],
+                applicationId: "com.example.ready",
+                filters: [],
+                provenance: { kind: "explicit", source: path.join(root, "app.apk") },
+              },
+            };
+      fixture.deployAndroidArtifact = async () => ({
+        ok: false,
+        failure: {
+          code: item.code as
+            | "DEPLOYMENT_IDENTITY_CONFLICT"
+            | "DEPLOYMENT_INSTALL_FAILED"
+            | "DEPLOYMENT_TOOL_REQUIRED",
+          stage: "stage" in item ? item.stage : "input",
+          summary: "Deployment stopped.",
+          detail: "The requested deployment could not continue.",
+          next: "Correct the deployment input and retry.",
+        },
+      });
+
+      try {
+        const actualExitCode = await runCli(
+          ["run", "--device", "USB-1", "--deploy", "--json", "--non-interactive", "--", "test"],
+          streams,
+          fixture,
+        );
+        const payload = JSON.parse(streams.output.value);
+        expect(payload).toMatchObject({
+          problems: [{ code: item.code }],
+        });
+        expect({ name: item.name, exitCode: actualExitCode }).toEqual({
+          name: item.name,
+          exitCode: item.exitCode,
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
   test("dumps package-filtered logs as clean structured JSON", async () => {
     const streams = io();
     const fixture = dependencies(

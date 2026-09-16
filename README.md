@@ -167,9 +167,18 @@ its exit code, and clean only resources created by the run:
 npx adb-ready run -- npm run test:e2e
 ```
 
+Or make the target and deployment part of the same bounded job:
+
+```bash
+npx adb-ready run --avd Pixel_9_API_36 --deploy --variant debug -- \
+  maestro '--device={target.serial}' test .maestro/smoke.yaml
+```
+
 Each executed run retains a redacted evidence bundle with its result,
-timeline, problems, focused logcat, AI context, JUnit XML, and GitHub step
-summary. Scripts also get deterministic JSON and NDJSON contracts:
+timeline, problems, focused logcat, native verifier output, AI context, JUnit
+XML, and GitHub step summary. Existing matching emulators are reused; only an
+emulator started by that run is stopped. Scripts also get deterministic JSON
+and NDJSON contracts:
 
 ```bash
 adb-ready devices --json --non-interactive

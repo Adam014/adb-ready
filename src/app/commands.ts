@@ -2112,6 +2112,10 @@ export interface DevData {
     timedOut: boolean;
     stdoutTruncated: boolean;
     stderrTruncated: boolean;
+    /** Bounded, redacted native verifier output retained for evidence export. */
+    stdout?: string;
+    /** Bounded, redacted native verifier output retained for evidence export. */
+    stderr?: string;
   };
 }
 
@@ -4161,6 +4165,8 @@ export async function runDev(
           timedOut: verificationProcess.timedOut,
           stdoutTruncated: verificationProcess.stdoutTruncated,
           stderrTruncated: verificationProcess.stderrTruncated,
+          stdout: redactText(verificationProcess.stdout).value,
+          stderr: redactText(verificationProcess.stderr).value,
         };
   if (verification !== undefined) {
     bus.emit({

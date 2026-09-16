@@ -47,6 +47,8 @@ function execution(): CommandExecution<DevData> {
           timedOut: false,
           stdoutTruncated: false,
           stderrTruncated: false,
+          stdout: "native output on serial-secret\n",
+          stderr: "token=very-secret\n",
         },
         readiness: {
           ready: false,
@@ -139,6 +141,8 @@ describe("writeEvidenceBundle", () => {
         "logcat.txt",
         "problems.json",
         "result.json",
+        "verifier-stderr.txt",
+        "verifier-stdout.txt",
       ]);
       for (const file of manifest.files) {
         const content = await readFile(path.join(written.artifactPath, file.path));
@@ -150,6 +154,12 @@ describe("writeEvidenceBundle", () => {
       expect(serialized).not.toContain("hardware-secret");
       expect(serialized).not.toContain("very-secret");
       expect(serialized).toContain("[REDACTED]");
+      expect(await readFile(path.join(written.artifactPath, "verifier-stdout.txt"), "utf8")).toBe(
+        "native output on [REDACTED]\n",
+      );
+      expect(await readFile(path.join(written.artifactPath, "verifier-stderr.txt"), "utf8")).toBe(
+        "token=[REDACTED]\n",
+      );
       expect(await readFile(path.join(written.artifactPath, "junit.xml"), "utf8")).toContain(
         'failures="1"',
       );

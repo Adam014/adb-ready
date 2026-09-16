@@ -125,6 +125,7 @@ adb-ready init --dry-run --json
 adb-ready connect 192.168.1.42:37123 --dry-run --json
 adb-ready ports reverse add 8081 --dry-run --json
 adb-ready dev --port 8081 --dry-run --json
+adb-ready run --avd Pixel_9_API_36 --deploy --dry-run --json -- maestro test smoke.yaml
 ```
 
 Plan steps declare their risk. A dry run performs no pairing, connection,
@@ -162,6 +163,41 @@ Preview the complete project plan before a device is allocated:
 ```bash
 adb-ready run --preset expo --dry-run --json -- npm run test:e2e
 ```
+
+### Start an existing AVD and deploy the intended build
+
+For a complete local or CI-owned emulator job, name one existing AVD and either
+provide the intended artifact or let ADB Ready discover exactly one compatible
+build output:
+
+```bash
+adb-ready run \
+  --avd Pixel_9_API_36 \
+  --artifact android/app/build/outputs/apk/debug/app-debug.apk \
+  --package com.example.app \
+  --run-timeout 10m \
+  -- maestro '--device={target.serial}' test .maestro/smoke.yaml
+
+adb-ready run --avd Pixel_9_API_36 --deploy --variant debug -- \
+  ./gradlew connectedDebugAndroidTest
+```
+
+The AVD must already exist. ADB Ready uses the standard Android Emulator and
+ADB tools as its portable baseline; it does not create, delete, or upgrade an
+SDK or AVD. An already-running matching emulator is reused and never stopped.
+An emulator started by this run is readiness-checked and stopped on success,
+failure, cancellation, or timeout.
+
+Artifact selection prefers Android build metadata and refuses ambiguous,
+incomplete, incompatible, outside-project, or stale candidates. APK and split
+APK sets install directly. APK Set and Android App Bundle deployment requires
+an explicit or locally verified bundletool; ADB Ready never downloads one in
+the background. The installed package, version, ABI compatibility, and launch
+activity are independently verified before the project or verifier runs.
+
+The evidence manifest also includes the verifier's bounded, redacted native
+stdout and stderr. Preparation failures still publish the same result,
+problems, JUnit, and evidence contract after owned-resource cleanup.
 
 ## CI example
 

@@ -82,6 +82,12 @@ export interface CliOptions {
   customCommand?: { executable: string; args: string[] };
   runCommand?: { executable: string; args: string[] };
   runTimeoutMs?: number;
+  avdName?: string;
+  deployArtifact?: boolean;
+  runArtifactPaths?: string[];
+  runVariant?: string;
+  javaPath?: string;
+  bundletoolPath?: string;
   sessionAction?: "events" | "list" | "show";
   sessionId?: string;
   sessionStatus?: "completed" | "failed" | "interrupted" | "running";
@@ -215,6 +221,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--pairing-code-stdin",
   "--last",
   "--dry-run",
+  "--deploy",
   "--logs",
   "--no-logs",
   "--cleanup-ports",
@@ -278,6 +285,13 @@ function parseDuration(value: string): number | undefined {
   return Number.isSafeInteger(milliseconds) && milliseconds > 0 ? milliseconds : undefined;
 }
 
+function printableValue(value: string): boolean {
+  return [...value].every((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code > 31 && code !== 127;
+  });
+}
+
 function splitLongOption(argument: string): { option: string; inlineValue?: string } {
   const separator = argument.indexOf("=");
   if (separator === -1) {
@@ -323,6 +337,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let customCommand: CliOptions["customCommand"];
   let runCommand: CliOptions["runCommand"];
   let runTimeoutMs: number | undefined;
+  let avdName: string | undefined;
+  let deployArtifact = false;
+  const runArtifactPaths: string[] = [];
+  let runVariant: string | undefined;
+  let javaPath: string | undefined;
+  let bundletoolPath: string | undefined;
   let sessionAction: CliOptions["sessionAction"];
   let sessionId: string | undefined;
   let sessionStatus: CliOptions["sessionStatus"];
@@ -663,6 +683,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       remembered = true;
     } else if (option === "--dry-run") {
       dryRun = true;
+    } else if (option === "--deploy") {
+      deployArtifact = true;
     } else if (option === "--all-projects") {
       allProjects = true;
     } else if (option === "--preset") {
@@ -970,6 +992,50 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           option,
         );
       }
+    } else if (option === "--avd") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() !== value || value.length === 0 || !printableValue(value)) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--avd must be a non-empty printable AVD name.",
+          option,
+        );
+      }
+      avdName = value;
+    } else if (option === "--artifact") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() !== value || value.length === 0 || !printableValue(value)) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--artifact must be a non-empty printable path.",
+          option,
+        );
+      }
+      runArtifactPaths.push(value);
+      deployArtifact = true;
+    } else if (option === "--variant") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid Android variant: ${value}.`, option);
+      }
+      runVariant = value;
+    } else if (option === "--java") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() !== value || value.length === 0) {
+        return failure("CLI_INVALID_VALUE", "--java cannot be empty.", option);
+      }
+      javaPath = value;
+    } else if (option === "--bundletool") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() !== value || value.length === 0) {
+        return failure("CLI_INVALID_VALUE", "--bundletool cannot be empty.", option);
+      }
+      bundletoolPath = value;
     } else if (option === "--adb") {
       const value = readValue();
       if (typeof value !== "string") {
@@ -1052,6 +1118,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         "--max-records",
         "--budget",
         "--run-timeout",
+        "--avd",
+        "--artifact",
+        "--variant",
+        "--java",
+        "--bundletool",
       ]);
       const hint = suggestion(option, knownOptions);
       return failure(
@@ -1079,13 +1150,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     else if (
       command === "app" ||
       command === "open" ||
+      command === "run" ||
       (command === "inspect" && inspectKind === "app")
     )
       appId = packageOption;
     else
       return failure(
         "CLI_USAGE",
-        "--package can only be used with app, inspect app, logs, or open.",
+        "--package can only be used with app, inspect app, logs, open, or run deployment.",
       );
   }
   if (command === "apps") packageScope ??= "user";
@@ -1439,6 +1511,45 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (runTimeoutMs !== undefined && command !== "run") {
     return failure("CLI_USAGE", "--run-timeout can only be used with run.", "--run-timeout");
   }
+  const autonomousRunOptions =
+    avdName !== undefined ||
+    deployArtifact ||
+    runArtifactPaths.length > 0 ||
+    runVariant !== undefined ||
+    javaPath !== undefined ||
+    bundletoolPath !== undefined;
+  if (autonomousRunOptions && command !== "run") {
+    return failure(
+      "CLI_USAGE",
+      "--avd, --deploy, --artifact, --variant, --java, and --bundletool can only be used with run.",
+    );
+  }
+  if (
+    command === "run" &&
+    (runVariant !== undefined || javaPath !== undefined || bundletoolPath !== undefined) &&
+    !deployArtifact
+  ) {
+    return failure(
+      "CLI_USAGE",
+      "--variant, --java, and --bundletool require --deploy or --artifact.",
+    );
+  }
+  if (command === "run" && packageOption !== undefined && !deployArtifact) {
+    return failure("CLI_USAGE", "run --package requires --deploy or --artifact.");
+  }
+  if (
+    avdName !== undefined &&
+    (select || remembered || device !== undefined || transportId !== undefined)
+  ) {
+    return failure("CLI_USAGE", "--avd cannot be combined with another target selector.", "--avd");
+  }
+  if (avdName !== undefined && (adbHost !== undefined || adbPort !== undefined)) {
+    return failure(
+      "CLI_USAGE",
+      "--avd requires the local ADB server and cannot be combined with --adb-host or --adb-port.",
+      "--avd",
+    );
+  }
   if (
     command !== "logs" &&
     (logPackage !== undefined ||
@@ -1526,6 +1637,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(customCommand === undefined ? {} : { customCommand }),
       ...(runCommand === undefined ? {} : { runCommand }),
       ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
+      ...(avdName === undefined ? {} : { avdName }),
+      ...(deployArtifact ? { deployArtifact: true } : {}),
+      ...(runArtifactPaths.length === 0 ? {} : { runArtifactPaths }),
+      ...(runVariant === undefined ? {} : { runVariant }),
+      ...(javaPath === undefined ? {} : { javaPath }),
+      ...(bundletoolPath === undefined ? {} : { bundletoolPath }),
       ...(sessionAction === undefined ? {} : { sessionAction }),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(sessionStatus === undefined ? {} : { sessionStatus }),

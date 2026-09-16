@@ -235,6 +235,71 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses one explicit autonomous AVD, deployment, and verifier workflow", () => {
+    expect(
+      parseArguments([
+        "run",
+        "--avd",
+        "Pixel_9_API_36",
+        "--deploy",
+        "--artifact",
+        "android/app/build/outputs/apk/debug/base.apk",
+        "--artifact",
+        "android/app/build/outputs/apk/debug/config.arm64_v8a.apk",
+        "--variant",
+        "debug",
+        "--package",
+        "com.example.ready",
+        "--java",
+        "/usr/bin/java",
+        "--bundletool",
+        "/tools/bundletool-all.jar",
+        "--",
+        "maestro",
+        "--device={target.serial}",
+        "test",
+        ".maestro/smoke.yaml",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "run",
+        avdName: "Pixel_9_API_36",
+        deployArtifact: true,
+        runArtifactPaths: [
+          "android/app/build/outputs/apk/debug/base.apk",
+          "android/app/build/outputs/apk/debug/config.arm64_v8a.apk",
+        ],
+        runVariant: "debug",
+        appId: "com.example.ready",
+        javaPath: "/usr/bin/java",
+        bundletoolPath: "/tools/bundletool-all.jar",
+        runCommand: {
+          executable: "maestro",
+          args: ["--device={target.serial}", "test", ".maestro/smoke.yaml"],
+        },
+      },
+    });
+  });
+
+  test("rejects autonomous run options that cannot produce one deterministic target or deployment", () => {
+    const failures = [
+      ["dev", "--deploy"],
+      ["run", "--variant", "debug", "--", "test"],
+      ["run", "--package", "com.example.ready", "--", "test"],
+      ["run", "--avd", "Pixel", "--device", "emulator-5554", "--", "test"],
+      ["run", "--avd", "Pixel", "--adb-host", "127.0.0.1", "--", "test"],
+      ["run", "--avd", "bad\nname", "--", "test"],
+      ["run", "--artifact", "bad\npath.apk", "--", "test"],
+      ["run", "--deploy", "--variant", "bad variant", "--", "test"],
+      ["run", "--deploy", "--java=", "--", "test"],
+      ["run", "--deploy", "--bundletool= ", "--", "test"],
+    ];
+    for (const argv of failures) {
+      expect(parseArguments(argv)).toMatchObject({ ok: false });
+    }
+  });
+
   test("parses local session history and problem inspection", () => {
     expect(parseArguments(["sessions"])).toMatchObject({
       ok: true,

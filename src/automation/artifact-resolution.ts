@@ -330,6 +330,25 @@ function candidateLabel(root: string, artifact: AndroidArtifact): string {
   return [artifact.variant, artifact.applicationId, filters, files].filter(Boolean).join(" · ");
 }
 
+const DENSITY_DPI: Readonly<Record<string, string>> = {
+  ldpi: "120",
+  mdpi: "160",
+  tvdpi: "213",
+  hdpi: "240",
+  xhdpi: "320",
+  xxhdpi: "480",
+  xxxhdpi: "640",
+};
+
+function normalizedDensity(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  return DENSITY_DPI[normalized] ?? normalized.replace(/dpi$/u, "");
+}
+
+function normalizedLocale(value: string): string {
+  return value.trim().replaceAll("_", "-").toLowerCase();
+}
+
 function matchesSelection(
   artifact: AndroidArtifact,
   options: Pick<ResolveAndroidArtifactOptions, "applicationId" | "device" | "variant">,
@@ -342,9 +361,12 @@ function matchesSelection(
     if (kind === "ABI" && options.device?.abis !== undefined) {
       if (!options.device.abis.includes(filter.value)) return false;
     } else if (kind === "DENSITY" && options.device?.density !== undefined) {
-      if (options.device.density !== filter.value) return false;
+      if (normalizedDensity(options.device.density) !== normalizedDensity(filter.value))
+        return false;
     } else if (kind === "LANGUAGE" && options.device?.locales !== undefined) {
-      if (!options.device.locales.includes(filter.value)) return false;
+      const requested = normalizedLocale(filter.value);
+      if (!options.device.locales.some((locale) => normalizedLocale(locale) === requested))
+        return false;
     }
   }
   return true;

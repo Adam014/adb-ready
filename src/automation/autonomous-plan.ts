@@ -6,6 +6,7 @@ import { type AndroidCapabilities, type AndroidToolId, capability } from "./capa
 export interface AutonomousRunPlanInput {
   avd?: string;
   artifact?: string;
+  deploy?: boolean;
   capabilities: AndroidCapabilities;
   projectCommand: { executable: string; args: readonly string[] };
   verifier: { executable: string; args: readonly string[] };
@@ -75,8 +76,8 @@ export function buildAutonomousRunPlan(input: AutonomousRunPlanInput): Autonomou
     });
   }
 
-  if (input.artifact !== undefined) {
-    const kind = artifactKind(input.artifact);
+  if (input.deploy === true || input.artifact !== undefined) {
+    const kind = input.artifact === undefined ? undefined : artifactKind(input.artifact);
     if (kind === "unknown") {
       blockers.push({
         capability: "artifact",
@@ -93,7 +94,10 @@ export function buildAutonomousRunPlan(input: AutonomousRunPlanInput): Autonomou
     steps.push(
       {
         id: "resolve-artifact",
-        title: `Validate the explicit ${kind.toUpperCase()} artifact and its application identity`,
+        title:
+          kind === undefined
+            ? "Discover exactly one compatible Android build artifact"
+            : `Validate the explicit ${kind.toUpperCase()} artifact and its application identity`,
         risk: "read-only",
       },
       {

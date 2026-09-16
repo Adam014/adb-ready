@@ -37,7 +37,31 @@ import {
   runProblemsCommand,
   runSessionCommand,
 } from "../app/session-commands.js";
+import {
+  type ArtifactDeploymentFailure,
+  deployAndroidArtifact,
+} from "../automation/artifact-deployment.js";
+import {
+  type ArtifactResolutionFailure,
+  resolveAndroidArtifact,
+} from "../automation/artifact-resolution.js";
+import { buildAutonomousRunPlan } from "../automation/autonomous-plan.js";
+import {
+  type AvdLifecycleFailure,
+  type PreparedAvd,
+  prepareExistingAvd as prepareAvd,
+} from "../automation/avd-lifecycle.js";
+import {
+  type AndroidCapabilities,
+  capability,
+  detectAndroidCapabilities,
+} from "../automation/capabilities.js";
+import type { AutonomousRunEvidence } from "../automation/evidence-bundle.js";
 import { type AutomationRunData, writeEvidenceBundle } from "../automation/evidence-bundle.js";
+import {
+  inspectAndroidTargetProfile,
+  type TargetProfileFailure,
+} from "../automation/target-profile.js";
 import { loadConfig } from "../config/loader.js";
 import type { ConfigError, ConfigValues } from "../config/types.js";
 import { EventBus } from "../core/event-bus.js";
@@ -57,6 +81,7 @@ import {
   runInspectUi,
 } from "../evidence/inspect.js";
 import { runUiAction, type UiActionData } from "../evidence/ui-actions.js";
+import { locateAdb } from "../platform/executable.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
 import {
@@ -246,12 +271,20 @@ waits for every readiness assertion, runs one bounded verification command,
 then cleans owned resources. The verification exit code is preserved.
 
 Run options:
-  --run-timeout DURATION Bound the verification command (default: 15m)
-  --dry-run              Build an offline plan unless a target is explicit
-  -- EXECUTABLE ARG...   Verification command, passed directly without a shell
+  --avd NAME              Reuse or start this exact existing AVD
+  --deploy                Discover and deploy one compatible Android artifact
+  --artifact PATH         Deploy this project-local APK, APK Set, or AAB; repeat for splits
+  --variant NAME          Select one exact build variant during discovery
+  --package APP_ID        Require this installed application identity
+  --java PATH             Use this Java executable for bundletool
+  --bundletool PATH       Use this bundletool executable or JAR
+  --run-timeout DURATION  Bound the verification command (default: 15m)
+  --dry-run               Build the complete plan without mutation
+  -- EXECUTABLE ARG...    Verification command, passed directly without a shell
 
 The literal placeholder {target.serial} is resolved inside arguments after target selection.
 Verification processes also receive ANDROID_SERIAL and ADB_READY_TARGET_SERIAL.
+AVDs must already exist. ADB Ready never creates or upgrades an SDK or AVD implicitly.
 `,
   doctor: `Usage: adb-ready doctor [options]
 
@@ -406,6 +439,11 @@ export interface CliDependencies extends CommandDependencies {
   writeRememberedTarget?: typeof writeRememberedTarget;
   sessionStore?: false | SessionStoreOptions;
   targetLease?: false | TargetLeaseOptions;
+  detectAndroidCapabilities?: typeof detectAndroidCapabilities;
+  prepareAvd?: typeof prepareAvd;
+  resolveAndroidArtifact?: typeof resolveAndroidArtifact;
+  inspectAndroidTargetProfile?: typeof inspectAndroidTargetProfile;
+  deployAndroidArtifact?: typeof deployAndroidArtifact;
 }
 
 function requiresTargetLease(options: CliOptions): boolean {
@@ -536,6 +574,28 @@ function inputProblem(code: string, summary: string, detail: string, commandId =
     severity: "error",
     summary,
     detail,
+    retryable: true,
+    evidence: [],
+    actions: [],
+    correlation: { commandId },
+  };
+}
+
+function autonomousProblem(
+  failure:
+    | ArtifactDeploymentFailure
+    | ArtifactResolutionFailure
+    | AvdLifecycleFailure
+    | TargetProfileFailure,
+  category: string,
+  commandId = "run",
+): Problem {
+  return {
+    code: failure.code,
+    category,
+    severity: "error",
+    summary: failure.summary,
+    detail: `${failure.detail} ${failure.next}`,
     retryable: true,
     evidence: [],
     actions: [],
@@ -1064,6 +1124,152 @@ async function runCliInternal(
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
   };
+  let androidCapabilities: AndroidCapabilities | undefined;
+  let preparedAvd: PreparedAvd | undefined;
+  let autonomousEvidence: AutonomousRunEvidence | undefined;
+  let autonomousAdb: string | undefined;
+  const autonomousRun =
+    options.command === "run" && (options.avdName !== undefined || options.deployArtifact === true);
+  const finishAutonomousFailure = async (
+    problems: Problem[],
+    requestedExitCode: number,
+  ): Promise<number> => {
+    let exitCode = requestedExitCode;
+    if (preparedAvd !== undefined) {
+      const cleanup = await preparedAvd.release(signal);
+      if (autonomousEvidence?.avd !== undefined) autonomousEvidence.avd.cleanup = cleanup;
+      if (preparedAvd.ownership === "owned" && !cleanup.stopped) {
+        exitCode = ExitCode.AdbOperation;
+        problems.push(
+          inputProblem(
+            "AVD_CLEANUP_FAILED",
+            "The owned Android emulator did not stop cleanly.",
+            cleanup.detail,
+          ),
+        );
+      }
+      preparedAvd = undefined;
+    }
+    const failed: CommandExecution<DevData> = {
+      result: { ...failureResult("run", problems, dependencies), data: null },
+      exitCode,
+    };
+    if (options.dryRun) {
+      renderResult(failed.result, {
+        format: options.format,
+        capabilities: options.format === "human" ? errorCapabilities : outputCapabilities,
+        sink: options.format === "human" ? io.error : io.output,
+        verbose: options.verbose,
+      });
+      return exitCode;
+    }
+    const written = await writeEvidenceBundle(failed, {
+      cwd: io.cwd,
+      ...(autonomousEvidence === undefined ? {} : { automation: autonomousEvidence }),
+      ...(io.env.GITHUB_STEP_SUMMARY === undefined
+        ? {}
+        : { githubStepSummaryPath: io.env.GITHUB_STEP_SUMMARY }),
+    });
+    renderResult(written.execution.result, {
+      format: options.format,
+      capabilities: options.format === "human" ? errorCapabilities : outputCapabilities,
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return exitCode;
+  };
+  if (autonomousRun) {
+    autonomousAdb = await (dependencies.locateAdb ?? locateAdb)({
+      ...(values.adbPath === undefined ? {} : { explicitPath: values.adbPath }),
+      env: io.env,
+    });
+    if (autonomousAdb === undefined) {
+      return await finishAutonomousFailure(
+        [
+          inputProblem(
+            "AUTONOMOUS_ADB_REQUIRED",
+            "ADB is required for an autonomous run.",
+            "Install Android SDK Platform Tools or pass --adb PATH.",
+          ),
+        ],
+        ExitCode.Environment,
+      );
+    }
+    androidCapabilities = await (
+      dependencies.detectAndroidCapabilities ?? detectAndroidCapabilities
+    )({
+      cwd: io.cwd,
+      env: io.env,
+      ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+      ...(options.runCommand === undefined ? {} : { verifier: options.runCommand }),
+      explicit: {
+        ...(options.javaPath === undefined ? {} : { java: options.javaPath }),
+        ...(options.bundletoolPath === undefined ? {} : { bundletool: options.bundletoolPath }),
+      },
+    });
+  }
+  if (options.avdName !== undefined && !options.dryRun) {
+    const emulator = capability(androidCapabilities as AndroidCapabilities, "emulator");
+    if (emulator.status !== "supported" || emulator.invocation === undefined) {
+      return await finishAutonomousFailure(
+        [
+          inputProblem(
+            "AVD_EMULATOR_REQUIRED",
+            emulator.detail,
+            emulator.next ?? "Install the Android Emulator in the selected SDK.",
+          ),
+        ],
+        ExitCode.Environment,
+      );
+    }
+    const avdProgress =
+      options.format === "human" && !options.quiet
+        ? new ProgressRenderer({
+            bus,
+            sink: io.error,
+            capabilities: errorCapabilities,
+            verbose: options.verbose,
+          })
+        : undefined;
+    let preparation: Awaited<ReturnType<typeof prepareAvd>>;
+    try {
+      preparation = await (dependencies.prepareAvd ?? prepareAvd)(
+        {
+          name: options.avdName,
+          emulator: emulator.invocation.executable,
+          adb: autonomousAdb as string,
+          cwd: io.cwd,
+          env: io.env,
+          timeoutMs: options.timeoutMs ?? 120_000,
+          ...(signal === undefined ? {} : { signal }),
+        },
+        { ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }) },
+      );
+    } finally {
+      avdProgress?.dispose();
+    }
+    if (!preparation.ok) {
+      return await finishAutonomousFailure(
+        [autonomousProblem(preparation.failure, "target.avd")],
+        preparation.failure.code === "AVD_CANCELLED" ? ExitCode.Interrupted : ExitCode.Target,
+      );
+    }
+    const avd = preparation.avd;
+    preparedAvd = avd;
+    autonomousEvidence = {
+      avd: {
+        name: avd.name,
+        serial: avd.serial,
+        ownership: avd.ownership,
+        readiness: avd.readiness,
+      },
+    };
+    config.targetSelector = avd.serial;
+    delete config.targetTransportId;
+    delete config.rememberedSerial;
+    delete config.rememberedHardwareSerial;
+    delete config.rememberedOnly;
+  }
   const offlineDevPlan =
     (options.command === "dev" || options.command === "run") &&
     options.dryRun &&
@@ -1153,6 +1359,9 @@ async function runCliInternal(
       : inventory;
     if (!selected.result.ok || selected.result.data?.selected === undefined) {
       if (shouldPrompt) {
+        if (autonomousRun) {
+          return await finishAutonomousFailure([...selected.result.problems], selected.exitCode);
+        }
         renderResult(
           { ...selected.result, command: options.command },
           {
@@ -1162,13 +1371,16 @@ async function runCliInternal(
             verbose: options.verbose,
           },
         );
+        await preparedAvd?.release(signal);
+        preparedAvd = undefined;
         return selected.exitCode;
       }
     } else {
       preparedSelection = selected.result.data.selected;
       const transport = preparedSelection.transport;
-      if (transport.transportId === undefined) {
+      if (options.avdName !== undefined || transport.transportId === undefined) {
         config.targetSelector = transport.serial;
+        delete config.targetTransportId;
       } else {
         config.targetTransportId = transport.transportId;
       }
@@ -1280,6 +1492,8 @@ async function runCliInternal(
         ],
         dependencies,
       );
+      await preparedAvd?.release(signal);
+      preparedAvd = undefined;
       renderFailure(failure, options.format, io);
       return ExitCode.InvalidInput;
     }
@@ -1365,6 +1579,11 @@ async function runCliInternal(
         ],
         dependencies,
       );
+      if (autonomousRun) {
+        return await finishAutonomousFailure([...failure.problems], ExitCode.Target);
+      }
+      await preparedAvd?.release(signal);
+      preparedAvd = undefined;
       renderFailure(failure, options.format, io);
       return ExitCode.Target;
     }
@@ -1639,14 +1858,160 @@ async function runCliInternal(
             }
           : {}),
       } satisfies DevOptions;
-      const devExecution = offlineDevPlan
-        ? await runDevOfflinePlan(devOptions, commandDependencies)
-        : await runDev(devOptions, config, commandDependencies, signal);
+      let devExecution: CommandExecution<DevData>;
+      if (offlineDevPlan) {
+        devExecution = await runDevOfflinePlan(devOptions, commandDependencies);
+        if (
+          autonomousRun &&
+          androidCapabilities !== undefined &&
+          devExecution.result.data !== null
+        ) {
+          const planned = buildAutonomousRunPlan({
+            ...(options.avdName === undefined ? {} : { avd: options.avdName }),
+            deploy: options.deployArtifact === true,
+            ...(options.runArtifactPaths?.[0] === undefined
+              ? {}
+              : { artifact: options.runArtifactPaths[0] }),
+            capabilities: androidCapabilities,
+            projectCommand: devExecution.result.data.command,
+            verifier: options.runCommand ?? { executable: "", args: [] },
+          });
+          if (planned.blockers.length > 0) {
+            devExecution.result.ok = false;
+            devExecution.exitCode = ExitCode.Environment;
+            devExecution.result.problems.push(
+              ...planned.blockers.map((blocker) =>
+                inputProblem(
+                  `AUTONOMOUS_${blocker.capability.toUpperCase().replaceAll("-", "_")}_REQUIRED`,
+                  blocker.summary,
+                  blocker.next,
+                  devExecution.result.commandId,
+                ),
+              ),
+            );
+          }
+          devExecution.result.data.plan = planned.plan;
+        }
+      } else {
+        let preparationProblem: Problem | undefined;
+        let preparationExitCode: ExitCode = ExitCode.AdbOperation;
+        if (options.command === "run" && options.deployArtifact === true) {
+          const serial = preparedSelection?.transport.serial;
+          if (serial === undefined || autonomousAdb === undefined) {
+            preparationProblem = inputProblem(
+              "AUTONOMOUS_TARGET_REQUIRED",
+              "Artifact deployment requires one selected Android target.",
+              "Start or select one ready target and retry the run.",
+            );
+            preparationExitCode = ExitCode.Target;
+          } else {
+            const profile = await (
+              dependencies.inspectAndroidTargetProfile ?? inspectAndroidTargetProfile
+            )(
+              { adb: autonomousAdb, serial, ...(signal === undefined ? {} : { signal }) },
+              dependencies.runner,
+            );
+            if (!profile.ok) {
+              preparationProblem = autonomousProblem(profile.failure, "target.profile");
+              preparationExitCode = ExitCode.Target;
+            } else {
+              autonomousEvidence = { ...autonomousEvidence, targetProfile: profile.profile };
+              const resolution = await (
+                dependencies.resolveAndroidArtifact ?? resolveAndroidArtifact
+              )({
+                root: io.cwd,
+                ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
+                ...(options.runArtifactPaths === undefined
+                  ? {}
+                  : { explicitPaths: options.runArtifactPaths }),
+                ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+                ...(options.runVariant === undefined ? {} : { variant: options.runVariant }),
+                device: profile.profile,
+              });
+              if (!resolution.ok) {
+                preparationProblem = autonomousProblem(resolution.failure, "input.artifact");
+                preparationExitCode = ExitCode.InvalidInput;
+              } else {
+                autonomousEvidence = { ...autonomousEvidence, artifact: resolution.artifact };
+                const bundletool =
+                  androidCapabilities === undefined
+                    ? undefined
+                    : capability(androidCapabilities, "bundletool");
+                const deployed = await (
+                  dependencies.deployAndroidArtifact ?? deployAndroidArtifact
+                )(
+                  {
+                    artifact: resolution.artifact,
+                    serial,
+                    adb: autonomousAdb,
+                    ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+                    ...(bundletool?.status !== "supported" || bundletool.invocation === undefined
+                      ? {}
+                      : { bundletoolCommand: bundletool.invocation }),
+                    ...(signal === undefined ? {} : { signal }),
+                  },
+                  { ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }) },
+                );
+                if (!deployed.ok) {
+                  const category =
+                    deployed.failure.code === "DEPLOYMENT_TOOL_REQUIRED"
+                      ? "environment.deployment"
+                      : deployed.failure.stage === "input" || deployed.failure.stage === "identity"
+                        ? "input.artifact"
+                        : "adb.deployment";
+                  preparationProblem = autonomousProblem(deployed.failure, category);
+                  preparationExitCode =
+                    category === "environment.deployment"
+                      ? ExitCode.Environment
+                      : category === "input.artifact"
+                        ? ExitCode.InvalidInput
+                        : ExitCode.AdbOperation;
+                } else {
+                  autonomousEvidence = {
+                    ...autonomousEvidence,
+                    deployment: deployed.deployment,
+                  };
+                }
+              }
+            }
+          }
+        }
+        if (preparationProblem === undefined) {
+          devExecution = await runDev(devOptions, config, commandDependencies, signal);
+        } else {
+          const failed: ResultEnvelope<DevData> = {
+            ...failureResult("run", [preparationProblem], dependencies),
+            data: null,
+          };
+          devExecution = {
+            result: failed,
+            exitCode: preparationExitCode,
+          };
+        }
+      }
+      if (preparedAvd !== undefined) {
+        const cleanup = await preparedAvd.release(signal);
+        if (autonomousEvidence?.avd !== undefined) autonomousEvidence.avd.cleanup = cleanup;
+        if (preparedAvd.ownership === "owned" && !cleanup.stopped) {
+          devExecution.result.ok = false;
+          devExecution.exitCode = ExitCode.AdbOperation;
+          devExecution.result.problems.push(
+            inputProblem(
+              "AVD_CLEANUP_FAILED",
+              "The owned Android emulator did not stop cleanly.",
+              cleanup.detail,
+              devExecution.result.commandId,
+            ),
+          );
+        }
+        preparedAvd = undefined;
+      }
       execution =
         options.command === "run" && !options.dryRun
           ? (
               await writeEvidenceBundle(devExecution, {
                 cwd: io.cwd,
+                ...(autonomousEvidence === undefined ? {} : { automation: autonomousEvidence }),
                 ...(io.env.GITHUB_STEP_SUMMARY === undefined
                   ? {}
                   : { githubStepSummaryPath: io.env.GITHUB_STEP_SUMMARY }),
@@ -1716,6 +2081,7 @@ async function runCliInternal(
   } finally {
     progress?.dispose();
     events?.dispose();
+    await preparedAvd?.release(signal);
     await targetLease?.release();
   }
 

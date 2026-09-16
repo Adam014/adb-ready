@@ -15,6 +15,8 @@ adb-ready dev --dry-run
 - [`flutter/adb-ready.config.json`](./flutter/adb-ready.config.json)
 - [`capacitor/adb-ready.config.json`](./capacitor/adb-ready.config.json)
 - [`custom/adb-ready.config.json`](./custom/adb-ready.config.json)
+- [`automation/README.md`](./automation/README.md) — one finite AVD, deployment,
+  verifier, evidence, and cleanup job
 
 Prefer `adb-ready init` when starting from an existing detected project. Add
 only the ports, hooks, and retention rules that the project genuinely needs.
