@@ -132,8 +132,8 @@ transport, even when `ANDROID_SERIAL` names one device. ADB Ready therefore
 does not add `--android` to detected Expo commands. After Metro passes
 readiness, ADB Ready:
 
-1. asks Expo's public `/_expo/open` endpoint for the Android deep link, with a
-   bounded `/_expo/link` fallback for Expo 55;
+1. asks Expo's bounded `/_expo/link` redirect endpoint for the Android deep
+   link used by Expo Go or the project development client;
 2. routes local-network Metro URLs through the verified reverse mapping while
    preserving public tunnel URLs;
 3. resolves the installed URL handler on the selected transport; and

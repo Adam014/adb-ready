@@ -54,7 +54,7 @@ function dependencies(runner: ProcessRunner): CommandDependencies {
             target: {
               url: "demo://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081%2F",
               runtime,
-              source: "open",
+              source: "link",
               applicationId: "com.example.demo",
             },
           },
@@ -379,7 +379,7 @@ describe("runDev", () => {
         target: {
           url: `demo://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${String(devicePort)}`,
           runtime,
-          source: "open",
+          source: "link",
           applicationId: "com.example.demo",
         },
       };
