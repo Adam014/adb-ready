@@ -1,30 +1,21 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import { capability, detectAndroidCapabilities } from "../../src/automation/capabilities.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
 
-const temporaryDirectories: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
-  );
-});
-
-async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-capabilities-"));
-  temporaryDirectories.push(directory);
-  return directory;
-}
-
-async function file(name: string, executable = true): Promise<void> {
-  await mkdir(path.dirname(name), { recursive: true });
-  await writeFile(name, "fixture\n");
-  if (executable && process.platform !== "win32") await chmod(name, 0o755);
+function fixture(options: {
+  directories?: readonly string[];
+  files?: Readonly<Record<string, string>>;
+  executables?: Readonly<Record<string, string>>;
+}) {
+  const directories = new Set(options.directories ?? []);
+  const files = options.files ?? {};
+  return {
+    directoryAvailable: async (candidate: string) => directories.has(candidate),
+    fileAvailable: async (candidate: string) => Object.hasOwn(files, candidate),
+    readText: async (candidate: string) => files[candidate] ?? "",
+    locate: async (name: string) => options.executables?.[name],
+  };
 }
 
 function result(request: ProcessRequest, stdout: string, stderr = ""): ProcessResult {
@@ -48,7 +39,7 @@ function result(request: ProcessRequest, stdout: string, stderr = ""): ProcessRe
 }
 
 function versionRunner(request: ProcessRequest): Promise<ProcessResult> {
-  const executable = path.basename(request.executable).toLowerCase();
+  const executable = path.posix.basename(request.executable.replaceAll("\\", "/")).toLowerCase();
   if (executable.startsWith("emulator")) {
     return Promise.resolve(result(request, "Android emulator version 36.4.10.0\n"));
   }
@@ -69,17 +60,19 @@ function versionRunner(request: ProcessRequest): Promise<ProcessResult> {
 
 describe("Android capability detection", () => {
   test("resolves the canonical macOS SDK and optional tools deterministically", async () => {
-    const home = await temporaryDirectory();
-    const sdk = path.join(home, "Library", "Android", "sdk");
-    const bin = path.join(home, "bin");
-    await Promise.all([
-      file(path.join(sdk, "emulator", "emulator")),
-      file(path.join(sdk, "cmdline-tools", "latest", "bin", "avdmanager")),
-      file(path.join(bin, "android")),
-      file(path.join(bin, "bundletool")),
-      file(path.join(bin, "java")),
-      file(path.join(bin, "maestro")),
-    ]);
+    const home = "/Users/fixture";
+    const sdk = path.posix.join(home, "Library", "Android", "sdk");
+    const bin = path.posix.join(home, "bin");
+    const files = Object.fromEntries(
+      [
+        path.posix.join(sdk, "emulator", "emulator"),
+        path.posix.join(sdk, "cmdline-tools", "latest", "bin", "avdmanager"),
+        path.posix.join(bin, "android"),
+        path.posix.join(bin, "bundletool"),
+        path.posix.join(bin, "java"),
+        path.posix.join(bin, "maestro"),
+      ].map((candidate) => [candidate, ""]),
+    );
 
     const detected = await detectAndroidCapabilities({
       cwd: home,
@@ -88,6 +81,16 @@ describe("Android capability detection", () => {
       platform: "darwin",
       verifier: { executable: "maestro", args: ["test", "flow.yaml"] },
       runner: versionRunner,
+      ...fixture({
+        directories: [sdk],
+        files,
+        executables: {
+          android: path.posix.join(bin, "android"),
+          bundletool: path.posix.join(bin, "bundletool"),
+          java: path.posix.join(bin, "java"),
+          maestro: path.posix.join(bin, "maestro"),
+        },
+      }),
     });
 
     expect(detected.sdk).toMatchObject({ status: "supported", root: sdk });
@@ -107,15 +110,15 @@ describe("Android capability detection", () => {
   });
 
   test("uses the canonical Linux fallback without inventing a missing SDK", async () => {
-    const home = await temporaryDirectory();
-    const sdk = path.join(home, "Android", "Sdk");
-    await mkdir(sdk, { recursive: true });
+    const home = "/home/fixture";
+    const sdk = path.posix.join(home, "Android", "Sdk");
     const detected = await detectAndroidCapabilities({
       cwd: home,
       env: { PATH: "" },
       homeDirectory: home,
       platform: "linux",
       runner: versionRunner,
+      ...fixture({ directories: [sdk] }),
     });
 
     expect(detected.sdk).toMatchObject({ status: "supported", root: sdk });
@@ -124,15 +127,15 @@ describe("Android capability detection", () => {
   });
 
   test("models Windows SDK paths without requiring POSIX executable bits", async () => {
-    const root = await temporaryDirectory();
     const localAppData = path.win32.join("C:\\Users\\fixture", "AppData", "Local");
     const sdk = path.win32.join(localAppData, "Android", "Sdk");
     const detected = await detectAndroidCapabilities({
-      cwd: root,
+      cwd: "C:\\workspace",
       env: { LOCALAPPDATA: localAppData, PATH: "" },
       homeDirectory: "C:\\Users\\fixture",
       platform: "win32",
       runner: versionRunner,
+      ...fixture({}),
     });
 
     expect(detected.sdk).toMatchObject({
@@ -143,10 +146,9 @@ describe("Android capability detection", () => {
   });
 
   test("fails closed when Android SDK environment roots conflict", async () => {
-    const root = await temporaryDirectory();
-    const first = path.join(root, "sdk-a");
-    const second = path.join(root, "sdk-b");
-    await Promise.all([mkdir(first), mkdir(second)]);
+    const root = "/workspace";
+    const first = "/workspace/sdk-a";
+    const second = "/workspace/sdk-b";
 
     const detected = await detectAndroidCapabilities({
       cwd: root,
@@ -154,28 +156,33 @@ describe("Android capability detection", () => {
       homeDirectory: root,
       platform: "linux",
       runner: versionRunner,
+      ...fixture({ directories: [first, second] }),
     });
 
     expect(detected.sdk).toMatchObject({
       status: "incompatible",
-      candidates: [first, second, path.join(root, "Android", "Sdk")],
+      candidates: [first, second, path.posix.join(root, "Android", "Sdk")],
     });
     expect(detected.sdk.next).toContain("canonical Android SDK root");
   });
 
   test("distinguishes incompatible and unverified tool versions", async () => {
-    const root = await temporaryDirectory();
-    const bin = path.join(root, "bin");
-    await Promise.all([file(path.join(bin, "android")), file(path.join(bin, "java"))]);
+    const root = "/workspace";
+    const android = "/tools/android";
+    const java = "/tools/java";
     const detected = await detectAndroidCapabilities({
       cwd: root,
-      env: { PATH: bin },
+      env: { PATH: "/tools" },
       homeDirectory: root,
       platform: "linux",
       runner: async (request) =>
-        path.basename(request.executable) === "android"
+        path.posix.basename(request.executable.replaceAll("\\", "/")) === "android"
           ? result(request, "Android CLI 0.9.0\n")
           : result(request, "Java runtime without a parseable version\n"),
+      ...fixture({
+        files: { [android]: "", [java]: "" },
+        executables: { android, java },
+      }),
     });
 
     expect(capability(detected, "android-cli")).toMatchObject({
@@ -186,9 +193,8 @@ describe("Android capability detection", () => {
   });
 
   test("accepts Java's legacy 1.8 version notation as Java 8", async () => {
-    const root = await temporaryDirectory();
-    const java = path.join(root, "java");
-    await file(java);
+    const root = "/workspace";
+    const java = "/tools/java";
 
     const detected = await detectAndroidCapabilities({
       cwd: root,
@@ -197,6 +203,7 @@ describe("Android capability detection", () => {
       platform: "linux",
       explicit: { java },
       runner: async (request) => result(request, "", 'java version "1.8.0_442"\n'),
+      ...fixture({ files: { [java]: "" } }),
     });
 
     expect(capability(detected, "java")).toMatchObject({
@@ -206,16 +213,9 @@ describe("Android capability detection", () => {
   });
 
   test("reads Gradle wrapper metadata without executing the wrapper", async () => {
-    const root = await temporaryDirectory();
-    const wrapper = path.join(root, "gradlew");
-    await Promise.all([
-      file(wrapper),
-      file(path.join(root, "gradle", "wrapper", "gradle-wrapper.properties"), false),
-    ]);
-    await writeFile(
-      path.join(root, "gradle", "wrapper", "gradle-wrapper.properties"),
-      "distributionUrl=https\\://services.gradle.org/distributions/gradle-9.7.1-bin.zip\n",
-    );
+    const root = "/workspace";
+    const wrapper = path.posix.join(root, "gradlew");
+    const properties = path.posix.join(root, "gradle", "wrapper", "gradle-wrapper.properties");
     let probes = 0;
     const detected = await detectAndroidCapabilities({
       cwd: root,
@@ -226,6 +226,13 @@ describe("Android capability detection", () => {
         probes += 1;
         return result(request, "");
       },
+      ...fixture({
+        files: {
+          [wrapper]: "",
+          [properties]:
+            "distributionUrl=https\\://services.gradle.org/distributions/gradle-9.7.1-bin.zip\n",
+        },
+      }),
     });
 
     expect(capability(detected, "gradle")).toMatchObject({

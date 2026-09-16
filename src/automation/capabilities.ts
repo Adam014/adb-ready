@@ -56,6 +56,10 @@ export interface DetectAndroidCapabilitiesOptions {
   timeoutMs?: number;
   explicit?: Partial<Record<Exclude<AndroidToolId, "external-verifier">, string>>;
   verifier?: { executable: string; args?: readonly string[]; cwd?: string };
+  fileAvailable?: (candidate: string, executable: boolean) => Promise<boolean>;
+  directoryAvailable?: (candidate: string) => Promise<boolean>;
+  readText?: (candidate: string) => Promise<string>;
+  locate?: typeof locateExecutable;
 }
 
 const PROBE_TIMEOUT_MS = 3_000;
@@ -85,6 +89,25 @@ async function executableFile(candidate: string, platform: NodeJS.Platform): Pro
   }
 }
 
+async function directoryAvailable(candidate: string): Promise<boolean> {
+  return await stat(candidate)
+    .then((value) => value.isDirectory())
+    .catch(() => false);
+}
+
+function availableFile(
+  options: DetectAndroidCapabilitiesOptions,
+  candidate: string,
+  executable: boolean,
+): Promise<boolean> {
+  return (
+    options.fileAvailable?.(candidate, executable) ??
+    (executable
+      ? executableFile(candidate, options.platform ?? process.platform)
+      : regularFile(candidate))
+  );
+}
+
 function defaultSdkRoot(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
@@ -105,6 +128,7 @@ async function resolveSdk(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
   homeDirectory: string,
+  isDirectory: (candidate: string) => Promise<boolean>,
 ): Promise<AndroidCapabilities["sdk"]> {
   const paths = pathApi(platform);
   const environmentRoots = unique(
@@ -128,12 +152,7 @@ async function resolveSdk(
   }
 
   const selected = environmentRoots[0] ?? fallback;
-  if (
-    selected === undefined ||
-    !(await stat(selected)
-      .then((value) => value.isDirectory())
-      .catch(() => false))
-  ) {
+  if (selected === undefined || !(await isDirectory(selected))) {
     return {
       status: "unavailable",
       candidates,
@@ -166,17 +185,17 @@ async function resolveExecutable(
   const explicit = options.explicit?.[id]?.trim();
   if (explicit !== undefined && explicit !== "") {
     const candidate = paths.resolve(options.cwd ?? process.cwd(), explicit);
-    return (await executableFile(candidate, platform))
+    return (await availableFile(options, candidate, true))
       ? { path: candidate, source: "explicit" }
       : undefined;
   }
 
   if (sdkRoot !== undefined && sdkRelative !== undefined) {
     const candidate = paths.join(sdkRoot, ...sdkRelative, executableName(name, platform));
-    if (await executableFile(candidate, platform)) return { path: candidate, source: "sdk" };
+    if (await availableFile(options, candidate, true)) return { path: candidate, source: "sdk" };
   }
 
-  const located = await locateExecutable(name, { env, platform });
+  const located = await (options.locate ?? locateExecutable)(name, { env, platform });
   return located === undefined ? undefined : { path: located, source: "path" };
 }
 
@@ -275,12 +294,16 @@ async function resolveGradle(
   const platform = options.platform ?? process.platform;
   const paths = pathApi(platform);
   const properties = paths.join(cwd, "gradle", "wrapper", "gradle-wrapper.properties");
-  if (await regularFile(properties)) {
-    const contents = await readFile(properties, "utf8").catch(() => "");
+  if (await availableFile(options, properties, false)) {
+    const contents = await (options.readText ?? ((candidate) => readFile(candidate, "utf8")))(
+      properties,
+    ).catch(() => "");
     const version = /gradle-(\d+(?:\.\d+){1,2})-(?:all|bin)\.zip/u.exec(contents)?.[1];
     const wrapper = paths.join(cwd, platform === "win32" ? "gradlew.bat" : "gradlew");
     const wrapperAvailable =
-      platform === "win32" ? await regularFile(wrapper) : await executableFile(wrapper, platform);
+      platform === "win32"
+        ? await availableFile(options, wrapper, false)
+        : await availableFile(options, wrapper, true);
     if (!wrapperAvailable) {
       return {
         id: "gradle",
@@ -324,7 +347,7 @@ async function resolveBundletool(
       options.cwd ?? process.cwd(),
       explicit,
     );
-    if (!(await regularFile(candidate))) {
+    if (!(await availableFile(options, candidate, false))) {
       return unavailable(
         "bundletool",
         "Provide an existing bundletool-all JAR with --bundletool PATH.",
@@ -377,8 +400,8 @@ async function resolveVerifier(
     paths.isAbsolute(requested) || requested.includes("/") || requested.includes("\\");
   const resolved = hasPath
     ? paths.resolve(options.verifier.cwd ?? options.cwd ?? process.cwd(), requested)
-    : await locateExecutable(requested, { env, platform });
-  if (resolved === undefined || !(await executableFile(resolved, platform))) {
+    : await (options.locate ?? locateExecutable)(requested, { env, platform });
+  if (resolved === undefined || !(await availableFile(options, resolved, true))) {
     return unavailable(
       "external-verifier",
       `Install ${requested} or pass an executable path that exists.`,
@@ -404,7 +427,12 @@ export async function detectAndroidCapabilities(
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const homeDirectory = options.homeDirectory ?? homedir();
-  const sdk = await resolveSdk(platform, env, homeDirectory);
+  const sdk = await resolveSdk(
+    platform,
+    env,
+    homeDirectory,
+    options.directoryAvailable ?? directoryAvailable,
+  );
   const sdkRoot = sdk.status === "supported" ? sdk.root : undefined;
 
   const emulatorResolved = await resolveExecutable("emulator", "emulator", options, sdkRoot, [
