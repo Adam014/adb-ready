@@ -21,6 +21,10 @@ breaking changes.
 - Resolve explicit or framework build artifacts from bounded Android output
   metadata, keep ABI variants separate, select only proven target-compatible
   APKs, and reject stale, ambiguous, incomplete, or unsafe candidates.
+- Deploy APK and split APK artifacts through one target-scoped ADB transport,
+  build and install AAB or APK Set inputs with explicit bundletool, verify the
+  installed package, version, and launch activity, and clean only owned
+  temporary output.
 
 ## [0.4.0] - 2026-09-15
 
