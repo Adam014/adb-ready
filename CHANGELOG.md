@@ -18,6 +18,9 @@ breaking changes.
 - Reuse or start one exact existing Android virtual device, prove ADB, boot,
   package-manager, and unlock readiness, and stop only emulator processes that
   the active workflow owns.
+- Resolve explicit or framework build artifacts from bounded Android output
+  metadata, keep ABI variants separate, select only proven target-compatible
+  APKs, and reject stale, ambiguous, incomplete, or unsafe candidates.
 
 ## [0.4.0] - 2026-09-15
 
