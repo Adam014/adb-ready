@@ -52,6 +52,7 @@ export interface DeployAndroidArtifactOptions {
   applicationId?: string;
   java?: string;
   bundletool?: string;
+  bundletoolCommand?: { executable: string; argsPrefix: string[] };
   replace?: boolean;
   grantRuntimePermissions?: boolean;
   signal?: AbortSignal;
@@ -162,8 +163,21 @@ function validArtifactShape(artifact: AndroidArtifact): boolean {
   return artifact.files.length === 1 && extensions[0] === ".apks";
 }
 
-function bundletoolArguments(bundletool: string, command: string, args: string[]): string[] {
-  return ["-jar", bundletool, command, ...args];
+function bundletoolInvocation(
+  options: DeployAndroidArtifactOptions,
+): { executable: string; argsPrefix: string[] } | undefined {
+  if (options.bundletoolCommand !== undefined) return options.bundletoolCommand;
+  return options.java === undefined || options.bundletool === undefined
+    ? undefined
+    : { executable: options.java, argsPrefix: ["-jar", options.bundletool] };
+}
+
+function bundletoolArguments(
+  invocation: { executable: string; argsPrefix: string[] },
+  command: string,
+  args: string[],
+): string[] {
+  return [...invocation.argsPrefix, command, ...args];
 }
 
 async function resolveApplicationId(
@@ -196,7 +210,8 @@ async function resolveApplicationId(
         )
       : { ok: true, applicationId: expected };
   }
-  if (options.java === undefined || options.bundletool === undefined)
+  const invocation = bundletoolInvocation(options);
+  if (invocation === undefined)
     return failed(
       "DEPLOYMENT_TOOL_REQUIRED",
       "identity",
@@ -206,8 +221,8 @@ async function resolveApplicationId(
     );
   const dump = await run(
     runner,
-    options.java,
-    bundletoolArguments(options.bundletool, "dump", [
+    invocation.executable,
+    bundletoolArguments(invocation, "dump", [
       "manifest",
       `--bundle=${options.artifact.files[0] ?? ""}`,
       "--module=base",
@@ -333,7 +348,8 @@ export async function deployAndroidArtifact(
       "Resolve one target and one validated project-local artifact before deployment.",
     );
   const bundleDeployment = options.artifact.kind === "aab" || options.artifact.kind === "apks";
-  if (bundleDeployment && (options.java === undefined || options.bundletool === undefined))
+  const invocation = bundletoolInvocation(options);
+  if (bundleDeployment && invocation === undefined)
     return failed(
       "DEPLOYMENT_TOOL_REQUIRED",
       "input",
@@ -343,9 +359,9 @@ export async function deployAndroidArtifact(
     );
   if (
     bundleDeployment &&
-    options.java !== undefined &&
-    options.bundletool !== undefined &&
-    (!validCommandValue(options.java) || !validCommandValue(options.bundletool))
+    invocation !== undefined &&
+    (!validCommandValue(invocation.executable) ||
+      invocation.argsPrefix.some((argument) => !validCommandValue(argument)))
   )
     return failed(
       "DEPLOYMENT_INVALID_INPUT",
@@ -400,7 +416,7 @@ export async function deployAndroidArtifact(
     return await verifyDeployment(options, identity.applicationId, runner, false, false);
   }
 
-  if (options.java === undefined || options.bundletool === undefined)
+  if (invocation === undefined)
     throw new Error("Bundle deployment tools passed preflight but became unavailable");
 
   const removeTemporaryDirectory =
@@ -418,8 +434,8 @@ export async function deployAndroidArtifact(
       apkSet = path.join(temporaryDirectory, "device.apks");
       const build = await run(
         runner,
-        options.java,
-        bundletoolArguments(options.bundletool, "build-apks", [
+        invocation.executable,
+        bundletoolArguments(invocation, "build-apks", [
           `--bundle=${options.artifact.files[0] ?? ""}`,
           `--output=${apkSet}`,
           "--connected-device",
@@ -441,8 +457,8 @@ export async function deployAndroidArtifact(
     if (outcome === undefined) {
       const install = await run(
         runner,
-        options.java,
-        bundletoolArguments(options.bundletool, "install-apks", [
+        invocation.executable,
+        bundletoolArguments(invocation, "install-apks", [
           `--apks=${apkSet ?? ""}`,
           `--device-id=${options.serial}`,
           `--adb=${options.adb}`,

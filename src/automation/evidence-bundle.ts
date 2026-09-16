@@ -33,6 +33,56 @@ export interface AutomationRunData {
   outcome: RunOutcome;
   session: DevData | null;
   evidence: EvidenceBundle;
+  automation?: AutonomousRunEvidence;
+}
+
+export interface AutonomousRunEvidence {
+  avd?: {
+    name: string;
+    serial: string;
+    ownership: "owned" | "reused";
+    readiness: {
+      adb: boolean;
+      boot: boolean;
+      packageManager: boolean;
+      unlocked: boolean;
+      attempts: number;
+      durationMs: number;
+    };
+    cleanup?: {
+      attempted: boolean;
+      stopped: boolean;
+      forced: boolean;
+      detail: string;
+    };
+  };
+  targetProfile?: {
+    serial: string;
+    abis: string[];
+    density?: string;
+    locales: string[];
+  };
+  artifact?: {
+    kind: "aab" | "apk" | "apks" | "split-apks";
+    files: string[];
+    applicationId?: string;
+    variant?: string;
+    versionCode?: number;
+    versionName?: string;
+    provenance: { kind: string; source: string };
+  };
+  deployment?: {
+    artifactKind: "aab" | "apk" | "apks" | "split-apks";
+    applicationId: string;
+    serial: string;
+    installed: true;
+    launchable: true;
+    activity: string;
+    versionCode?: number;
+    versionName?: string;
+    temporaryApkSetCreated: boolean;
+    temporaryApkSetCleaned: boolean;
+  };
 }
 
 export interface EvidenceBundleOptions {
@@ -41,6 +91,7 @@ export interface EvidenceBundleOptions {
   idFactory?: () => string;
   maxContextCharacters?: number;
   githubStepSummaryPath?: string;
+  automation?: AutonomousRunEvidence;
 }
 
 function outcome(problems: readonly Problem[]): RunOutcome {
@@ -184,7 +235,12 @@ export async function writeEvidenceBundle(
   const finalResult: ResultEnvelope<AutomationRunData> = sanitized(
     {
       ...execution.result,
-      data: { outcome: runOutcome, session, evidence: initialBundle },
+      data: {
+        outcome: runOutcome,
+        session,
+        evidence: initialBundle,
+        ...(options.automation === undefined ? {} : { automation: options.automation }),
+      },
     },
     literals,
   );
@@ -210,6 +266,20 @@ export async function writeEvidenceBundle(
             .filter(({ source }) => source === "logcat")
             .map(({ message }) => message)
             .join("\n") + (events.some(({ source }) => source === "logcat") ? "\n" : ""),
+        sensitive: true,
+      },
+    ],
+    [
+      "verifier-stdout.txt",
+      {
+        content: finalResult.data?.session?.verification?.stdout ?? "",
+        sensitive: true,
+      },
+    ],
+    [
+      "verifier-stderr.txt",
+      {
+        content: finalResult.data?.session?.verification?.stderr ?? "",
         sensitive: true,
       },
     ],

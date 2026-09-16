@@ -25,6 +25,12 @@ breaking changes.
   build and install AAB or APK Set inputs with explicit bundletool, verify the
   installed package, version, and launch activity, and clean only owned
   temporary output.
+- Compose existing-AVD startup, deterministic artifact deployment, project
+  readiness, one bounded external verifier, normalized evidence, and
+  ownership-safe cleanup in the existing `run` command with a mutation-free
+  dry-run plan.
+- Preserve bounded, redacted native verifier stdout and stderr in every run
+  evidence bundle, including structured preparation failures after cleanup.
 
 ## [0.4.0] - 2026-09-15
 

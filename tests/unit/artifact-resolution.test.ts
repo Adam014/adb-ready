@@ -153,6 +153,40 @@ describe("deterministic Android artifact resolution", () => {
     ).toMatchObject({ ok: false, failure: { code: "ARTIFACT_NOT_FOUND" } });
   });
 
+  test("matches Android density buckets and locale spellings to observed target properties", async () => {
+    const root = await project();
+    const output = path.join(root, "android", "app", "build", "outputs", "apk", "release");
+    await metadata(output, {
+      applicationId: "com.example.ready",
+      variantName: "release",
+      elements: [
+        {
+          type: "ONE_OF_MANY",
+          filters: [
+            { filterType: "DENSITY", value: "xxhdpi" },
+            { filterType: "LANGUAGE", value: "pt_BR" },
+          ],
+          versionCode: 8,
+          versionName: "2.0",
+          outputFile: "app-xxhdpi-pt.apk",
+        },
+      ],
+    });
+    await file(path.join(output, "app-xxhdpi-pt.apk"));
+
+    expect(
+      await resolveAndroidArtifact({
+        root,
+        preset: "expo",
+        variant: "release",
+        device: { density: "480", locales: ["pt-BR", "pt"] },
+      }),
+    ).toMatchObject({
+      ok: true,
+      artifact: { files: [expect.stringContaining("app-xxhdpi-pt.apk")] },
+    });
+  });
+
   test("fails closed on ambiguous variants and resolves exact identity filters", async () => {
     const root = await project();
     for (const variant of ["debug", "release"]) {
