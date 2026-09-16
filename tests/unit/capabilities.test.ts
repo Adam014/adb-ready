@@ -1,7 +1,25 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { capability, detectAndroidCapabilities } from "../../src/automation/capabilities.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+});
+
+async function nativeFixtureFile(candidate: string, executable: boolean): Promise<void> {
+  await mkdir(path.dirname(candidate), { recursive: true });
+  await writeFile(candidate, "fixture\n");
+  if (executable && process.platform !== "win32") await chmod(candidate, 0o755);
+}
 
 function fixture(options: {
   directories?: readonly string[];
@@ -59,6 +77,55 @@ function versionRunner(request: ProcessRequest): Promise<ProcessResult> {
 }
 
 describe("Android capability detection", () => {
+  test("uses the production read-only filesystem adapters", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capabilities-native-"));
+    temporaryDirectories.push(root);
+    const sdk = path.join(root, "sdk");
+    const emulator = path.join(
+      sdk,
+      "emulator",
+      process.platform === "win32" ? "emulator.exe" : "emulator",
+    );
+    const avdmanager = path.join(
+      sdk,
+      "cmdline-tools",
+      "latest",
+      "bin",
+      process.platform === "win32" ? "avdmanager.exe" : "avdmanager",
+    );
+    const java = path.join(root, process.platform === "win32" ? "java.exe" : "java");
+    const bundletool = path.join(root, "bundletool-all.jar");
+    await Promise.all([
+      mkdir(sdk, { recursive: true }),
+      nativeFixtureFile(emulator, true),
+      nativeFixtureFile(avdmanager, true),
+      nativeFixtureFile(java, true),
+      nativeFixtureFile(bundletool, false),
+    ]);
+
+    const detected = await detectAndroidCapabilities({
+      cwd: root,
+      env: { ANDROID_HOME: sdk, PATH: "" },
+      homeDirectory: root,
+      explicit: { java, bundletool },
+      runner: async (request) =>
+        request.args?.includes("-jar")
+          ? result(request, "1.18.3\n")
+          : path.basename(request.executable).toLowerCase().startsWith("java")
+            ? result(request, "", 'openjdk version "17.0.18"\n')
+            : result(request, "Android emulator version 36.4.10.0\n"),
+    });
+
+    expect(detected.sdk).toMatchObject({ status: "supported", root: sdk });
+    expect(capability(detected, "emulator").status).toBe("supported");
+    expect(capability(detected, "avdmanager").status).toBe("supported");
+    expect(capability(detected, "bundletool")).toMatchObject({
+      status: "supported",
+      path: bundletool,
+      invocation: { executable: java, argsPrefix: ["-jar", bundletool] },
+    });
+  });
+
   test("resolves the canonical macOS SDK and optional tools deterministically", async () => {
     const home = "/Users/fixture";
     const sdk = path.posix.join(home, "Library", "Android", "sdk");
@@ -242,5 +309,82 @@ describe("Android capability detection", () => {
       path: wrapper,
     });
     expect(probes).toBe(0);
+  });
+
+  test("reports failed probes, unusable wrappers, and missing explicit verifier paths", async () => {
+    const root = "/workspace";
+    const android = "/tools/android";
+    const properties = "/workspace/gradle/wrapper/gradle-wrapper.properties";
+    const detected = await detectAndroidCapabilities({
+      cwd: root,
+      env: { PATH: "/tools" },
+      homeDirectory: root,
+      platform: "linux",
+      verifier: { executable: "./missing-verifier" },
+      runner: async (request) => ({ ...result(request, ""), exitCode: 9 }),
+      ...fixture({
+        files: {
+          [android]: "",
+          [properties]:
+            "distributionUrl=https\\://services.gradle.org/distributions/gradle-9.7.1-bin.zip\n",
+        },
+        executables: { android },
+      }),
+    });
+
+    expect(capability(detected, "android-cli")).toMatchObject({ status: "unverified" });
+    expect(capability(detected, "gradle")).toMatchObject({
+      status: "unverified",
+      next: "Restore the Gradle wrapper launcher and keep it executable.",
+    });
+    expect(capability(detected, "external-verifier")).toMatchObject({
+      status: "unavailable",
+    });
+  });
+
+  test("probes a PATH Gradle installation when no project wrapper exists", async () => {
+    const gradle = "/tools/gradle";
+    const detected = await detectAndroidCapabilities({
+      cwd: "/workspace",
+      env: { PATH: "/tools" },
+      homeDirectory: "/workspace",
+      platform: "linux",
+      runner: versionRunner,
+      ...fixture({ files: { [gradle]: "" }, executables: { gradle } }),
+    });
+
+    expect(capability(detected, "gradle")).toMatchObject({
+      status: "supported",
+      source: "path",
+      version: "9.7.1",
+    });
+  });
+
+  test("fails closed for missing bundletool JARs and incompatible Java", async () => {
+    const missing = await detectAndroidCapabilities({
+      cwd: "/workspace",
+      env: { PATH: "" },
+      homeDirectory: "/workspace",
+      platform: "linux",
+      explicit: { bundletool: "missing.jar" },
+      runner: versionRunner,
+      ...fixture({}),
+    });
+    const jar = "/workspace/bundletool.jar";
+    const incompatible = await detectAndroidCapabilities({
+      cwd: "/workspace",
+      env: { PATH: "" },
+      homeDirectory: "/workspace",
+      platform: "linux",
+      explicit: { bundletool: jar },
+      runner: versionRunner,
+      ...fixture({ files: { [jar]: "" } }),
+    });
+
+    expect(capability(missing, "bundletool").status).toBe("unavailable");
+    expect(capability(incompatible, "bundletool")).toMatchObject({
+      status: "incompatible",
+      path: jar,
+    });
   });
 });
