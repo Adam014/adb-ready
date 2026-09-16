@@ -6,11 +6,17 @@ if (managed === undefined) throw new Error("Managed task fixture was not activat
 
 if (process.env.ADB_READY_TASK_FIXTURE_ABRUPT === "1") {
   await new Promise<void>(() => {
-    process.once("SIGTERM", () => process.exit(143));
+    const keepAlive = setInterval(() => undefined, 1_000);
+    process.once("SIGTERM", () => {
+      clearInterval(keepAlive);
+      process.exit(143);
+    });
   });
 } else if (process.env.ADB_READY_TASK_FIXTURE_WAIT === "1") {
   await new Promise<void>((resolve) => {
+    const keepAlive = setInterval(() => undefined, 1_000);
     const stop = (): void => {
+      clearInterval(keepAlive);
       void managed.finish(130).finally(resolve);
     };
     process.once("SIGINT", stop);
