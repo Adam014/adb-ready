@@ -105,5 +105,17 @@ describe("Android target profile", () => {
       ok: false,
       failure: { code: "TARGET_PROFILE_UNAVAILABLE", summary: expect.stringContaining("ABI") },
     });
+
+    const legacyFailed: ProcessRunner = async (request) =>
+      request.args?.at(-1) === "ro.product.cpu.abilist"
+        ? result(request, "\n")
+        : result(request, "", { timedOut: true });
+    expect(await inspectAndroidTargetProfile(options, legacyFailed)).toMatchObject({
+      ok: false,
+      failure: {
+        code: "TARGET_PROFILE_UNAVAILABLE",
+        detail: expect.stringContaining("timeout"),
+      },
+    });
   });
 });

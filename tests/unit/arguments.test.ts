@@ -290,6 +290,10 @@ describe("parseArguments", () => {
       ["run", "--avd", "Pixel", "--device", "emulator-5554", "--", "test"],
       ["run", "--avd", "Pixel", "--adb-host", "127.0.0.1", "--", "test"],
       ["run", "--avd", "bad\nname", "--", "test"],
+      ["run", "--artifact", "bad\npath.apk", "--", "test"],
+      ["run", "--deploy", "--variant", "bad variant", "--", "test"],
+      ["run", "--deploy", "--java=", "--", "test"],
+      ["run", "--deploy", "--bundletool= ", "--", "test"],
     ];
     for (const argv of failures) {
       expect(parseArguments(argv)).toMatchObject({ ok: false });
