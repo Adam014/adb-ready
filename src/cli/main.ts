@@ -261,6 +261,7 @@ help only after the local Expo control channel is ready.
 Development options:
   --preset NAME          expo, react-native, flutter, capacitor, gradle, or custom
   --package-manager PM   npm, pnpm, yarn, or bun
+  --package APP_ID       Scope crash diagnostics to this Android application
   --port PORT            Add a reverse TCP port; repeat for more ports
   --[no-]auto-reverse-localhost
                          Detect public Expo localhost URLs (default: enabled)
@@ -1791,8 +1792,10 @@ async function runCliInternal(
         signal,
       );
     } else if (options.command === "dev" || options.command === "run") {
+      const devApplicationId = options.appId ?? values.appPackage;
       const devOptions = {
         cwd: io.cwd,
+        ...(devApplicationId === undefined ? {} : { applicationId: devApplicationId }),
         ...(values.devPreset === undefined ? {} : { preset: values.devPreset }),
         ...(values.packageManager === undefined ? {} : { packageManager: values.packageManager }),
         ...(values.devCommand === undefined ? {} : { command: values.devCommand }),

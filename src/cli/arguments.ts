@@ -1149,6 +1149,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     if (command === "logs") logPackage = packageOption;
     else if (
       command === "app" ||
+      command === "dev" ||
       command === "open" ||
       command === "run" ||
       (command === "inspect" && inspectKind === "app")
@@ -1157,7 +1158,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     else
       return failure(
         "CLI_USAGE",
-        "--package can only be used with app, inspect app, logs, open, or run deployment.",
+        "--package can only be used with app, dev, inspect app, logs, open, or run deployment.",
       );
   }
   if (command === "apps") packageScope ??= "user";

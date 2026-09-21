@@ -55,6 +55,25 @@ One selected transport is used for the entire session:
 Use `--device`, `--transport-id`, `--last`, or `--select` to override the normal
 selection policy.
 
+## App-scoped crash diagnostics
+
+Set the Android application ID when project detection cannot prove it:
+
+```bash
+adb-ready dev --package com.example.app
+```
+
+The same value can be shared as `app.android.package` in project configuration.
+ADB Ready verifies the package on the selected target and filters logcat by its
+restart-stable UID when supported, with an exact PID fallback for older
+targets. Expo sessions automatically switch to the package Android resolves
+for the verified Expo Go or development-client launch URL.
+
+Until that identity is verified, startup records remain explicitly
+`log.unattributed`. They can help reconstruct a target timeline, but an
+unrelated system or test-process crash cannot become an application problem or
+outrank attributed evidence in exported AI context.
+
 ## Port ownership
 
 The session treats each requested mapping as one of three states:

@@ -243,6 +243,9 @@ Android transport backend.
 - Pairing codes never enter command-line arguments.
 - Session data is bounded, redacted, private to the local user, and never
   uploaded by ADB Ready.
+- Crash diagnostics are promoted only after ADB Ready verifies the application
+  package on the selected target; unrelated device-process failures remain
+  explicitly unattributed evidence.
 - Stale UI references are rejected before input is sent.
 - UI hierarchy capture is serialized per target across CLI and MCP processes,
   while independent targets remain parallel.

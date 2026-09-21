@@ -51,7 +51,16 @@ follow boundary so records written during setup are neither lost nor repeated.
 Unparsed lines are preserved. Output arriving on `stderr` is not automatically
 classified as an error; severity comes from source semantics. Fatal Android
 exceptions, native crashes, ANRs, and React Native fatal errors become
-structured findings.
+structured findings. Package-scoped streams first verify the installed package
+identity, prefer Android's restart-stable UID filter when the selected target
+supports it, and fall back to the package's current PID on older targets.
+
+Development sessions do not infer application ownership from a broad tag such
+as `AndroidRuntime`. Before an application identity is verified, matching
+target-wide records are retained as low-priority `log.unattributed` evidence
+and never promoted to application problems. A configured `app.android.package`
+or `dev --package APP_ID` scopes the stream directly; Expo sessions retarget it
+to the package that Android resolves for the verified launch URL.
 
 ## Session history
 
