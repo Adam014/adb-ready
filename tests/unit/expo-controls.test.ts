@@ -180,4 +180,24 @@ describe("Expo live controls", () => {
     });
     expect(socket.closed).toBeTrue();
   });
+
+  test("turns socket errors and early closes into stable control failures", async () => {
+    for (const [event, detail] of [
+      ["error", "The local Expo control channel failed."],
+      ["close", "The local Expo control channel closed before responding."],
+    ] as const) {
+      const socket = new FakeSocket();
+      const resultPromise = sendExpoControl({
+        action: "reload",
+        endpoint: "http://localhost:8081",
+        socketFactory: () => {
+          queueMicrotask(() => socket.emit(event, {}));
+          return socket;
+        },
+      });
+
+      await expect(resultPromise).resolves.toMatchObject({ detail, ok: false });
+      expect(socket.closed).toBeTrue();
+    }
+  });
 });
