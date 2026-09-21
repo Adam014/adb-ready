@@ -127,6 +127,26 @@ describe("compileSessionContext", () => {
     expect(compiled.markdown.match(/Target briefly disappeared/gu)).toHaveLength(2);
   });
 
+  test("prioritizes attributed app problems over unrelated target crashes", () => {
+    const unrelated = Array.from({ length: 12 }, (_, index) => ({
+      ...event(index + 1, "info", `uiautomator crash frame ${String(index)} ${"x".repeat(90)}`),
+      source: "logcat",
+      type: "log.unattributed",
+    }));
+    const appProblem = {
+      ...event(13, "error", "selected application crashed in CheckoutScreen"),
+      source: "logcat",
+      type: "log.problem",
+    };
+
+    const compiled = compileSessionContext(manifest, [...unrelated, appProblem], {
+      characterBudget: 1_400,
+    });
+
+    expect(compiled.markdown).toContain("selected application crashed in CheckoutScreen");
+    expect(compiled.omittedEvents).toBeGreaterThan(0);
+  });
+
   test("rejects budgets too small for a useful diagnostic artifact", () => {
     expect(() => compileSessionContext(manifest, [], { characterBudget: 999 })).toThrow(
       "at least 1000",

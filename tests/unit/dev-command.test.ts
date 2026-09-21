@@ -359,6 +359,12 @@ describe("runDev", () => {
       if (args.includes("mdns")) {
         return result(request, { stdout: "List of discovered mdns services\n" });
       }
+      if (args.includes("package") && args.includes("-U")) {
+        return result(request, { stdout: "package:com.example.demo uid:10124\n" });
+      }
+      if (args.includes("logcat") && args.includes("--help")) {
+        return result(request, { stdout: "  --uid=UIDS  filter by UID\n" });
+      }
       if (args.includes("--no-rebind")) {
         mapped = true;
         return result(request);
@@ -416,7 +422,6 @@ describe("runDev", () => {
         cwd: "/workspace/app",
         reversePorts: [{ device: 18081 }],
         readiness: { all: [] },
-        logs: false,
         watch: false,
       },
       { targetSelector: "emulator-5554" },
@@ -445,6 +450,22 @@ describe("runDev", () => {
     expect(targetOperations).toHaveLength(2);
     expect(targetOperations.every(({ args }) => args?.[0] === "-t" && args[1] === "7")).toBeTrue();
     expect(targetOperations.flatMap(({ args }) => args ?? [])).not.toContain("10.0.0.9:41231");
+    const logcatRequests = requests.filter(
+      ({ args }) => args?.includes("logcat") && !args.includes("--help"),
+    );
+    expect(logcatRequests).toHaveLength(2);
+    expect(logcatRequests[0]?.args).not.toContain("--uid=10124");
+    expect(logcatRequests[1]?.args).toContain("--uid=10124");
+    expect(execution.result.data?.journal.events).toContainEqual(
+      expect.objectContaining({
+        type: "log.scope.changed",
+        data: {
+          applicationId: "com.example.demo",
+          attribution: "application",
+          selector: "uid",
+        },
+      }),
+    );
   });
 
   test("activates owned Expo controls only after ready and stops cleanly from raw input", async () => {
@@ -1283,6 +1304,7 @@ describe("runDev", () => {
     const execution = await runDevOfflinePlan(
       {
         cwd: "/workspace/app",
+        applicationId: "com.example.app",
         preset: "custom",
         command: { executable: "node", args: ["server.mjs"] },
         reversePorts: [{ device: 8081 }],
@@ -1314,6 +1336,7 @@ describe("runDev", () => {
     const execution = await runDev(
       {
         cwd: "/workspace/app",
+        applicationId: "com.example.app",
         preset: "custom",
         command: { executable: "dev-server", args: ["serve"] },
         reversePorts: [{ device: 8081 }],
@@ -1326,12 +1349,18 @@ describe("runDev", () => {
         const probe = targetProbe(request);
         if (probe !== undefined) return probe;
         const args = request.args ?? [];
+        if (args.includes("logcat") && args.includes("--help")) {
+          return result(request, { stdout: "  --uid=UIDS  filter by UID\n" });
+        }
         if (args.includes("logcat")) {
           const line = "09-10 10:00:00.000  100  101 E ReactNativeJS: token=secret-value\n";
           request.onStdoutChunk?.(new TextEncoder().encode(line));
           return result(request, {
             stdout: line,
           });
+        }
+        if (args.includes("package") && args.includes("-U")) {
+          return result(request, { stdout: "package:com.example.app uid:10123\n" });
         }
         if (args.includes("--no-rebind")) {
           mapped = true;
@@ -1380,10 +1409,13 @@ describe("runDev", () => {
       "stdout:password=[REDACTED]",
       "stderr:stderr is not failure",
     ]);
-    const logcatRequest = requests.find(({ args }) => args?.includes("logcat"));
+    const logcatRequest = requests.find(
+      ({ args }) => args?.includes("logcat") && !args.includes("--help"),
+    );
     const logStart = logcatRequest?.args?.indexOf("-T") ?? -1;
     expect(logStart).toBeGreaterThan(-1);
     expect(logcatRequest?.args?.[logStart + 1]).toBe("1");
+    expect(logcatRequest?.args).toContain("--uid=10123");
     const serializedJournal = JSON.stringify(execution.result.data?.journal.events);
     expect(serializedJournal).not.toContain("hunter2");
     expect(serializedJournal).not.toContain("secret-value");
@@ -1406,8 +1438,86 @@ describe("runDev", () => {
       "ended",
     ]);
     expect(execution.result.problems).toContainEqual(
-      expect.objectContaining({ code: "REACT_NATIVE_FATAL", severity: "warning" }),
+      expect.objectContaining({
+        code: "REACT_NATIVE_FATAL",
+        severity: "warning",
+        summary: expect.stringContaining("selected application"),
+      }),
     );
+  });
+
+  test("keeps crashes from unrelated device processes out of app diagnostics", async () => {
+    const line = "09-10 10:00:00.000  900  901 F AndroidRuntime: FATAL EXCEPTION: uiautomator\n";
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      if (request.args?.includes("logcat")) {
+        request.onStdoutChunk?.(new TextEncoder().encode(line));
+        return result(request, { stdout: line });
+      }
+      return result(request);
+    });
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        preset: "custom",
+        command: { executable: "dev-server", args: ["serve"] },
+        reversePorts: [],
+        watch: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.problems.map(({ code }) => code)).not.toContain(
+      "ANDROID_FATAL_EXCEPTION",
+    );
+    expect(execution.result.data?.journal.events).toContainEqual(
+      expect.objectContaining({
+        type: "log.unattributed",
+        severity: "info",
+        data: expect.objectContaining({
+          attribution: "unattributed",
+          findingCode: "ANDROID_FATAL_EXCEPTION",
+          pid: 900,
+        }),
+      }),
+    );
+    expect(
+      execution.result.data?.journal.events.some(({ type }) => type === "log.problem"),
+    ).toBeFalse();
+  });
+
+  test("keeps logs unattributed when the configured app is still unavailable after ready", async () => {
+    const deps = dependencies(async (request) => targetProbe(request) ?? result(request));
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        applicationId: "com.example.missing",
+        preset: "custom",
+        command: { executable: "dev-server", args: ["serve"] },
+        reversePorts: [],
+        watch: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.journal.events).toContainEqual(
+      expect.objectContaining({
+        type: "log.scope.unavailable",
+        severity: "warning",
+        data: {
+          applicationId: "com.example.missing",
+          attribution: "unattributed",
+        },
+      }),
+    );
+    expect(execution.result.problems).toEqual([]);
   });
 
   test("does not mark a session ready until every configured readiness assertion passes", async () => {

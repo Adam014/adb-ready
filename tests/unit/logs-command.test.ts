@@ -326,6 +326,10 @@ describe("runLogs", () => {
         requests.push(request);
         return result(request, "package:com.example.demo uid:10123\n");
       }
+      if (request.args?.includes("--help")) {
+        requests.push(request);
+        return result(request, "  --uid=UIDS  filter by UID\n");
+      }
       if (baseRunner === undefined) throw new Error("missing fixture runner");
       return await baseRunner(request);
     };
@@ -334,8 +338,38 @@ describe("runLogs", () => {
 
     expect(execution.result.data).toMatchObject({ uid: 10123 });
     expect(execution.result.data?.pid).toBeUndefined();
-    expect(requests.find(({ args }) => args?.includes("logcat"))?.args).toContain("--uid=10123");
+    expect(
+      requests.find(({ args }) => args?.includes("logcat") && !args.includes("--help"))?.args,
+    ).toContain("--uid=10123");
     expect(requests.some(({ args }) => args?.includes("pidof"))).toBeFalse();
+  });
+
+  test("falls back to the current package PID when logcat lacks UID filtering", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = dependencies(requests, "456\n");
+    const baseRunner = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("packages")) {
+        requests.push(request);
+        return result(request, "package:com.example.demo uid:10123\n");
+      }
+      if (request.args?.includes("--help")) {
+        requests.push(request);
+        return result(request, "logcat options without UID filtering\n");
+      }
+      if (baseRunner === undefined) throw new Error("missing fixture runner");
+      return await baseRunner(request);
+    };
+
+    const execution = await runLogs({ packageName: "com.example.demo", dump: true }, {}, deps);
+
+    expect(execution.result.data).toMatchObject({ pid: 456 });
+    expect(execution.result.data?.uid).toBeUndefined();
+    const logcat = requests.find(
+      ({ args }) => args?.includes("logcat") && !args.includes("--help"),
+    );
+    expect(logcat?.args).toContain("--pid=456");
+    expect(logcat?.args).not.toContain("--uid=10123");
   });
 
   test("emits one structured finding for repeated fatal markers", async () => {

@@ -11,6 +11,10 @@ breaking changes.
 
 ### Fixed
 
+- Scope development-session crash diagnostics to a verified Android package
+  UID or PID, retarget Expo logs after its resolved launch, and keep unrelated
+  target-process crashes out of application problems and below attributed
+  evidence in prioritized AI context.
 - Serialize Android UI hierarchy capture per target across CLI and MCP
   processes, preventing concurrent read-only automation from racing the
   platform's single active UI Automation service, without taking a mutation

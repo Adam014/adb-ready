@@ -6,8 +6,11 @@ export type LogFindingCode =
   | "ANDROID_NATIVE_CRASH"
   | "REACT_NATIVE_FATAL";
 
+export type LogAttribution = "application" | "device" | "process" | "unattributed";
+
 export interface LogFinding {
   code: LogFindingCode;
+  attribution: LogAttribution;
   summary: string;
   detail: string;
 }
@@ -21,12 +24,22 @@ const REACT_NATIVE_FATAL =
 export function classifyLogRecord(
   record: LogcatThreadtimeLine | undefined,
   raw: string,
+  attribution: LogAttribution,
 ): LogFinding | undefined {
   const message = record?.message ?? raw;
+  const subject =
+    attribution === "application"
+      ? "the selected application"
+      : attribution === "process"
+        ? "the selected process"
+        : attribution === "device"
+          ? "a device process"
+          : "an unattributed device process";
   if (ANR.test(message)) {
     return {
       code: "ANDROID_ANR",
-      summary: "Android reported an application-not-responding event.",
+      attribution,
+      summary: `Android reported an application-not-responding event from ${subject}.`,
       detail:
         "Inspect the surrounding main/system log timeline for the blocked component and process.",
     };
@@ -37,14 +50,16 @@ export function classifyLogRecord(
   ) {
     return {
       code: "ANDROID_FATAL_EXCEPTION",
-      summary: "Android reported a fatal application exception.",
+      attribution,
+      summary: `Android reported a fatal exception from ${subject}.`,
       detail: "Inspect the following stack frames in the saved session or exported AI context.",
     };
   }
   if (NATIVE_CRASH.test(message) || (record?.tag === "DEBUG" && record.priority === "F")) {
     return {
       code: "ANDROID_NATIVE_CRASH",
-      summary: "Android reported a native application crash.",
+      attribution,
+      summary: `Android reported a native crash from ${subject}.`,
       detail: "Inspect the crash buffer and adjacent tombstone or backtrace records.",
     };
   }
@@ -54,7 +69,8 @@ export function classifyLogRecord(
   ) {
     return {
       code: "REACT_NATIVE_FATAL",
-      summary: "React Native reported an application error.",
+      attribution,
+      summary: `React Native reported an error from ${subject}.`,
       detail: "Inspect the surrounding JavaScript error and component stack in the saved session.",
     };
   }
