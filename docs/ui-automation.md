@@ -23,6 +23,13 @@ UI Automator waits for a quiet accessibility window before returning data.
 quiet window; pause the changing UI or navigate to a stable screen and retry.
 ADB Ready does not silently disable device-wide animations.
 
+Android permits only one active UI Automation service on a target. ADB Ready
+therefore serializes the short hierarchy-capture step per target, including
+across separate CLI and MCP processes. Independent targets still run in
+parallel, and selector processing or input does not hold the capture lock. If
+another process does not finish within the configured UI timeout, the command
+returns `UI_HIERARCHY_BUSY` instead of misreporting an inaccessible screen.
+
 ## Audit one screen for people and agents
 
 ```bash

@@ -2210,6 +2210,12 @@ describe("runCli", () => {
         if (args.includes("host-features")) return result(request, "shell_v2\n");
         if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
         if (args.includes("ro.serialno")) return result(request, "PHONE-1\n");
+        if (args.includes("uiautomator")) {
+          return result(
+            request,
+            '<?xml version="1.0"?><hierarchy><node text="Ready" package="com.example.app" class="android.widget.TextView" enabled="true" bounds="[0,0][100,100]" /></hierarchy>',
+          );
+        }
         return result(request, "");
       };
       return fixture;
@@ -2237,6 +2243,18 @@ describe("runCli", () => {
         { directory: leaseDirectory, heartbeatIntervalMs: 0 },
       );
       expect(owner.ok).toBeTrue();
+      const readStreams = io();
+      expect(
+        await runCli(
+          ["ui", "find", "text=Ready", "--device", "USB-1", "--json", "--non-interactive"],
+          readStreams,
+          withIdentity(leaseDirectory),
+        ),
+      ).toBe(ExitCode.Success);
+      expect(JSON.parse(readStreams.output.value)).toMatchObject({
+        ok: true,
+        data: { action: "find", matchCount: 1 },
+      });
       const busyStreams = io();
       expect(
         await runCli(

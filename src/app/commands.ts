@@ -57,6 +57,7 @@ import {
   targetInventoryProblems,
   targetSelectionProblem,
 } from "../domain/problems.js";
+import type { UiHierarchyLockOptions } from "../evidence/ui-hierarchy-capture.js";
 import { classifyLogRecord, type LogFinding } from "../logs/classifier.js";
 import { locateAdb, locateExecutable } from "../platform/executable.js";
 import { type ProcessResult, type ProcessRunner, runProcess } from "../platform/process-runner.js";
@@ -120,6 +121,7 @@ export interface CommandDependencies {
   ensureLoopbackBridge?: typeof ensureLoopbackBridge;
   resolveExpoLaunch?: typeof resolveExpoLaunch;
   sendExpoControl?: typeof sendExpoControl;
+  uiHierarchyLock?: UiHierarchyLockOptions;
 }
 
 export interface CommandExecution<T> {
@@ -3703,8 +3705,17 @@ export async function runDev(
     createAdbReadinessProbe({
       client: healthClient,
       target,
+      targetIdentity: selected.target.id,
+      commandId: context.commandId,
       logLines: () => recentLogLines,
       ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+      uiHierarchyLock: {
+        ...dependencies.uiHierarchyLock,
+        lease: {
+          ...(dependencies.env === undefined ? {} : { env: dependencies.env }),
+          ...dependencies.uiHierarchyLock?.lease,
+        },
+      },
     }),
     {
       signal: readinessController.signal,

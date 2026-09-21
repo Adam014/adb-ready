@@ -22,6 +22,7 @@ import {
   parseUiHierarchy,
   type UiHierarchySnapshot,
 } from "./ui-hierarchy.js";
+import { captureUiHierarchy } from "./ui-hierarchy-capture.js";
 
 export interface InspectAppRequest {
   cwd: string;
@@ -164,25 +165,38 @@ export async function runInspectUi(
   }
   const ready = await readyTarget(current, config, dependencies, problems, signal);
   if (ready === undefined) return finish<InspectUiData>(current, null, problems);
-  const hierarchy = await ready.client.targetCommand(
-    ready.target,
-    "inspect-ui",
-    "Reading Android accessibility hierarchy",
-    ["exec-out", "uiautomator", "dump", "/dev/tty"],
-    (output) =>
-      parseUiHierarchy(output, {
-        ...(request.interactiveOnly === undefined
-          ? {}
-          : { interactiveOnly: request.interactiveOnly }),
-        maxDepth,
-        maxNodes: 2_000,
-      }),
-    signal,
-    {
-      maxBufferBytes: 8 * 1024 * 1024,
-      timeoutMs: config.uiTimeoutMs ?? config.timeoutMs ?? DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
+  const captured = await captureUiHierarchy({
+    client: ready.client,
+    target: ready.target,
+    targetIdentity: ready.selected.target.id,
+    commandId: current.commandId,
+    operation: "inspect-ui",
+    message: "Reading Android accessibility hierarchy",
+    timeoutMs: config.uiTimeoutMs ?? config.timeoutMs ?? DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
+    maxBufferBytes: 8 * 1024 * 1024,
+    ...(signal === undefined ? {} : { signal }),
+    lock: {
+      ...dependencies.uiHierarchyLock,
+      lease: {
+        ...(dependencies.env === undefined ? {} : { env: dependencies.env }),
+        ...dependencies.uiHierarchyLock?.lease,
+      },
     },
-  );
+  });
+  if (!captured.ok) {
+    problems.push(captured.problem);
+    return finish<InspectUiData>(current, null, problems);
+  }
+  const hierarchy = {
+    ...captured.observation,
+    value: parseUiHierarchy(captured.observation.value, {
+      ...(request.interactiveOnly === undefined
+        ? {}
+        : { interactiveOnly: request.interactiveOnly }),
+      maxDepth,
+      maxNodes: 2_000,
+    }),
+  };
   if (!succeeded(hierarchy.process)) {
     problems.push(operationProblem("inspect-ui", hierarchy, current.commandId));
     return finish<InspectUiData>(current, null, problems);
