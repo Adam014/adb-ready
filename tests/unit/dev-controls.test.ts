@@ -107,4 +107,51 @@ describe("development live-control input", () => {
     expect(input.isRaw).toBeFalse();
     expect(sink.value).toBe("");
   });
+
+  test("keeps the session usable when an Expo action is rejected or fails", async () => {
+    const input = new FakeInput();
+    const sink = new MemorySink();
+    const binding = startDevControls({
+      capabilities,
+      input,
+      sink,
+      controls: {
+        preset: "expo",
+        execute: async (action) => {
+          if (action === "dev-menu") throw new Error("socket closed");
+          return {
+            action,
+            connectedClients: 0,
+            detail: "No Expo app is connected yet.",
+            ok: false,
+          };
+        },
+      },
+    });
+
+    input.send("r");
+    await Bun.sleep(0);
+    input.send("m");
+    await Bun.sleep(0);
+
+    expect(sink.value).toContain("! No Expo app is connected yet.");
+    expect(sink.value).toContain("! Expo control failed safely.");
+    binding?.dispose();
+  });
+
+  test("fails closed and restores terminal state when raw-mode setup throws", () => {
+    const input = new FakeInput();
+    input.setRawMode = () => {
+      throw new Error("unsupported");
+    };
+    const sink = new MemorySink();
+    const controls: DevLiveControls = {
+      preset: "expo",
+      execute: async (action) => ({ action, connectedClients: 0, detail: "unused", ok: false }),
+    };
+
+    expect(startDevControls({ capabilities, controls, input, sink })).toBeUndefined();
+    expect(input.paused).toBeTrue();
+    expect(input.listeners.size).toBe(0);
+  });
 });

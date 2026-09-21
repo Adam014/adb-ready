@@ -136,6 +136,112 @@ describe("Expo live controls", () => {
       }),
     ).toMatchObject({ ok: false, detail: expect.stringContaining("cancelled") });
     expect(constructed).toBeFalse();
+
+    expect(
+      await sendExpoControl({
+        action: "reload",
+        endpoint: "not a URL",
+        socketFactory: factory,
+      }),
+    ).toMatchObject({ ok: false, detail: expect.stringContaining("verified local") });
+
+    expect(
+      await sendExpoControl({
+        action: "reload",
+        endpoint: "http://localhost:8081",
+        socketFactory: () => {
+          throw new Error("unavailable");
+        },
+      }),
+    ).toMatchObject({
+      ok: false,
+      detail: "The local Expo control channel could not be opened.",
+    });
+  });
+
+  test("accepts Expo peer responses carried as ArrayBuffer and typed-array data", async () => {
+    for (const encode of [
+      (value: string) => new TextEncoder().encode(value).buffer,
+      (value: string) => new TextEncoder().encode(value),
+    ]) {
+      const socket = new FakeSocket();
+      socket.send = (value) => {
+        socket.sent.push(value);
+        const message = JSON.parse(value);
+        if (message.method === "getpeers") {
+          const response = JSON.stringify({
+            id: message.id,
+            result: { app: { platform: "android" } },
+            version: 2,
+          });
+          queueMicrotask(() => socket.emit("message", { data: encode(response) }));
+        }
+      };
+      const resultPromise = sendExpoControl({
+        action: "reload",
+        endpoint: "http://localhost:8081",
+        socketFactory: () => {
+          queueMicrotask(() => socket.emit("open", {}));
+          return socket;
+        },
+      });
+
+      await expect(resultPromise).resolves.toMatchObject({ ok: true });
+    }
+  });
+
+  test("ignores malformed and unrelated peer messages before the matching response", async () => {
+    const socket = new FakeSocket();
+    socket.send = (value) => {
+      socket.sent.push(value);
+      const message = JSON.parse(value);
+      if (message.method === "getpeers") {
+        queueMicrotask(() => {
+          socket.emit("message", { data: "{" });
+          socket.emit("message", {
+            data: JSON.stringify({ id: "another-request", result: {}, version: 2 }),
+          });
+          socket.emit("message", {
+            data: JSON.stringify({ id: message.id, result: { app: {} }, version: 2 }),
+          });
+        });
+      }
+    };
+
+    await expect(
+      sendExpoControl({
+        action: "reload",
+        endpoint: "http://localhost:8081",
+        socketFactory: () => {
+          queueMicrotask(() => socket.emit("open", {}));
+          return socket;
+        },
+      }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  test("reports a control broadcast that fails after peer discovery", async () => {
+    const socket = new FakeSocket();
+    const send = socket.send.bind(socket);
+    socket.respondWithPeers = { app: {} };
+    socket.send = (value) => {
+      if (JSON.parse(value).method === "reload") throw new Error("closed");
+      send(value);
+    };
+
+    await expect(
+      sendExpoControl({
+        action: "reload",
+        endpoint: "http://localhost:8081",
+        socketFactory: () => {
+          queueMicrotask(() => socket.emit("open", {}));
+          return socket;
+        },
+      }),
+    ).resolves.toMatchObject({
+      detail: "The local Expo control channel could not send the requested action.",
+      ok: false,
+    });
   });
 
   test("reports synchronous socket send failures without escaping the input handler", async () => {
