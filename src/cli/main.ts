@@ -620,6 +620,30 @@ function autonomousProblem(
   };
 }
 
+function emitRunPreparation(
+  bus: EventBus,
+  commandId: string,
+  status: "completed" | "failed" | "started",
+  phase: "artifact" | "deployment" | "target-profile",
+  message: string,
+  data?: Record<string, boolean | number | string>,
+): void {
+  bus.emit({
+    type: `operation.${status}`,
+    source: `run.${phase}`,
+    severity: status === "failed" ? "error" : "info",
+    message,
+    correlation: { commandId, operationId: phase },
+    data: { phase, ...(data ?? {}) },
+  });
+}
+
+function runArtifactKindLabel(kind: "aab" | "apk" | "apks" | "split-apks"): string {
+  if (kind === "split-apks") return "split APKs";
+  if (kind === "apks") return "APK Set";
+  return kind.toUpperCase();
+}
+
 function configProblems(errors: readonly ConfigError[]): Problem[] {
   return errors.map((error) => ({
     code: error.code,
@@ -1147,6 +1171,9 @@ async function runCliInternal(
   let autonomousAdb: string | undefined;
   const autonomousRun =
     options.command === "run" && (options.avdName !== undefined || options.deployArtifact === true);
+  const runPreparationCommandId = autonomousRun
+    ? (dependencies.idFactory ?? randomUUID)()
+    : "run-preparation";
   const finishAutonomousFailure = async (
     problems: Problem[],
     requestedExitCode: number,
@@ -1936,6 +1963,13 @@ async function runCliInternal(
             );
             preparationExitCode = ExitCode.Target;
           } else {
+            emitRunPreparation(
+              bus,
+              runPreparationCommandId,
+              "started",
+              "target-profile",
+              "Inspecting Android target for deployment",
+            );
             const profile = await (
               dependencies.inspectAndroidTargetProfile ?? inspectAndroidTargetProfile
             )(
@@ -1943,10 +1977,35 @@ async function runCliInternal(
               dependencies.runner,
             );
             if (!profile.ok) {
+              emitRunPreparation(
+                bus,
+                runPreparationCommandId,
+                "failed",
+                "target-profile",
+                "Android target inspection failed",
+              );
               preparationProblem = autonomousProblem(profile.failure, "target.profile");
               preparationExitCode = ExitCode.Target;
             } else {
+              emitRunPreparation(
+                bus,
+                runPreparationCommandId,
+                "completed",
+                "target-profile",
+                "Android target profile ready",
+                {
+                  abiCount: profile.profile.abis.length,
+                  localeCount: profile.profile.locales.length,
+                },
+              );
               autonomousEvidence = { ...autonomousEvidence, targetProfile: profile.profile };
+              emitRunPreparation(
+                bus,
+                runPreparationCommandId,
+                "started",
+                "artifact",
+                "Resolving Android build artifact",
+              );
               const resolution = await (
                 dependencies.resolveAndroidArtifact ?? resolveAndroidArtifact
               )({
@@ -1960,14 +2019,46 @@ async function runCliInternal(
                 device: profile.profile,
               });
               if (!resolution.ok) {
+                emitRunPreparation(
+                  bus,
+                  runPreparationCommandId,
+                  "failed",
+                  "artifact",
+                  "Android artifact resolution failed",
+                );
                 preparationProblem = autonomousProblem(resolution.failure, "input.artifact");
                 preparationExitCode = ExitCode.InvalidInput;
               } else {
                 autonomousEvidence = { ...autonomousEvidence, artifact: resolution.artifact };
+                emitRunPreparation(
+                  bus,
+                  runPreparationCommandId,
+                  "completed",
+                  "artifact",
+                  `Selected ${runArtifactKindLabel(resolution.artifact.kind)} artifact${resolution.artifact.variant === undefined ? "" : ` · ${resolution.artifact.variant}`} · ${String(resolution.artifact.files.length)} ${resolution.artifact.files.length === 1 ? "file" : "files"}`,
+                  {
+                    artifactKind: resolution.artifact.kind,
+                    fileCount: resolution.artifact.files.length,
+                    ...(resolution.artifact.applicationId === undefined
+                      ? {}
+                      : { applicationId: resolution.artifact.applicationId }),
+                    ...(resolution.artifact.variant === undefined
+                      ? {}
+                      : { variant: resolution.artifact.variant }),
+                  },
+                );
                 const bundletool =
                   androidCapabilities === undefined
                     ? undefined
                     : capability(androidCapabilities, "bundletool");
+                emitRunPreparation(
+                  bus,
+                  runPreparationCommandId,
+                  "started",
+                  "deployment",
+                  `Installing ${runArtifactKindLabel(resolution.artifact.kind)} on ${serial}`,
+                  { artifactKind: resolution.artifact.kind },
+                );
                 const deployed = await (
                   dependencies.deployAndroidArtifact ?? deployAndroidArtifact
                 )(
@@ -1984,6 +2075,13 @@ async function runCliInternal(
                   { ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }) },
                 );
                 if (!deployed.ok) {
+                  emitRunPreparation(
+                    bus,
+                    runPreparationCommandId,
+                    "failed",
+                    "deployment",
+                    "Android artifact deployment failed",
+                  );
                   const category =
                     deployed.failure.code === "DEPLOYMENT_TOOL_REQUIRED"
                       ? "environment.deployment"
@@ -2002,6 +2100,25 @@ async function runCliInternal(
                     ...autonomousEvidence,
                     deployment: deployed.deployment,
                   };
+                  emitRunPreparation(
+                    bus,
+                    runPreparationCommandId,
+                    "completed",
+                    "deployment",
+                    `Installed and verified ${deployed.deployment.applicationId}`,
+                    {
+                      applicationId: deployed.deployment.applicationId,
+                      artifactKind: deployed.deployment.artifactKind,
+                      installed: deployed.deployment.installed,
+                      launchable: deployed.deployment.launchable,
+                      ...(deployed.deployment.versionCode === undefined
+                        ? {}
+                        : { versionCode: deployed.deployment.versionCode }),
+                      ...(deployed.deployment.versionName === undefined
+                        ? {}
+                        : { versionName: deployed.deployment.versionName }),
+                    },
+                  );
                 }
               }
             }

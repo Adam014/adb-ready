@@ -82,6 +82,72 @@ describe("result renderer", () => {
     expect(sink.value).not.toContain("\u001b");
   });
 
+  test("surfaces autonomous deployment evidence without exposing artifact paths", () => {
+    const autonomous: ResultEnvelope<unknown> = {
+      ...result,
+      command: "run",
+      data: {
+        outcome: "success",
+        session: null,
+        evidence: { path: ".adb-ready/artifacts/run-1" },
+        automation: {
+          avd: {
+            name: "Pixel_9_API_36",
+            serial: "emulator-5554",
+            ownership: "owned",
+            readiness: {
+              adb: true,
+              boot: true,
+              packageManager: true,
+              unlocked: true,
+              attempts: 2,
+              durationMs: 500,
+            },
+          },
+          artifact: {
+            kind: "apk",
+            files: ["/private/workspace/app-debug.apk"],
+            applicationId: "com.example.ready",
+            variant: "debug",
+            versionCode: 42,
+            versionName: "1.0.0",
+            provenance: { kind: "agp-output-metadata", source: "/private/metadata.json" },
+          },
+          deployment: {
+            artifactKind: "apk",
+            applicationId: "com.example.ready",
+            serial: "emulator-5554",
+            installed: true,
+            launchable: true,
+            activity: ".MainActivity",
+            versionCode: 42,
+            versionName: "1.0.0",
+            temporaryApkSetCreated: false,
+            temporaryApkSetCleaned: false,
+          },
+        },
+      },
+    };
+    const human = new MemorySink();
+    renderResult(autonomous, { format: "human", capabilities, sink: human });
+
+    expect(human.value).toContain("Emulator Pixel_9_API_36 · started for this run");
+    expect(human.value).toContain("Artifact APK · debug · 1 file · 1.0.0 (42)");
+    expect(human.value).toContain("Deploy   com.example.ready · installed and verified");
+    expect(human.value).toContain("Launch   .MainActivity · launchable");
+    expect(human.value).not.toContain("/private/workspace");
+
+    const plain = new MemorySink();
+    renderResult(autonomous, { format: "plain", capabilities, sink: plain });
+    expect(plain.value).toContain("emulator_ownership=owned\n");
+    expect(plain.value).toContain("artifact_kind=apk\n");
+    expect(plain.value).toContain("artifact_file_count=1\n");
+    expect(plain.value).toContain("deployment_application_id=com.example.ready\n");
+    expect(plain.value).toContain("deployment_installed=true\n");
+    expect(plain.value).toContain("deployment_launchable=true\n");
+    expect(plain.value).not.toContain("/private/workspace");
+  });
+
   test("renders discoverable wireless services separately from connected targets", () => {
     const wireless: ResultEnvelope<unknown> = {
       ...result,

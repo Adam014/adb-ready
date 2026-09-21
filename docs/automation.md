@@ -204,6 +204,15 @@ an explicit or locally verified bundletool; ADB Ready never downloads one in
 the background. The installed package, version, ABI compatibility, and launch
 activity are independently verified before the project or verifier runs.
 
+During an interactive run, the terminal shows target inspection, artifact
+selection, and install verification as distinct live steps. The final summary
+identifies the artifact kind, variant, file count, package, version, launch
+activity, and whether a requested emulator was started or reused. Local
+artifact paths remain in the redacted evidence bundle instead of being exposed
+in the compact human summary. `--plain` exposes the same result as stable
+line-oriented `artifact_*`, `deployment_*`, and `emulator_*` fields; `--json`
+and `--ndjson` retain the complete structured automation data.
+
 The evidence manifest also includes the verifier's bounded, redacted native
 stdout and stderr. Preparation failures still publish the same result,
 problems, JUnit, and evidence contract after owned-resource cleanup.
