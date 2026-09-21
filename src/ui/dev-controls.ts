@@ -1,5 +1,8 @@
-import type { ExpoControlAction } from "../dev/expo-controls.js";
-import type { DevLiveControls, DevLiveControlsBinding } from "../dev/live-controls.js";
+import type {
+  DevLiveControls,
+  DevLiveControlsBinding,
+  ExpoControlAction,
+} from "../dev/expo-controls.js";
 import type { SelectInput } from "./select.js";
 import type { TextSink } from "./spinner.js";
 import { sanitizeTerminalText, style, symbols } from "./style.js";

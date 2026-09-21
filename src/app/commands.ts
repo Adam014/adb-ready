@@ -21,10 +21,14 @@ import { EventBus } from "../core/event-bus.js";
 import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.js";
 import { redactText } from "../core/redaction.js";
 import { TextLineBuffer } from "../core/text-lines.js";
-import { type ExpoControlAction, sendExpoControl } from "../dev/expo-controls.js";
+import {
+  type DevLiveControlsBinding,
+  type DevLiveControlsReady,
+  type ExpoControlAction,
+  sendExpoControl,
+} from "../dev/expo-controls.js";
 import { type ExpoLaunchResolution, resolveExpoLaunch } from "../dev/expo-launch.js";
 import { type DevHook, type DevHookEvent, type HookRun, runHooks } from "../dev/hooks.js";
-import type { DevLiveControlsBinding, DevLiveControlsReady } from "../dev/live-controls.js";
 import { type DiscoveredLocalService, discoverExpoLocalServices } from "../dev/local-services.js";
 import { ensureLoopbackBridge, type LoopbackBridge } from "../dev/loopback-bridge.js";
 import { type MetroServiceProbeResult, probeMetroService } from "../dev/metro-service.js";

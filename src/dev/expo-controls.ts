@@ -7,6 +7,20 @@ export interface ExpoControlResult {
   ok: boolean;
 }
 
+export interface DevLiveControls {
+  execute(action: ExpoControlAction, signal?: AbortSignal): Promise<ExpoControlResult>;
+  preset: "expo";
+}
+
+export interface DevLiveControlsBinding {
+  dispose(): void;
+  stopRequested: Promise<void>;
+}
+
+export type DevLiveControlsReady = (
+  controls: DevLiveControls,
+) => DevLiveControlsBinding | undefined;
+
 interface SocketEventMap {
   close: { code?: number; reason?: string };
   error: unknown;

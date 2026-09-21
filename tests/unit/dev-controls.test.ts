@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ExpoControlAction } from "../../src/dev/expo-controls.js";
-import type { DevLiveControls } from "../../src/dev/live-controls.js";
+import type { DevLiveControls, ExpoControlAction } from "../../src/dev/expo-controls.js";
 import { renderDevControlHelp, startDevControls } from "../../src/ui/dev-controls.js";
 import type { SelectInput } from "../../src/ui/select.js";
 import type { TextSink } from "../../src/ui/spinner.js";
