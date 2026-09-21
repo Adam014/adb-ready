@@ -594,10 +594,13 @@ describe("runDev", () => {
         conflicts: [],
       },
     });
-    deps.probeMetroService = async () => ({
-      status: "available",
-      endpoint: "http://127.0.0.1:8081",
-    });
+    deps.probeMetroService = async (options) => {
+      expect(options.expectedProjectRoot).toBe("/workspace/app");
+      return {
+        status: "available",
+        endpoint: "http://127.0.0.1:8081",
+      };
+    };
 
     const execution = await runDev(
       {
@@ -675,11 +678,14 @@ describe("runDev", () => {
         conflicts: [],
       },
     });
-    deps.probeMetroService = async () => ({
-      status: "occupied",
-      endpoint: "http://127.0.0.1:8081",
-      detail: "The service did not return Metro's running status.",
-    });
+    deps.probeMetroService = async (options) => {
+      expect(options.expectedProjectRoot).toBe("/workspace/app");
+      return {
+        status: "occupied",
+        endpoint: "http://127.0.0.1:8081",
+        detail: "Metro belongs to a different project root.",
+      };
+    };
 
     const execution = await runDev(
       {
@@ -696,7 +702,12 @@ describe("runDev", () => {
     expect(requests.some(({ executable }) => executable === "project-start")).toBeFalse();
     expect(mapped).toBeFalse();
     expect(execution.result.problems).toContainEqual(
-      expect.objectContaining({ code: ProblemCode.DevelopmentServiceConflict }),
+      expect.objectContaining({
+        code: ProblemCode.DevelopmentServiceConflict,
+        summary: "Port 8081 is occupied by a service ADB Ready cannot safely attach to.",
+        detail:
+          "Metro belongs to a different project root. Stop that service or configure the matching Metro host port before retrying.",
+      }),
     );
   });
 

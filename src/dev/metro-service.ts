@@ -1,8 +1,12 @@
+import { realpath } from "node:fs/promises";
 import { connect } from "node:net";
+import path from "node:path";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 1_000;
 const MAX_STATUS_BYTES = 128;
+const MAX_PROJECT_ROOT_BYTES = 4_096;
 const METRO_STATUS = "packager-status:running";
+const METRO_PROJECT_ROOT_HEADER = "x-react-native-project-root";
 
 function aborted(signal?: AbortSignal): boolean {
   return signal?.aborted === true;
@@ -17,10 +21,14 @@ export type MetroServiceProbeResult =
 export interface MetroServiceProbeOptions {
   host: string;
   port: number;
+  expectedProjectRoot?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   connectPort?: (host: string, port: number, signal: AbortSignal) => Promise<boolean>;
-  fetchStatus?: (url: string, signal: AbortSignal) => Promise<{ status: number; body: string }>;
+  fetchStatus?: (
+    url: string,
+    signal: AbortSignal,
+  ) => Promise<{ status: number; body: string; projectRoot?: string }>;
 }
 
 async function portReachable(host: string, port: number, signal: AbortSignal): Promise<boolean> {
@@ -70,13 +78,44 @@ async function boundedResponse(response: Response): Promise<string> {
 async function fetchStatus(
   url: string,
   signal: AbortSignal,
-): Promise<{ status: number; body: string }> {
+): Promise<{ status: number; body: string; projectRoot?: string }> {
   const response = await fetch(url, {
     signal,
     redirect: "error",
     headers: { accept: "text/plain" },
   });
-  return { status: response.status, body: await boundedResponse(response) };
+  const projectRoot = response.headers.get(METRO_PROJECT_ROOT_HEADER) ?? undefined;
+  return {
+    status: response.status,
+    body: await boundedResponse(response),
+    ...(projectRoot === undefined ? {} : { projectRoot }),
+  };
+}
+
+async function canonicalProjectRoot(value: string): Promise<string | undefined> {
+  if (Buffer.byteLength(value, "utf8") > MAX_PROJECT_ROOT_BYTES) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURI(value);
+  } catch {
+    return undefined;
+  }
+  if (!path.isAbsolute(decoded)) return undefined;
+  const resolved = path.resolve(decoded);
+  const canonical = await realpath(resolved).catch(() => resolved);
+  return process.platform === "win32" ? canonical.toLocaleLowerCase("en-US") : canonical;
+}
+
+async function projectRootMatches(
+  observed: string | undefined,
+  expected: string,
+): Promise<boolean> {
+  if (observed === undefined) return false;
+  const [observedRoot, expectedRoot] = await Promise.all([
+    canonicalProjectRoot(observed),
+    canonicalProjectRoot(expected),
+  ]);
+  return observedRoot !== undefined && expectedRoot !== undefined && observedRoot === expectedRoot;
 }
 
 export async function probeMetroService(
@@ -107,7 +146,12 @@ export async function probeMetroService(
         `${endpoint}/status`,
         controller.signal,
       );
-      if (response.status === 200 && response.body.trim() === METRO_STATUS) {
+      const validStatus = response.status === 200 && response.body.trim() === METRO_STATUS;
+      if (
+        validStatus &&
+        (options.expectedProjectRoot === undefined ||
+          (await projectRootMatches(response.projectRoot, options.expectedProjectRoot)))
+      ) {
         return { status: "available", endpoint };
       }
       return {
@@ -116,7 +160,11 @@ export async function probeMetroService(
         detail:
           response.status !== 200
             ? `The Metro status endpoint returned HTTP ${String(response.status)}.`
-            : "The service did not return Metro's running status.",
+            : response.body.trim() !== METRO_STATUS
+              ? "The service did not return Metro's running status."
+              : response.projectRoot === undefined
+                ? "Metro did not identify its project root, so ADB Ready cannot attach safely."
+                : "Metro belongs to a different project root.",
       };
     } catch {
       if (aborted(options.signal)) return { status: "aborted", endpoint };

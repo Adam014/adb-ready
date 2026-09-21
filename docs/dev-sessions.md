@@ -107,8 +107,9 @@ The same switch is available to `adb-ready init`. It can also be persisted as
 
 For Expo and React Native, ADB Ready checks the local host behind the default
 device port `8081` before launching the project command. It attaches only when
-`/status` returns Metro's exact running-status response. An open port alone is
-not sufficient evidence.
+`/status` returns Metro's exact running-status response and Expo identifies the
+same canonical project root. An open port, an unidentified Metro server, or a
+Metro server belonging to another project is not sufficient evidence.
 
 An attached Metro server remains externally owned:
 
@@ -120,6 +121,8 @@ An attached Metro server remains externally owned:
   never restarts a process ADB Ready does not own.
 - A non-Metro service on the configured host port fails with
   `DEVELOPMENT_SERVICE_CONFLICT` and an actionable explanation.
+- A Metro server with a missing or different project identity fails with the
+  same safe conflict and remains untouched.
 
 Run Metro in its original terminal when you need its native reload or developer
 controls. A newly started Metro process continues to receive its controls

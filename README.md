@@ -152,9 +152,10 @@ session is ready. Input continues directly to the framework; automation and
 redirected output stay prompt-free.
 
 If Expo or React Native Metro is already running, ADB Ready verifies its
-standard status endpoint and attaches the Android session without restarting or
-owning that server. An unrelated process on the same port is reported as a
-clear conflict instead of being mistaken for Metro.
+standard status endpoint and project identity before attaching the Android
+session without restarting or owning that server. A Metro server from another
+project—or an unrelated process on the same port—is reported as a clear
+conflict instead of being reused.
 
 [Reach your first ready session →](./docs/getting-started.md)
 

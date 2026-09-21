@@ -107,6 +107,7 @@ export interface CommandDependencies {
   probeMetroService?: (options: {
     host: string;
     port: number;
+    expectedProjectRoot?: string;
     signal?: AbortSignal;
   }) => Promise<MetroServiceProbeResult>;
   resolveExpoLaunch?: typeof resolveExpoLaunch;
@@ -3403,6 +3404,7 @@ export async function runDev(
     const probe = await (dependencies.probeMetroService ?? probeMetroService)({
       host: "127.0.0.1",
       port: metroPort,
+      expectedProjectRoot: project.root,
       ...(signal === undefined ? {} : { signal }),
     });
     if (probe.status === "available") {
@@ -3424,7 +3426,7 @@ export async function runDev(
         commandProblem(
           ProblemCode.DevelopmentServiceConflict,
           "child.service.conflict",
-          `Port ${String(metroPort)} is occupied by a service that is not Metro.`,
+          `Port ${String(metroPort)} is occupied by a service ADB Ready cannot safely attach to.`,
           `${probe.detail} Stop that service or configure the matching Metro host port before retrying.`,
           context.commandId,
           [{ source: "metro.status", field: "endpoint", value: probe.endpoint }],
@@ -3810,6 +3812,7 @@ export async function runDev(
         : await (dependencies.probeMetroService ?? probeMetroService)({
             host: "127.0.0.1",
             port: Number(new URL(attachedService.endpoint).port),
+            expectedProjectRoot: project.root,
             signal: watchSignal,
           });
     const serviceReady = attachedProbe === undefined || attachedProbe.status === "available";

@@ -9,6 +9,12 @@ breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Verify Expo's canonical project identity before attaching to an existing
+  Metro server, preventing a development session from silently reusing another
+  project's server on the same port.
+
 ### Added
 
 - Model optional Android tooling as typed `supported`, `unavailable`,
