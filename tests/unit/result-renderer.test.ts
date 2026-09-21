@@ -148,8 +148,8 @@ describe("result renderer", () => {
     expect(records[1]).toMatchObject({ kind: "result", command: "devices", ok: true });
   });
 
-  test("renders port lists without confusing them with saved sessions", () => {
-    for (const mappings of [[], [{ direction: "forward", device: "tcp:8081", host: "tcp:8081" }]]) {
+  test("renders port lists with explicit endpoint roles and directions", () => {
+    for (const mappings of [[], [{ direction: "forward", device: "tcp:3000", host: "tcp:9229" }]]) {
       const ports: ResultEnvelope<unknown> = {
         ...result,
         command: "ports forward list",
@@ -172,7 +172,30 @@ describe("result renderer", () => {
       ).not.toThrow();
       expect(human.value).toContain(`Mappings (${String(mappings.length)})`);
       expect(plain.value).toContain(`mapping_count=${String(mappings.length)}`);
+      if (mappings.length > 0) {
+        expect(human.value).toContain("host tcp:9229 -> device tcp:3000");
+        expect(human.value).not.toContain("↔");
+      }
     }
+
+    const reverse: ResultEnvelope<unknown> = {
+      ...result,
+      command: "ports reverse list",
+      data: {
+        direction: "reverse",
+        action: "list",
+        status: "listed",
+        selected: { transport: { serial: "USB-1" } },
+        mappings: [{ direction: "reverse", device: "tcp:8081", host: "tcp:3000" }],
+      },
+    };
+    const unicode = new MemorySink();
+    renderResult(reverse, {
+      format: "human",
+      capabilities: { ...capabilities, unicode: true },
+      sink: unicode,
+    });
+    expect(unicode.value).toContain("device tcp:8081 → host tcp:3000");
   });
 
   test("renders saved session timelines and problem summaries for humans", () => {

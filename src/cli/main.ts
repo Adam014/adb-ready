@@ -389,9 +389,11 @@ For automation, pipe the code and add --pairing-code-stdin.
   adb-ready ports forward add HOST_PORT [DEVICE_PORT] [options]
   adb-ready ports forward remove HOST_PORT [options]
 
-Manages TCP mappings for one deterministic Android target. A missing second
-port means the same port on both sides. Add is idempotent and never overwrites
-an existing mapping. Use --dry-run to inspect the exact ADB plan.
+Manages TCP mappings for one deterministic Android target. Forward listens on
+the host and routes host -> device. Reverse listens on the selected device and
+routes device -> host. A missing second port means the same port on both sides.
+Add is idempotent and never overwrites an existing mapping. Use --dry-run to
+inspect the exact ADB plan.
 `,
   problems: `Usage: adb-ready problems [SESSION] [options]
 

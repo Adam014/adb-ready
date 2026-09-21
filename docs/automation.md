@@ -131,6 +131,15 @@ adb-ready run --avd Pixel_9_API_36 --deploy --dry-run --json -- maestro test smo
 Plan steps declare their risk. A dry run performs no pairing, connection,
 mapping, hook, or child-process mutation.
 
+Port endpoints are always named by their role. Forward mappings listen on the
+host and route to the selected device; reverse mappings listen on the device
+and route back to the host:
+
+```bash
+adb-ready ports forward add 9229 3000 --dry-run  # host 9229 -> device 3000
+adb-ready ports reverse add 8081 3000 --dry-run  # device 8081 -> host 3000
+```
+
 ## Run one bounded verification
 
 Use `run` when CI or an agent must prove a workflow and then exit instead of
