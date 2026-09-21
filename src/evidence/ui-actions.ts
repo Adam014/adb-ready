@@ -16,6 +16,7 @@ import {
   type UiHierarchySnapshot,
   type UiNode,
 } from "./ui-hierarchy.js";
+import { captureUiHierarchy } from "./ui-hierarchy-capture.js";
 
 export type UiAction =
   | "assert"
@@ -179,18 +180,36 @@ async function hierarchy(
   ready: Ready,
   commandId: string,
   problems: Problem[],
+  dependencies: CommandDependencies,
   signal?: AbortSignal,
   timeoutMs = DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
 ): Promise<MeasuredUiSnapshot | undefined> {
-  const observation = await ready.client.targetCommand(
-    ready.target,
-    "ui-snapshot",
-    "Reading Android UI state",
-    ["exec-out", "uiautomator", "dump", "/dev/tty"],
-    (output) => parseUiHierarchy(output, { maxDepth: 100, maxNodes: 2_000 }),
-    signal,
-    { maxBufferBytes: 8 * 1024 * 1024, timeoutMs },
-  );
+  const captured = await captureUiHierarchy({
+    client: ready.client,
+    target: ready.target,
+    targetIdentity: ready.selected.target.id,
+    commandId,
+    operation: "ui-snapshot",
+    message: "Reading Android UI state",
+    timeoutMs,
+    maxBufferBytes: 8 * 1024 * 1024,
+    ...(signal === undefined ? {} : { signal }),
+    lock: {
+      ...dependencies.uiHierarchyLock,
+      lease: {
+        ...(dependencies.env === undefined ? {} : { env: dependencies.env }),
+        ...dependencies.uiHierarchyLock?.lease,
+      },
+    },
+  });
+  if (!captured.ok) {
+    problems.push(captured.problem);
+    return undefined;
+  }
+  const observation = {
+    ...captured.observation,
+    value: parseUiHierarchy(captured.observation.value, { maxDepth: 100, maxNodes: 2_000 }),
+  };
   if (!succeeded(observation.process)) {
     problems.push(operationProblem("ui-snapshot", observation, commandId));
     return undefined;
@@ -815,7 +834,14 @@ export async function runUiAction(
   }
 
   if (request.action === "audit") {
-    const snapshot = await hierarchy(ready, current.commandId, problems, signal, uiTimeout(config));
+    const snapshot = await hierarchy(
+      ready,
+      current.commandId,
+      problems,
+      dependencies,
+      signal,
+      uiTimeout(config),
+    );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     return finish(
       current,
@@ -835,7 +861,14 @@ export async function runUiAction(
   }
 
   if (request.action === "get") {
-    const snapshot = await hierarchy(ready, current.commandId, problems, signal, uiTimeout(config));
+    const snapshot = await hierarchy(
+      ready,
+      current.commandId,
+      problems,
+      dependencies,
+      signal,
+      uiTimeout(config),
+    );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     const node = selectUniqueNode(
       request.selector,
@@ -867,7 +900,14 @@ export async function runUiAction(
   }
 
   if (request.action === "find" || request.action === "assert") {
-    const snapshot = await hierarchy(ready, current.commandId, problems, signal, uiTimeout(config));
+    const snapshot = await hierarchy(
+      ready,
+      current.commandId,
+      problems,
+      dependencies,
+      signal,
+      uiTimeout(config),
+    );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     const matches = snapshot.nodes.filter((node) => selectorMatch(request.selector, node));
     const limit = request.action === "find" ? (request.limit ?? 20) : 1;
@@ -932,7 +972,14 @@ export async function runUiAction(
       );
       return finish<UiActionData>(current, null, problems);
     }
-    const snapshot = await hierarchy(ready, current.commandId, problems, signal, uiTimeout(config));
+    const snapshot = await hierarchy(
+      ready,
+      current.commandId,
+      problems,
+      dependencies,
+      signal,
+      uiTimeout(config),
+    );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     const changed = snapshot.digest !== request.digest;
     return finish(
@@ -972,7 +1019,7 @@ export async function runUiAction(
     const maxAttempts = Math.ceil(timeoutMs / 250) + 1;
     while (attempts < maxAttempts) {
       attempts += 1;
-      last = await hierarchy(ready, current.commandId, problems, signal, timeoutMs);
+      last = await hierarchy(ready, current.commandId, problems, dependencies, signal, timeoutMs);
       if (last === undefined) return finish<UiActionData>(current, null, problems);
       const matched = last.nodes.find((node) => selectorMatch(request.selector, node));
       if (
@@ -1023,7 +1070,14 @@ export async function runUiAction(
     );
   }
 
-  const before = await hierarchy(ready, current.commandId, problems, signal, uiTimeout(config));
+  const before = await hierarchy(
+    ready,
+    current.commandId,
+    problems,
+    dependencies,
+    signal,
+    uiTimeout(config),
+  );
   if (before === undefined) return finish<UiActionData>(current, null, problems);
   let args: string[];
   let input: UiActionData["input"];
@@ -1322,7 +1376,14 @@ export async function runUiAction(
       return finish<UiActionData>(current, null, problems);
     }
   }
-  const after = await hierarchy(ready, current.commandId, problems, signal, uiTimeout(config));
+  const after = await hierarchy(
+    ready,
+    current.commandId,
+    problems,
+    dependencies,
+    signal,
+    uiTimeout(config),
+  );
   if (after === undefined) return finish<UiActionData>(current, null, problems);
   const changed = before.digest !== after.digest;
   const resultingNode =

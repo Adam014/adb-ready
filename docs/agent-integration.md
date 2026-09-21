@@ -147,7 +147,10 @@ unambiguous paired service; it never guesses among multiple devices.
 
 Tool calls within one MCP connection are executed in submission order. This
 prevents parallel agent requests from interleaving target binding, UI snapshots,
-or device mutations. Separate MCP connections remain independent.
+or device mutations. Separate MCP connections remain independent, while the
+short Android hierarchy-capture step is additionally serialized per target
+across connections and processes because the platform exposes only one active
+UI Automation service per target.
 
 ## Tool surface
 

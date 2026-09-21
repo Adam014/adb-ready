@@ -11,6 +11,10 @@ breaking changes.
 
 ### Fixed
 
+- Serialize Android UI hierarchy capture per target across CLI and MCP
+  processes, preventing concurrent read-only automation from racing the
+  platform's single active UI Automation service, without taking a mutation
+  lease for read-only UI queries.
 - Replace non-functional framework shortcut claims with ADB Ready-owned Expo
   reload and developer-menu controls over a verified local Expo channel, and
   advertise them only after the interactive control input is active.

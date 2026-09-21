@@ -244,6 +244,8 @@ Android transport backend.
 - Session data is bounded, redacted, private to the local user, and never
   uploaded by ADB Ready.
 - Stale UI references are rejected before input is sent.
+- UI hierarchy capture is serialized per target across CLI and MCP processes,
+  while independent targets remain parallel.
 - Field replacement verifies values without confusing a declared Android hint
   for user-entered text.
 - Screen recordings require a readable MP4 and a real multi-frame timeline;

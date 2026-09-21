@@ -459,7 +459,17 @@ function requiresTargetLease(options: CliOptions): boolean {
     return options.appAction !== "info" && options.appAction !== "resolve";
   }
   if (options.command === "ports") return options.portAction !== "list";
-  if (options.command === "ui") return options.uiRequest?.action !== "wait";
+  if (options.command === "ui") {
+    const action = options.uiRequest?.action;
+    return !(
+      action === "assert" ||
+      action === "audit" ||
+      action === "compare" ||
+      action === "find" ||
+      action === "get" ||
+      action === "wait"
+    );
+  }
   return options.command === "capture" && options.captureKind === "screen-record";
 }
 

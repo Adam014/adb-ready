@@ -4,6 +4,10 @@ import { parseAndroidLockState, parseForegroundActivity } from "../app/android-a
 import type { Problem } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import { parseUiHierarchy, type UiNode } from "../evidence/ui-hierarchy.js";
+import {
+  captureUiHierarchy,
+  type UiHierarchyLockOptions,
+} from "../evidence/ui-hierarchy-capture.js";
 import { connectionHosts, hostForUrl } from "../platform/network.js";
 
 export type ReadinessAssertion =
@@ -119,8 +123,11 @@ export async function waitForReadiness(
 export interface AdbReadinessProbeOptions {
   client: AdbClient;
   target: AdbTargetSelector;
+  targetIdentity?: string;
+  commandId?: string;
   logLines?: () => readonly string[];
   clock?: () => Date;
+  uiHierarchyLock?: UiHierarchyLockOptions;
   connectPort?: (host: string, port: number, signal?: AbortSignal) => Promise<boolean>;
   fetchUrl?: (url: string, signal?: AbortSignal) => Promise<number>;
 }
@@ -328,15 +335,20 @@ export function createAdbReadinessProbe(options: AdbReadinessProbeOptions): Read
           `Foreground activity is ${foreground.applicationId}/${foreground.activity}.`,
         );
       }
-      const observation = await options.client.targetCommand(
-        options.target,
-        "readiness-ui",
-        `Checking UI selector ${assertion.selector}`,
-        ["exec-out", "uiautomator", "dump", "/dev/tty"],
-        (output) => output,
-        signal,
-        { maxBufferBytes: 4 * 1024 * 1024 },
-      );
+      const captured = await captureUiHierarchy({
+        client: options.client,
+        target: options.target,
+        targetIdentity: options.targetIdentity ?? options.target.serial,
+        commandId: options.commandId ?? "readiness-ui",
+        operation: "readiness-ui",
+        message: `Checking UI selector ${assertion.selector}`,
+        timeoutMs: 15_000,
+        maxBufferBytes: 4 * 1024 * 1024,
+        ...(signal === undefined ? {} : { signal }),
+        ...(options.uiHierarchyLock === undefined ? {} : { lock: options.uiHierarchyLock }),
+      });
+      if (!captured.ok) return result("failed", captured.problem.summary);
+      const observation = captured.observation;
       if (!succeeded(observation.process))
         return result("failed", "The UI hierarchy could not be acquired.");
       const hierarchy = parseUiHierarchy(observation.value);

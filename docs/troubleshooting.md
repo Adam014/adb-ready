@@ -31,6 +31,8 @@ adb-ready context --since 5m --only problems,recovery,logs
 | `MULTIPLE_WIRELESS_ENDPOINTS` | Discovery returned ambiguous services | Pass one exact `HOST:PORT` |
 | `PORT_MAPPING_CONFLICT` | Another mapping owns the requested listen port | Inspect `ports ... list`; remove or change it explicitly |
 | `LOG_PACKAGE_NOT_RUNNING` | Package filtering could not resolve a live process | Launch the app or use another package/PID |
+| `UI_HIERARCHY_BUSY` | Another process held the selected target's single UI Automation service through the UI timeout | Let that capture finish or increase the UI timeout, then retry |
+| `UI_HIERARCHY_LOCK_UNAVAILABLE` | The per-user coordination directory is not writable | Restore write access to the ADB Ready state directory, then retry |
 | `UI_NOT_IDLE` | Android UI Automator could not observe a quiet accessibility window | Pause continuous UI changes or navigate to a stable screen, then retry |
 | `SESSION_RECOVERY_FAILED` | The bounded target/port recovery budget was exhausted | Inspect `problems`, network state, and saved recovery events |
 | `SESSION_PERSISTENCE_FAILED` | The private session record could not be written | Check user-state directory permissions and capacity |
