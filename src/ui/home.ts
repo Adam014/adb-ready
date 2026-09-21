@@ -314,6 +314,7 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     const currentOptions: ReadonlyArray<SelectOption<HomeMenuValue>> = atRoot
       ? rootOptions
       : sectionOptions[section ?? "device"];
+    const numericShortcut = `1-${String(Math.min(currentOptions.length, 9))} jump`;
     const selection = await selectOne<HomeMenuValue>({
       title: atRoot
         ? "WHAT DO YOU WANT TO DO?"
@@ -329,13 +330,9 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         presentation === "full" && firstRender
           ? homePreamble(frame, options.version, options.capabilities)
           : compactSessionPreamble(options.capabilities),
-      help: atRoot
-        ? options.capabilities.unicode
-          ? "↑↓ move · 1-5 jump · enter open"
-          : "up/down · 1-5 jump · enter open"
-        : options.capabilities.unicode
-          ? "↑↓ move · 1-9 jump · enter open"
-          : "up/down · 1-9 jump · enter open",
+      help: options.capabilities.unicode
+        ? `↑↓ move · ${numericShortcut} · enter open`
+        : `up/down · ${numericShortcut} · enter open`,
       escapeLabel: atRoot ? "close" : "back",
       eraseOnExit: true,
       ...(options.refreshIntervalMs === undefined

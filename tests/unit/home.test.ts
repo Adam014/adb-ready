@@ -103,14 +103,17 @@ describe("home screen", () => {
   });
 
   test("opens a focused section and supports its version shortcut", async () => {
+    const sink = new MemorySink();
     const selected = await showHomeScreen({
       version: "0.0.0",
       input: new AutoInput("5\r", "4\r"),
-      sink: new MemorySink(),
+      sink,
       capabilities: { ...interactive, animation: false },
     });
 
     expect(selected).toEqual({ kind: "action", action: "version" });
+    expect(sink.value).toContain("1-6 jump");
+    expect(sink.value).toContain("1-4 jump");
   });
 
   test("keeps new app and evidence workflows behind focused categories", async () => {

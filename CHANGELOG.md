@@ -11,6 +11,8 @@ breaking changes.
 
 ### Fixed
 
+- Derive interactive-home numeric shortcut hints from the visible choices so
+  every numbered action is accurately discoverable.
 - Honor plain, JSON, and NDJSON output for both the `version` command and
   `--version` shortcut while preserving conventional bare human output.
 - Compile every `dev` and `run` dry run offline, including explicit device,
