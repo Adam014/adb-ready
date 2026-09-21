@@ -40,6 +40,7 @@ const capabilities: TerminalCapabilities = {
   unicode: true,
   animation: false,
   columns: 80,
+  rows: 24,
 };
 
 function start(input = new FakeInput(), sink = new MemorySink()) {

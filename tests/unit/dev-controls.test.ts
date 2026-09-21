@@ -41,6 +41,7 @@ const capabilities: TerminalCapabilities = {
   animation: false,
   color: false,
   columns: 100,
+  rows: 24,
   interactive: true,
   unicode: true,
 };

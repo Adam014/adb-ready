@@ -68,12 +68,15 @@ function visibleLineLength(value: string): number {
   return [...stripTerminalSequences(value).replaceAll("\r", "")].length;
 }
 
+const COMPACT_WORDMARK_MARKER = " ##  ###  ###";
+
 const interactive: TerminalCapabilities = {
   interactive: true,
   color: false,
   unicode: true,
   animation: true,
   columns: 100,
+  rows: 40,
 };
 
 describe("home screen", () => {
@@ -163,6 +166,37 @@ describe("home screen", () => {
     expect(sink.value).not.toContain("\u001B[2J\u001B[H");
     expect(sink.value).not.toContain("Android sessions. Kept ready.");
     expect(sink.value.split("\n").every((line) => visibleLineLength(line) < 45)).toBe(true);
+  });
+
+  test("adapts the initial identity and detail density to terminal height", async () => {
+    const compactSink = new MemorySink();
+    await showHomeScreen({
+      version: "0.0.0",
+      input: new AutoInput("\u001B"),
+      sink: compactSink,
+      capabilities: { ...interactive, animation: false, rows: 24 },
+    });
+
+    expect(compactSink.value).toContain(COMPACT_WORDMARK_MARKER);
+    expect(compactSink.value).not.toContain("Android sessions. Kept ready.");
+    expect(compactSink.value).toContain(
+      "Prepare one target, ports, logs, and your project command.",
+    );
+
+    const minimalSink = new MemorySink();
+    await showHomeScreen({
+      version: "0.0.0",
+      input: new AutoInput("\u001B"),
+      sink: minimalSink,
+      capabilities: { ...interactive, animation: true, rows: 16 },
+    });
+
+    expect(minimalSink.value).toContain("ADB READY · v0.0.0");
+    expect(minimalSink.value).not.toContain(COMPACT_WORDMARK_MARKER);
+    expect(minimalSink.value).not.toContain(
+      "Prepare one target, ports, logs, and your project command.",
+    );
+    expect(minimalSink.value).toContain("[6]  Exit");
   });
 
   test("keeps the compact ASCII wordmark static", async () => {

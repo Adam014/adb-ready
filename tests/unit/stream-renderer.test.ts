@@ -8,6 +8,7 @@ const color: TerminalCapabilities = {
   unicode: true,
   animation: true,
   columns: 120,
+  rows: 24,
 };
 const plain: TerminalCapabilities = { ...color, color: false };
 

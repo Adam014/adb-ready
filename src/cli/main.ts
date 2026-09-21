@@ -431,6 +431,7 @@ export interface CliInput extends SelectInput {
 export interface CliOutput extends TextSink {
   isTTY?: boolean;
   columns?: number;
+  rows?: number;
 }
 
 export interface CliIo {
@@ -558,6 +559,7 @@ function capabilities(
     inputIsTTY: io.input.isTTY === true,
     outputIsTTY: stream.isTTY === true,
     ...(stream.columns === undefined ? {} : { columns: stream.columns }),
+    ...(stream.rows === undefined ? {} : { rows: stream.rows }),
   });
 }
 

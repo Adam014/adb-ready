@@ -11,6 +11,7 @@ export interface TerminalPreferences {
   inputIsTTY: boolean;
   outputIsTTY: boolean;
   columns?: number;
+  rows?: number;
 }
 
 export interface TerminalCapabilities {
@@ -19,6 +20,7 @@ export interface TerminalCapabilities {
   unicode: boolean;
   animation: boolean;
   columns: number;
+  rows: number;
 }
 
 function environmentFlag(value: string | undefined): boolean {
@@ -57,5 +59,6 @@ export function resolveTerminalCapabilities(
     animation:
       interactive && preferences.animation !== false && !reducedMotion && !environmentFlag(env.CI),
     columns: Math.max(20, preferences.columns ?? 80),
+    rows: Math.max(10, preferences.rows ?? 24),
   };
 }
