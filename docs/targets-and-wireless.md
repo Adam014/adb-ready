@@ -28,6 +28,12 @@ adb-ready devices --last
 disambiguates duplicate transports. `--last` resolves the last verified target
 identity; it does not silently choose an unrelated visible device.
 
+An exact serial, serial-backed alias, or transport ID also bounds target-side
+identity inspection to that transport. ADB Ready does not query unrelated
+visible devices before running the requested command. Stable hardware-identity
+selection and remembered-target recovery inspect the inventory because those
+workflows must correlate a target whose transport may have changed.
+
 All target-aware commands accept the same selectors.
 
 ## Pair Android 11 and newer

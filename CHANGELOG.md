@@ -11,6 +11,9 @@ breaking changes.
 
 ### Fixed
 
+- Restrict stable-identity probes to an explicitly selected serial, alias, or
+  transport ID so target-aware commands do not query unrelated visible Android
+  devices before operating on the requested target.
 - Label port mappings by explicit host and device roles and show their actual
   direction, including listener-specific removal plans, instead of presenting
   distinct endpoints as an ambiguous bidirectional pair.

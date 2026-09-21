@@ -226,6 +226,17 @@ interface CommandContext {
   started: Date;
 }
 
+type TargetIdentityScope =
+  | { kind: "all" }
+  | { kind: "none" }
+  | { kind: "serial"; serial: string }
+  | { kind: "transport-id"; transportId: string };
+
+interface TargetInspectionOptions {
+  hostFeatures?: readonly string[];
+  identityScope?: TargetIdentityScope;
+}
+
 function processSucceeded(result: ProcessResult): boolean {
   return (
     result.spawnError === undefined &&
@@ -549,19 +560,61 @@ function normalizedHardwareSerial(value: string | undefined): string | undefined
     : normalized;
 }
 
+function targetIdentityScope(
+  devices: readonly AdbDevice[],
+  config: CommandConfig,
+): TargetIdentityScope {
+  if (config.targetTransportId !== undefined) {
+    return { kind: "transport-id", transportId: config.targetTransportId };
+  }
+  if (config.targetSelector === undefined) {
+    return { kind: "all" };
+  }
+  const resolved = config.targetAliases?.[config.targetSelector] ?? config.targetSelector;
+  if (resolved.startsWith("hardware:")) {
+    return { kind: "all" };
+  }
+  const direct = devices.find(({ serial }) => serial === resolved);
+  if (direct !== undefined) {
+    return { kind: "serial", serial: direct.serial };
+  }
+  return { kind: "none" };
+}
+
+function identityCandidateMatches(device: AdbDevice, scope: TargetIdentityScope): boolean {
+  if (scope.kind === "all") return true;
+  if (scope.kind === "none") return false;
+  return scope.kind === "serial"
+    ? device.serial === scope.serial
+    : device.transportId === scope.transportId;
+}
+
 async function inspectTargets(
   client: AdbClient,
   devices: readonly AdbDevice[],
   commandId: string,
   signal: AbortSignal | undefined,
-  hostFeatures?: readonly string[],
+  options: TargetInspectionOptions = {},
 ): Promise<TargetInspection> {
+  const identityScope = options.identityScope ?? { kind: "all" };
   const identityCandidates = devices.filter(
-    ({ serial, state }) => state === "device" && isStableAdbSerial(serial),
+    (device) =>
+      device.state === "device" &&
+      isStableAdbSerial(device.serial) &&
+      identityCandidateMatches(device, identityScope),
   );
   const [mdnsDiscovery, identities] = await Promise.all([
-    discoverMdns(client, hostFeatures, signal),
-    Promise.all(identityCandidates.map(({ serial }) => client.getHardwareSerial(serial, signal))),
+    discoverMdns(client, options.hostFeatures, signal),
+    Promise.all(
+      identityCandidates.map((device) =>
+        client.getHardwareSerial(
+          identityScope.kind === "transport-id"
+            ? { serial: device.serial, transportId: identityScope.transportId }
+            : device.serial,
+          signal,
+        ),
+      ),
+    ),
   ]);
   const mdns = mdnsDiscovery.observation;
   const optionalProblems: Problem[] = [];
@@ -687,13 +740,9 @@ export async function runDoctor(
   }
 
   problems.push(...problemsForDevices(devices.value, { commandId: context.commandId }, "warning"));
-  const inspection = await inspectTargets(
-    client,
-    devices.value,
-    context.commandId,
-    signal,
-    processSucceeded(hostFeatures.process) ? hostFeatures.value : [],
-  );
+  const inspection = await inspectTargets(client, devices.value, context.commandId, signal, {
+    hostFeatures: processSucceeded(hostFeatures.process) ? hostFeatures.value : [],
+  });
   if (inspection.interruption !== undefined) {
     problems.push(inspection.interruption);
     return finish<DoctorData>(context, null, problems);
@@ -758,7 +807,9 @@ export async function runDevices(
 
   problems.push(...problemsForDevices(devices.value, { commandId: context.commandId }, "warning"));
 
-  const inspection = await inspectTargets(client, devices.value, context.commandId, signal);
+  const inspection = await inspectTargets(client, devices.value, context.commandId, signal, {
+    identityScope: targetIdentityScope(devices.value, config),
+  });
   if (inspection.interruption !== undefined) {
     problems.push(inspection.interruption);
     return finish<DevicesData>(context, null, problems);
@@ -925,7 +976,9 @@ export async function runPorts(
     problems.push(operationProblem("devices", devices, context.commandId));
     return finish<PortsData>(context, null, problems);
   }
-  const inspection = await inspectTargets(client, devices.value, context.commandId, signal);
+  const inspection = await inspectTargets(client, devices.value, context.commandId, signal, {
+    identityScope: targetIdentityScope(devices.value, config),
+  });
   if (inspection.interruption !== undefined) {
     problems.push(inspection.interruption);
     return finish<PortsData>(context, null, problems);
@@ -1760,6 +1813,7 @@ export async function runLogs(
     devices.value,
     context.commandId,
     signal,
+    { identityScope: targetIdentityScope(devices.value, config) },
   );
   if (inspection.interruption !== undefined) {
     problems.push(inspection.interruption);
@@ -3066,6 +3120,7 @@ export async function runDev(
     devices.value,
     context.commandId,
     signal,
+    { identityScope: targetIdentityScope(devices.value, config) },
   );
   if (inspection.interruption !== undefined) {
     problems.push(inspection.interruption);

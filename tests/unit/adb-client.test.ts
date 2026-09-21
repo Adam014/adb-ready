@@ -297,6 +297,7 @@ describe("AdbClient", () => {
     });
 
     await client.getHardwareSerial("192.168.1.8:37123");
+    await client.getHardwareSerial({ serial: "USB-1", transportId: "9" });
     await client.getState("192.168.1.8:37123");
 
     expect(requests.map(({ args }) => args)).toEqual([
@@ -311,6 +312,7 @@ describe("AdbClient", () => {
         "getprop",
         "ro.serialno",
       ],
+      ["-H", "remote.example", "-P", "5037", "-t", "9", "shell", "getprop", "ro.serialno"],
       ["-H", "remote.example", "-P", "5037", "-s", "192.168.1.8:37123", "get-state"],
     ]);
   });
