@@ -11,6 +11,9 @@ breaking changes.
 
 ### Fixed
 
+- Reconcile running session summaries from their complete persisted events so
+  session lists, details, and AI context show current counts, timestamps, and
+  the resolved preset before finalization without per-log manifest rewrites.
 - Scope development-session crash diagnostics to a verified Android package
   UID or PID, retarget Expo logs after its resolved launch, and keep unrelated
   target-process crashes out of application problems and below attributed

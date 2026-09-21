@@ -3100,6 +3100,14 @@ export async function runDev(
     localServices,
   } = resolved.definition;
   recorder?.addPrivateLiteral(project.root);
+  bus.emit({
+    type: "session.configured",
+    source: "session",
+    severity: "info",
+    message: `Development session configured for ${preset}`,
+    correlation: { commandId: context.commandId, sessionId, targetId: selected.target.id },
+    data: { preset },
+  });
   if (localServices.length > 0) {
     bus.emit({
       type: "local.service.discovered",
