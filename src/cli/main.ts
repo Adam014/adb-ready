@@ -98,6 +98,7 @@ import {
 import type { AndroidTarget } from "../target/model.js";
 import type { SelectedTarget } from "../target/selection.js";
 import { confirmAction } from "../ui/confirm.js";
+import { startDevControls } from "../ui/dev-controls.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
@@ -253,6 +254,9 @@ Selects one Android target, verifies reverse ports, starts an Expo, React
 Native, native Gradle, or custom command with ANDROID_SERIAL, and correlates
 child output with targeted logcat. Ctrl-C stops owned processes and removes
 only mappings created by this session.
+
+Owned interactive Expo sessions activate r reload, m developer menu, and ?
+help only after the local Expo control channel is ready.
 
 Development options:
   --preset NAME          expo, react-native, flutter, capacitor, gradle, or custom
@@ -1835,6 +1839,18 @@ async function runCliInternal(
               }),
         },
         childStdin: errorCapabilities.interactive ? ("inherit" as const) : ("ignore" as const),
+        ...(options.command === "dev" && errorCapabilities.interactive
+          ? {
+              onLiveControlsReady: (controls) =>
+                startDevControls({
+                  capabilities: errorCapabilities,
+                  controls,
+                  input: io.input,
+                  sink: io.error,
+                  ...(signal === undefined ? {} : { signal }),
+                }),
+            }
+          : {}),
         sessionStore:
           values.sessionPersist === false || dependencies.sessionStore === false
             ? false
