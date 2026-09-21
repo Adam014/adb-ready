@@ -79,6 +79,17 @@ function targetProbe(request: ProcessRequest): ProcessResult | undefined {
   return undefined;
 }
 
+function startedMetroAt(endpoint: string): NonNullable<CommandDependencies["probeMetroService"]> {
+  let calls = 0;
+  return async ({ host, port }) => {
+    expect(host).toBe("localhost");
+    calls += 1;
+    return calls === 1
+      ? { status: "unavailable", endpoint: `http://localhost:${String(port)}` }
+      : { status: "available", endpoint };
+  };
+}
+
 describe("runDev", () => {
   test("auto-reverses public Expo localhost services and includes them in default readiness", async () => {
     const deps = dependencies(async (request) => result(request));
@@ -235,6 +246,7 @@ describe("runDev", () => {
   test("creates and cleans a discovered backend mapping in a real development session", async () => {
     const requests: ProcessRequest[] = [];
     const mappings = new Map<string, string>();
+    let bridgeClosed = 0;
     const deps = dependencies(async (request) => {
       requests.push(request);
       const probe = targetProbe(request);
@@ -277,10 +289,21 @@ describe("runDev", () => {
         environmentFiles: [".env.local"],
       },
     ];
-    deps.probeMetroService = async () => ({
-      status: "unavailable",
-      endpoint: "http://127.0.0.1:8081",
-    });
+    deps.probeMetroService = startedMetroAt("http://127.0.0.1:8081");
+    deps.ensureLoopbackBridge = async ({ port }) =>
+      port === 8081
+        ? {
+            status: "bridged",
+            bridge: {
+              port,
+              sourceHost: "127.0.0.1",
+              targetHost: "::1",
+              close: async () => {
+                bridgeClosed += 1;
+              },
+            },
+          }
+        : { status: "not-needed" };
 
     const execution = await runDev(
       {
@@ -297,6 +320,7 @@ describe("runDev", () => {
     );
 
     expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(bridgeClosed).toBe(1);
     expect(mappings.size).toBe(0);
     expect(execution.result.data?.ports).toMatchObject({
       requested: [
@@ -309,6 +333,9 @@ describe("runDev", () => {
     expect(
       requests.filter(({ args }) => args?.includes("--no-rebind")).map(({ args }) => args?.at(-2)),
     ).toEqual(["tcp:8081", "tcp:8000"]);
+    expect(
+      execution.result.data?.journal.events.some(({ type }) => type === "port.bridge.created"),
+    ).toBeTrue();
   });
 
   test("launches Expo only on the selected transport without delegating Android selection", async () => {
@@ -367,13 +394,12 @@ describe("runDev", () => {
         conflicts: [],
       },
     });
-    deps.probeMetroService = async () => ({
-      status: "unavailable",
-      endpoint: "http://127.0.0.1:18081",
-    });
+    deps.probeMetroService = startedMetroAt("http://[::1]:18081");
     let resolvedDevicePort: number | undefined;
-    deps.resolveExpoLaunch = async ({ devicePort, runtime }) => {
+    let resolvedEndpoint: string | undefined;
+    deps.resolveExpoLaunch = async ({ devicePort, endpoint, runtime }) => {
       resolvedDevicePort = devicePort;
+      resolvedEndpoint = endpoint;
       return {
         status: "resolved",
         target: {
@@ -400,6 +426,7 @@ describe("runDev", () => {
     expect(execution.exitCode).toBe(ExitCode.Success);
     expect(mapped).toBeFalse();
     expect(resolvedDevicePort).toBe(18081);
+    expect(resolvedEndpoint).toBe("http://[::1]:18081");
     expect(execution.result.data?.command).toMatchObject({
       executable: "/bin/npm",
       args: ["run", "start"],
@@ -457,10 +484,7 @@ describe("runDev", () => {
           conflicts: [],
         },
       });
-      deps.probeMetroService = async () => ({
-        status: "unavailable",
-        endpoint: "http://127.0.0.1:8081",
-      });
+      deps.probeMetroService = startedMetroAt("http://127.0.0.1:8081");
       if (failure === "url") {
         deps.resolveExpoLaunch = async () => ({
           status: "unavailable",
@@ -522,10 +546,7 @@ describe("runDev", () => {
           conflicts: [],
         },
       });
-      deps.probeMetroService = async () => ({
-        status: "unavailable",
-        endpoint: "http://127.0.0.1:8081",
-      });
+      deps.probeMetroService = startedMetroAt("http://127.0.0.1:8081");
       if (failure === "aborted") {
         deps.resolveExpoLaunch = async () => ({ status: "aborted" });
       }
@@ -555,6 +576,83 @@ describe("runDev", () => {
       );
       expect(execution.result.data?.status).toBe(failure === "aborted" ? "interrupted" : "failed");
       expect(mapped).toBeFalse();
+    }
+  });
+
+  test("fails before launch when the started Expo server is not a valid Metro endpoint", async () => {
+    for (const status of ["occupied", "unavailable"] as const) {
+      let mapped = false;
+      let metroProbes = 0;
+      let launchResolved = false;
+      const deps = dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (args.includes("--no-rebind")) mapped = true;
+        if (args.includes("--remove")) mapped = false;
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        return result(request);
+      });
+      deps.detectProject = async () => ({
+        root: "/workspace/app",
+        preset: "expo",
+        presetEvidence: [],
+        packageManager: {
+          name: "npm",
+          executable: "/bin/npm",
+          source: "lockfile",
+          conflicts: [],
+        },
+      });
+      deps.ensureLoopbackBridge = async () => ({ status: "not-needed" });
+      deps.probeMetroService = async () => {
+        metroProbes += 1;
+        if (metroProbes === 1) {
+          return { status: "unavailable", endpoint: "http://localhost:8081" };
+        }
+        return status === "occupied"
+          ? {
+              status,
+              endpoint: "http://127.0.0.1:8081",
+              detail: "The service did not return Metro's running status.",
+            }
+          : { status, endpoint: "http://localhost:8081" };
+      };
+      deps.resolveExpoLaunch = async () => {
+        launchResolved = true;
+        return { status: "aborted" };
+      };
+
+      const execution = await runDev(
+        {
+          cwd: "/workspace/app",
+          preset: "expo",
+          command: { executable: "project-start", args: [] },
+          reversePorts: [{ device: 8081 }],
+          readiness: { all: [] },
+          logs: false,
+          watch: false,
+        },
+        {},
+        deps,
+      );
+
+      expect(execution.exitCode).toBe(ExitCode.ChildProcess);
+      expect(mapped).toBeFalse();
+      expect(metroProbes).toBe(2);
+      expect(launchResolved).toBeFalse();
+      expect(execution.result.problems).toContainEqual(
+        expect.objectContaining({
+          code: ProblemCode.ExpoLaunchFailed,
+          summary: "The started Expo server did not expose a valid Metro endpoint.",
+          detail:
+            status === "occupied"
+              ? "The service did not return Metro's running status. Check the configured Expo command and host port."
+              : "No Metro service was reachable on localhost:8081 after readiness passed.",
+        }),
+      );
     }
   });
 
@@ -2454,5 +2552,64 @@ describe("runDev", () => {
     expect(execution.exitCode).toBe(ExitCode.AdbOperation);
     expect(execution.result.data?.ports.cleaned).toBe(false);
     expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.PortMappingCleanupFailed);
+  });
+
+  test("reports IPv6 bridge startup and cleanup failures as session problems", async () => {
+    for (const failure of ["startup", "cleanup"] as const) {
+      let mapped = false;
+      const deps = dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        const args = request.args ?? [];
+        if (args.includes("--no-rebind")) mapped = true;
+        if (args.includes("--remove")) mapped = false;
+        if (args.includes("--list")) {
+          return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+        }
+        return result(request);
+      });
+      deps.ensureLoopbackBridge = async ({ port }) =>
+        failure === "startup"
+          ? { status: "failed", detail: "The loopback port is unavailable." }
+          : {
+              status: "bridged",
+              bridge: {
+                port,
+                sourceHost: "127.0.0.1",
+                targetHost: "::1",
+                close: async () => {
+                  throw new Error("bridge close failed");
+                },
+              },
+            };
+
+      const execution = await runDev(
+        {
+          cwd: "/workspace/app",
+          preset: "custom",
+          command: { executable: "dev-server", args: [] },
+          reversePorts: [{ device: 8081 }],
+          readiness: { all: [] },
+          logs: false,
+          watch: false,
+        },
+        {},
+        deps,
+      );
+
+      expect(mapped).toBeFalse();
+      expect(execution.result.problems).toContainEqual(
+        expect.objectContaining({
+          code:
+            failure === "startup"
+              ? ProblemCode.ReadinessFailed
+              : ProblemCode.PortMappingCleanupFailed,
+          summary:
+            failure === "startup"
+              ? "Android cannot reach the IPv6-only localhost service on port 8081."
+              : "Session-owned port resources could not be fully removed.",
+        }),
+      );
+    }
   });
 });

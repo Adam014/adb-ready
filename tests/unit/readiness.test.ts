@@ -170,11 +170,26 @@ describe("ADB readiness probes", () => {
 
     expect(await probe({ kind: "host-port", port: 8081 })).toMatchObject({
       status: "passed",
-      detail: "127.0.0.1:8081 is reachable.",
+      detail: "localhost:8081 is reachable via 127.0.0.1.",
     });
     expect(await probe({ kind: "host-port", host: "localhost", port: 1 })).toMatchObject({
       status: "failed",
     });
+
+    const dualStackHosts: string[] = [];
+    const dualStackProbe = createAdbReadinessProbe({
+      client: client(),
+      target,
+      connectPort: async (host) => {
+        dualStackHosts.push(host);
+        return host === "::1";
+      },
+    });
+    expect(await dualStackProbe({ kind: "host-port", port: 8081 })).toMatchObject({
+      status: "passed",
+      detail: "localhost:8081 is reachable via [::1].",
+    });
+    expect(dualStackHosts).toEqual(["127.0.0.1", "::1"]);
     expect(await probe({ kind: "http", url: "https://example.test/ready" })).toMatchObject({
       status: "passed",
     });

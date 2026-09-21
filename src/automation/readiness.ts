@@ -4,6 +4,7 @@ import { parseAndroidLockState, parseForegroundActivity } from "../app/android-a
 import type { Problem } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import { parseUiHierarchy, type UiNode } from "../evidence/ui-hierarchy.js";
+import { connectionHosts, hostForUrl } from "../platform/network.js";
 
 export type ReadinessAssertion =
   | { kind: "activity"; value: string }
@@ -133,9 +134,13 @@ function succeeded(process: {
 }
 
 async function portReachable(host: string, port: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted === true) return false;
   return await new Promise<boolean>((resolve) => {
     const socket = connect({ host, port });
+    let settled = false;
     const finish = (ready: boolean): void => {
+      if (settled) return;
+      settled = true;
       signal?.removeEventListener("abort", abort);
       socket.removeAllListeners();
       socket.destroy();
@@ -148,6 +153,18 @@ async function portReachable(host: string, port: number, signal?: AbortSignal): 
     socket.once("timeout", () => finish(false));
     signal?.addEventListener("abort", abort, { once: true });
   });
+}
+
+async function hostPortReachable(
+  host: string,
+  port: number,
+  signal?: AbortSignal,
+): Promise<{ ready: boolean; host: string }> {
+  for (const candidate of connectionHosts(host)) {
+    if (signal?.aborted === true) break;
+    if (await portReachable(candidate, port, signal)) return { ready: true, host: candidate };
+  }
+  return { ready: false, host };
 }
 
 async function httpStatus(url: string, signal?: AbortSignal): Promise<number> {
@@ -186,11 +203,27 @@ export function createAdbReadinessProbe(options: AdbReadinessProbeOptions): Read
     });
     try {
       if (assertion.kind === "host-port") {
-        const host = assertion.host ?? "127.0.0.1";
-        const ready = await (options.connectPort ?? portReachable)(host, assertion.port, signal);
+        const host = assertion.host ?? "localhost";
+        let reachableHost = host;
+        let ready = false;
+        if (options.connectPort === undefined) {
+          const result = await hostPortReachable(host, assertion.port, signal);
+          ready = result.ready;
+          reachableHost = result.host;
+        } else {
+          for (const candidate of connectionHosts(host)) {
+            if (signal?.aborted === true) break;
+            if (await options.connectPort(candidate, assertion.port, signal)) {
+              ready = true;
+              reachableHost = candidate;
+              break;
+            }
+          }
+        }
+        const route = ready && reachableHost !== host ? ` via ${hostForUrl(reachableHost)}` : "";
         return result(
           ready ? "passed" : "failed",
-          `${host}:${String(assertion.port)} is ${ready ? "reachable" : "not reachable"}.`,
+          `${hostForUrl(host)}:${String(assertion.port)} is ${ready ? `reachable${route}` : "not reachable"}.`,
         );
       }
       if (assertion.kind === "http") {

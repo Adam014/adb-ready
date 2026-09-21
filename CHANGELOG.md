@@ -14,6 +14,9 @@ breaking changes.
 - Verify Expo's canonical project identity before attaching to an existing
   Metro server, preventing a development session from silently reusing another
   project's server on the same port.
+- Support Expo and other localhost services that listen only on IPv6 by
+  creating a session-owned IPv4 loopback bridge for `adb reverse`, then close
+  that bridge during ownership-safe cleanup.
 
 ### Added
 

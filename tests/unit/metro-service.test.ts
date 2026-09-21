@@ -58,6 +58,25 @@ describe("probeMetroService", () => {
     expect(result).toEqual({ status: "available", endpoint: "http://127.0.0.1:8081" });
   });
 
+  test("finds a localhost Metro server on either loopback family", async () => {
+    const connected: string[] = [];
+    const result = await probeMetroService({
+      host: "localhost",
+      port: 8081,
+      connectPort: async (host) => {
+        connected.push(host);
+        return host === "::1";
+      },
+      fetchStatus: async (url) => {
+        expect(url).toBe("http://[::1]:8081/status");
+        return { status: 200, body: "packager-status:running" };
+      },
+    });
+
+    expect(connected).toEqual(["127.0.0.1", "::1"]);
+    expect(result).toEqual({ status: "available", endpoint: "http://[::1]:8081" });
+  });
+
   test("refuses to attach when Metro cannot prove the current project root", async () => {
     const base = {
       host: "127.0.0.1",

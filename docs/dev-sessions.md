@@ -87,6 +87,14 @@ Detection is deliberately bounded:
 - an explicit mapping for the same device port always wins; and
 - cleanup still removes only mappings created by the current session.
 
+ADB's `tcp:PORT` reverse endpoint connects to host localhost, while host
+toolchains may resolve `localhost` to either IPv4 or IPv6. ADB Ready probes both
+loopback families. If a required service listens only on `[::1]`, it creates a
+session-owned proxy on `127.0.0.1` for the same port so the selected Android
+target can use the normal reverse mapping. The proxy is loopback-only, remains
+owned by the session that created it, and is closed during session cleanup. ADB
+Ready fails safely if that bridge cannot be created.
+
 Preview the resolved mappings without touching ADB:
 
 ```bash
