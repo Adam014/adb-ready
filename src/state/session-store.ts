@@ -290,6 +290,58 @@ function validManifest(value: unknown): value is SessionManifest {
   );
 }
 
+interface SessionEventSnapshot {
+  bytes: number;
+  events: AdbReadyEvent[];
+}
+
+async function readEventSnapshot(
+  directory: string,
+  sessionId: string,
+): Promise<SessionEventSnapshot> {
+  const raw = await readFile(eventPath(directory, sessionId));
+  const finalNewline = raw.lastIndexOf(0x0a);
+  if (finalNewline === -1) return { bytes: 0, events: [] };
+  const complete = raw.subarray(0, finalNewline + 1);
+  const events = complete
+    .toString("utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as AdbReadyEvent);
+  return { bytes: complete.byteLength, events };
+}
+
+function eventPreset(events: readonly AdbReadyEvent[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const preset = events[index]?.data?.preset;
+    if (typeof preset === "string" && preset !== "") return preset;
+  }
+  return undefined;
+}
+
+async function hydrateRunningManifest(
+  directory: string,
+  manifest: SessionManifest,
+): Promise<SessionManifest> {
+  if (manifest.status !== "running") return manifest;
+  try {
+    const snapshot = await readEventSnapshot(directory, manifest.sessionId);
+    const latestTimestamp = snapshot.events.at(-1)?.timestamp;
+    const preset = manifest.preset ?? eventPreset(snapshot.events);
+    return {
+      ...manifest,
+      eventCount: snapshot.events.length,
+      eventBytes: snapshot.bytes,
+      ...(latestTimestamp === undefined || !Number.isFinite(Date.parse(latestTimestamp))
+        ? {}
+        : { updatedAt: latestTimestamp }),
+      ...(preset === undefined ? {} : { preset }),
+    };
+  } catch {
+    return manifest;
+  }
+}
+
 async function readAllSessions(
   options: SessionStoreOptions,
 ): Promise<SessionStoreResult<SessionManifest[]>> {
@@ -548,12 +600,19 @@ export async function listSessions(
   options: SessionStoreOptions = {},
 ): Promise<SessionStoreResult<SessionManifest[]>> {
   const all = await readAllSessions(options);
-  if (!all.ok || options.allProjects === true) return all;
-  const expected = await requestedProjectFingerprint(options);
-  if (expected === undefined) return all;
+  if (!all.ok) return all;
+  const expected =
+    options.allProjects === true ? undefined : await requestedProjectFingerprint(options);
+  const visible =
+    expected === undefined
+      ? all.value
+      : all.value.filter(({ projectFingerprint }) => projectFingerprint === expected);
+  const hydrated = await Promise.all(
+    visible.map(async (manifest) => await hydrateRunningManifest(all.directory, manifest)),
+  );
   return {
     ...all,
-    value: all.value.filter(({ projectFingerprint }) => projectFingerprint === expected),
+    value: hydrated.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
   };
 }
 
@@ -573,16 +632,20 @@ export async function readSession(
       };
     }
     const expected = await requestedProjectFingerprint(options);
-    return expected === undefined ||
-      options.allProjects === true ||
-      value.projectFingerprint === expected
-      ? { ok: true, value, directory }
-      : {
-          ok: false,
-          code: "SESSION_UNREADABLE",
-          message: "The requested session does not belong to this project.",
-          directory,
-        };
+    if (
+      expected !== undefined &&
+      options.allProjects !== true &&
+      value.projectFingerprint !== expected
+    ) {
+      return {
+        ok: false,
+        code: "SESSION_UNREADABLE",
+        message: "The requested session does not belong to this project.",
+        directory,
+      };
+    }
+    const manifest = await hydrateRunningManifest(directory, value);
+    return { ok: true, value: manifest, directory };
   } catch (error) {
     return {
       ok: false,
@@ -599,12 +662,8 @@ export async function readSessionEvents(
 ): Promise<SessionStoreResult<AdbReadyEvent[]>> {
   const directory = resolveDirectory(options);
   try {
-    const raw = await readFile(eventPath(directory, sessionId), "utf8");
-    const events = raw
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as AdbReadyEvent);
-    return { ok: true, value: events, directory };
+    const snapshot = await readEventSnapshot(directory, sessionId);
+    return { ok: true, value: snapshot.events, directory };
   } catch (error) {
     return {
       ok: false,

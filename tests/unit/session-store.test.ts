@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EventBus } from "../../src/core/event-bus.js";
@@ -10,6 +10,15 @@ import {
   readSessionEvents,
   SessionRecorder,
 } from "../../src/state/session-store.js";
+
+async function waitForEventCount(directory: string, sessionId: string, count: number) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const events = await readSessionEvents(sessionId, { directory });
+    if (events.ok && events.value.length === count) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Session ${sessionId} did not persist ${String(count)} events in time.`);
+}
 
 describe("session storage paths", () => {
   test("uses platform-native per-user state locations", () => {
@@ -113,13 +122,54 @@ describe("SessionRecorder", () => {
   test("keeps a readable running manifest before finalization", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-sessions-"));
     try {
+      const timestamps = ["2026-09-10T10:00:01.000Z", "2026-09-10T10:00:02.000Z"];
+      const bus = new EventBus(() => new Date(timestamps.shift() ?? "2026-09-10T10:00:02.000Z"));
       const recorder = await SessionRecorder.create(
-        new EventBus(),
-        { sessionId: "running-1", command: "dev", startedAt: new Date().toISOString() },
+        bus,
+        {
+          sessionId: "running-1",
+          command: "dev",
+          startedAt: "2026-09-10T10:00:00.000Z",
+        },
         { directory },
       );
+      bus.emit({
+        type: "session.configured",
+        source: "session",
+        severity: "info",
+        message: "Development session configured for expo",
+        correlation: { commandId: "command-1", sessionId: "running-1" },
+        data: { preset: "expo" },
+      });
+      bus.emit({
+        type: "child.started",
+        source: "child",
+        severity: "info",
+        message: "Development command started",
+        correlation: { commandId: "command-1", sessionId: "running-1" },
+      });
+      await waitForEventCount(directory, "running-1", 2);
+      await appendFile(path.join(directory, "running-1.ndjson"), '{"partial":', "utf8");
+
       const sessions = await listSessions({ directory });
-      expect(sessions).toMatchObject({ ok: true, value: [{ status: "running" }] });
+      expect(sessions).toMatchObject({
+        ok: true,
+        value: [
+          {
+            status: "running",
+            eventCount: 2,
+            preset: "expo",
+            updatedAt: "2026-09-10T10:00:02.000Z",
+          },
+        ],
+      });
+      const session = await readSession("running-1", { directory });
+      expect(session).toMatchObject({
+        ok: true,
+        value: { eventCount: 2, preset: "expo", updatedAt: "2026-09-10T10:00:02.000Z" },
+      });
+      const events = await readSessionEvents("running-1", { directory });
+      expect(events).toMatchObject({ ok: true, value: [{ sequence: 1 }, { sequence: 2 }] });
       await recorder.finish({ status: "interrupted", finishedAt: new Date().toISOString() });
     } finally {
       await rm(directory, { recursive: true, force: true });

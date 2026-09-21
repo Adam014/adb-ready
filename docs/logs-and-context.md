@@ -90,6 +90,14 @@ When the ID is omitted, the latest saved session is selected. Default retention
 keeps at most 30 finalized sessions, 14 days, and 20 MiB. Active sessions are
 not pruned as finalized history.
 
+Running-session summaries are reconciled from the append-only event journal at
+read time. `sessions list`, `sessions show`, and `context` therefore expose the
+latest completely persisted event count, byte count, update time, and known
+preset without rewriting the manifest for every log line. A trailing event
+that is still being appended is ignored until its terminating newline is
+durable, so concurrent inspection never treats a partial JSON record as a
+corrupt session.
+
 Storage locations follow host conventions:
 
 | Host | Default directory |
