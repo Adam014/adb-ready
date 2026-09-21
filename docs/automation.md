@@ -32,6 +32,12 @@ Root presentation flags may appear in either order. Adding
 `--non-interactive` does not change the result shape or fall back to human
 help.
 
+Version probes follow the same rule without loading configuration or ADB:
+`adb-ready version` and `adb-ready --version` print one conventional bare
+version line, while `version --format plain`, `version --json`, and
+`version --format ndjson` return their documented automation shapes. Output
+flags may appear before or after `version` or `--version`.
+
 Machine data is written to `stdout`. Human progress and diagnostics are written
 to `stderr`. `--quiet` hides successful human output without hiding failures.
 

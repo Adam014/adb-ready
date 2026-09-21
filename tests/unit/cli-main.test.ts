@@ -2021,6 +2021,42 @@ describe("runCli", () => {
     expect(await runCli(["version"], versionStreams, blocked)).toBe(ExitCode.Success);
     expect(versionStreams.output.value).toMatch(/^\d+\.\d+\.\d+\n$/u);
 
+    for (const args of [
+      ["version", "--json"],
+      ["--json", "version"],
+      ["--version", "--json"],
+      ["--json", "--version"],
+    ]) {
+      const structured = io();
+      expect(await runCli(args, structured, blocked)).toBe(ExitCode.Success);
+      expect(JSON.parse(structured.output.value)).toMatchObject({
+        schemaVersion: 1,
+        command: "version",
+        ok: true,
+        data: { version: expect.stringMatching(/^\d+\.\d+\.\d+$/u) },
+        problems: [],
+      });
+      expect(structured.error.value).toBe("");
+    }
+
+    const ndjsonVersion = io();
+    expect(await runCli(["version", "--format", "ndjson"], ndjsonVersion, blocked)).toBe(
+      ExitCode.Success,
+    );
+    expect(JSON.parse(ndjsonVersion.output.value)).toMatchObject({
+      kind: "result",
+      command: "version",
+      data: { version: expect.stringMatching(/^\d+\.\d+\.\d+$/u) },
+    });
+
+    const plainVersion = io();
+    expect(await runCli(["version", "--format", "plain"], plainVersion, blocked)).toBe(
+      ExitCode.Success,
+    );
+    expect(plainVersion.output.value).toMatch(
+      /^command=version\nok=true\nduration_ms=0\nversion=\d+\.\d+\.\d+\n$/u,
+    );
+
     const versionHelpStreams = io();
     expect(await runCli(["help", "version"], versionHelpStreams, blocked)).toBe(ExitCode.Success);
     expect(versionHelpStreams.output.value).toContain("Usage: adb-ready version");

@@ -11,6 +11,8 @@ breaking changes.
 
 ### Fixed
 
+- Honor plain, JSON, and NDJSON output for both the `version` command and
+  `--version` shortcut while preserving conventional bare human output.
 - Compile every `dev` and `run` dry run offline, including explicit device,
   transport, remembered-target, interactive-selection, artifact, and AVD
   inputs, so planning cannot inspect or mutate an Android target.

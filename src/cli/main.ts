@@ -419,7 +419,8 @@ List filters:
   version: `Usage: adb-ready version
 
 Prints the installed ADB Ready version and exits without loading project
-configuration or ADB.
+configuration or ADB. Human output and --version remain one bare version line;
+--format plain, --json, and --format ndjson use the global automation contract.
 `,
 } as const;
 
@@ -944,7 +945,24 @@ async function runCliInternal(
     return ExitCode.Success;
   }
   if (options.command === "version") {
-    io.output.write(`${VERSION}\n`);
+    if (options.format === "human") {
+      io.output.write(`${VERSION}\n`);
+      return ExitCode.Success;
+    }
+    const envelope = failureResult("version", [], dependencies);
+    renderResult(
+      {
+        ...envelope,
+        ok: true,
+        data: { version: VERSION },
+      },
+      {
+        format: options.format,
+        capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+        sink: io.output,
+        verbose: options.verbose,
+      },
+    );
     return ExitCode.Success;
   }
   if (options.command === "mcp") {
