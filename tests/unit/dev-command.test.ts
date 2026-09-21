@@ -447,6 +447,185 @@ describe("runDev", () => {
     expect(targetOperations.flatMap(({ args }) => args ?? [])).not.toContain("10.0.0.9:41231");
   });
 
+  test("activates owned Expo controls only after ready and stops cleanly from raw input", async () => {
+    const requests: ProcessRequest[] = [];
+    let mapped = false;
+    let disposed = 0;
+    let controlledEndpoint: string | undefined;
+    let controlledAction: string | undefined;
+    const deps = dependencies(async (request) => {
+      requests.push(request);
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      if (args.includes("resolve-activity")) {
+        return result(request, { stdout: "com.example.demo/.MainActivity\n" });
+      }
+      if (args.includes("am") && args.includes("start")) return result(request);
+      if (request.executable === "/bin/npm") {
+        return await new Promise<ProcessResult>((resolve) => {
+          const finish = () => resolve(result(request, { aborted: true, signal: "SIGTERM" }));
+          if (request.signal?.aborted === true) finish();
+          else request.signal?.addEventListener("abort", finish, { once: true });
+        });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: ["package.json dependency: expo"],
+      packageJson: {
+        path: "/workspace/app/package.json",
+        scripts: { start: "expo start" },
+        hasExpoDevClient: false,
+      },
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "package-json",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = startedMetroAt("http://127.0.0.1:8081");
+    deps.sendExpoControl = async ({ action, endpoint }) => {
+      controlledAction = action;
+      controlledEndpoint = endpoint;
+      return {
+        action,
+        connectedClients: 1,
+        detail: "Reload sent through Expo's active local control channel.",
+        ok: true,
+      };
+    };
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        logs: false,
+        onLiveControlsReady: (controls) => {
+          let stop: (() => void) | undefined;
+          const stopRequested = new Promise<void>((resolve) => {
+            stop = resolve;
+          });
+          queueMicrotask(async () => {
+            await controls.execute("reload");
+            stop?.();
+          });
+          return {
+            dispose: () => {
+              disposed += 1;
+            },
+            stopRequested,
+          };
+        },
+        preset: "expo",
+        readiness: { all: [] },
+        reversePorts: [{ device: 8081 }],
+        watch: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Interrupted);
+    expect(controlledAction).toBe("reload");
+    expect(controlledEndpoint).toBe("http://127.0.0.1:8081");
+    expect(disposed).toBe(1);
+    expect(mapped).toBeFalse();
+    expect(requests.find(({ executable }) => executable === "/bin/npm")?.stdin).toBe("ignore");
+    expect(
+      execution.result.data?.journal.events
+        .map(({ type }) => type)
+        .filter((type) => type.startsWith("dev.control")),
+    ).toEqual(["dev.controls.available", "dev.control.requested", "dev.control.completed"]);
+  });
+
+  test("keeps a ready Expo session safe when interactive control setup fails", async () => {
+    const controller = new AbortController();
+    let mapped = false;
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      const args = request.args ?? [];
+      if (args.includes("--no-rebind")) {
+        mapped = true;
+        return result(request);
+      }
+      if (args.includes("--remove")) {
+        mapped = false;
+        return result(request);
+      }
+      if (args.includes("--list")) {
+        return result(request, { stdout: mapped ? "host tcp:8081 tcp:8081\n" : "" });
+      }
+      if (args.includes("resolve-activity")) {
+        return result(request, { stdout: "com.example.demo/.MainActivity\n" });
+      }
+      if (args.includes("am") && args.includes("start")) return result(request);
+      if (request.executable === "/bin/npm") {
+        return await new Promise<ProcessResult>((resolve) => {
+          const finish = () => resolve(result(request, { aborted: true, signal: "SIGTERM" }));
+          if (request.signal?.aborted === true) finish();
+          else request.signal?.addEventListener("abort", finish, { once: true });
+        });
+      }
+      return result(request);
+    });
+    deps.detectProject = async () => ({
+      root: "/workspace/app",
+      preset: "expo",
+      presetEvidence: ["package.json dependency: expo"],
+      packageJson: {
+        path: "/workspace/app/package.json",
+        scripts: { start: "expo start" },
+        hasExpoDevClient: false,
+      },
+      packageManager: {
+        name: "npm",
+        executable: "/bin/npm",
+        source: "package-json",
+        conflicts: [],
+      },
+    });
+    deps.probeMetroService = startedMetroAt("http://127.0.0.1:8081");
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        logs: false,
+        onLiveControlsReady: () => {
+          queueMicrotask(() => controller.abort());
+          throw new Error("raw mode unavailable");
+        },
+        preset: "expo",
+        readiness: { all: [] },
+        reversePorts: [{ device: 8081 }],
+        watch: false,
+      },
+      {},
+      deps,
+      controller.signal,
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Interrupted);
+    expect(mapped).toBeFalse();
+    const events = execution.result.data?.journal.events.map(({ type }) => type) ?? [];
+    expect(events).toContain("dev.controls.unavailable");
+    expect(events).not.toContain("dev.controls.available");
+  });
+
   test("fails before ready when Expo cannot resolve or open the selected target", async () => {
     for (const failure of ["url", "handler", "launch"] as const) {
       let mapped = false;

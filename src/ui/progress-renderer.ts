@@ -33,22 +33,11 @@ export function renderDevControlHint(
         : [
             `${key("r", capabilities)} reload`,
             `${key("m", capabilities)} dev menu`,
-            `${key("j", capabilities)} debugger`,
             `${key("?", capabilities)} commands`,
             stop,
           ];
-  } else if (preset === "flutter") {
-    controls =
-      capabilities.columns < 72
-        ? [`${key("r", capabilities)} reload`, `${key("h", capabilities)} commands`, stop]
-        : [
-            `${key("r", capabilities)} hot reload`,
-            `${key("R", capabilities)} hot restart`,
-            `${key("h", capabilities)} commands`,
-            stop,
-          ];
   } else {
-    controls = [style.dim("framework input active", capabilities), stop];
+    controls = [stop];
   }
 
   return `${style.dim("  controls", capabilities)}  ${controls.join(separator)}\n`;
@@ -66,6 +55,7 @@ export class ProgressRenderer {
   readonly #sink: TextSink;
   readonly #capabilities: TerminalCapabilities;
   readonly #showDevControls: boolean;
+  #controlsAvailable = false;
   #preset?: DevPreset;
   #attachedService = false;
 
@@ -101,6 +91,7 @@ export class ProgressRenderer {
       this.#preset = eventPreset as DevPreset;
     }
     if (event.type === "service.attached") this.#attachedService = true;
+    if (event.type === "dev.controls.available") this.#controlsAvailable = true;
 
     if (event.type === "operation.started") {
       this.#spinner.start(event.message);
@@ -124,7 +115,9 @@ export class ProgressRenderer {
           this.#sink.write(
             this.#attachedService
               ? renderAttachedServiceHint(this.#capabilities)
-              : renderDevControlHint(this.#preset, this.#capabilities),
+              : this.#controlsAvailable
+                ? renderDevControlHint(this.#preset, this.#capabilities)
+                : renderDevControlHint(undefined, this.#capabilities),
           );
         }
       } else if (state === "stopping") {

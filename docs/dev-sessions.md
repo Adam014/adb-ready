@@ -132,9 +132,10 @@ An attached Metro server remains externally owned:
 - A Metro server with a missing or different project identity fails with the
   same safe conflict and remains untouched.
 
-Run Metro in its original terminal when you need its native reload or developer
-controls. A newly started Metro process continues to receive its controls
-directly through ADB Ready.
+Run an externally owned Metro server in its original terminal when you need its
+native controls. When ADB Ready starts and owns an Expo session, it activates
+its own verified controls after the app and local Expo control channel are
+ready.
 
 ## Expo target isolation
 
@@ -214,21 +215,23 @@ Set `dev.watch` to `false` only for a deliberately one-shot child process.
 ## Live terminal controls
 
 An interactive `adb-ready dev` session shows a compact control bar after it
-becomes ready. ADB Ready preserves the framework's native terminal input rather
-than intercepting or redefining it:
+becomes ready. The bar advertises only controls that ADB Ready has activated and
+can execute itself:
 
-- Expo shows `r` reload, `m` developer menu, `j` debugger, and `?` commands.
-- Flutter shows `r` hot reload, `R` hot restart, and `h` commands.
-- Other presets state that framework input is active without promising
-  unsupported shortcuts.
+- An owned Expo session supports `r` to reload the connected app, `m` to open
+  its developer menu, and `?` to show the exact controls again. These actions
+  use Expo's local message protocol only after ADB Ready verifies the loopback
+  Metro endpoint and an active control connection.
+- An attached Metro server remains externally owned, so its controls stay in
+  the terminal that started it.
+- Other presets show no unverified framework shortcuts.
 - `Ctrl+C` stops the owned child and performs the normal verified cleanup.
 - Health monitoring is stopped and awaited before intentional child or port
   teardown, so cancellation cannot be recorded as a device degradation or a
   recovery attempt.
 
 The control bar is never rendered by `run`, JSON/NDJSON output, redirected
-streams, CI, `--non-interactive`, or `--quiet`. This keeps scripts deterministic
-and leaves arbitrary child input untouched.
+streams, CI, `--non-interactive`, or `--quiet`. This keeps scripts deterministic.
 
 ## Lifecycle hooks
 

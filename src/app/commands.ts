@@ -21,6 +21,12 @@ import { EventBus } from "../core/event-bus.js";
 import { EventJournal, type EventJournalSnapshot } from "../core/event-journal.js";
 import { redactText } from "../core/redaction.js";
 import { TextLineBuffer } from "../core/text-lines.js";
+import {
+  type DevLiveControlsBinding,
+  type DevLiveControlsReady,
+  type ExpoControlAction,
+  sendExpoControl,
+} from "../dev/expo-controls.js";
 import { type ExpoLaunchResolution, resolveExpoLaunch } from "../dev/expo-launch.js";
 import { type DevHook, type DevHookEvent, type HookRun, runHooks } from "../dev/hooks.js";
 import { type DiscoveredLocalService, discoverExpoLocalServices } from "../dev/local-services.js";
@@ -113,6 +119,7 @@ export interface CommandDependencies {
   }) => Promise<MetroServiceProbeResult>;
   ensureLoopbackBridge?: typeof ensureLoopbackBridge;
   resolveExpoLaunch?: typeof resolveExpoLaunch;
+  sendExpoControl?: typeof sendExpoControl;
 }
 
 export interface CommandExecution<T> {
@@ -2031,6 +2038,7 @@ export interface DevOptions {
     };
   };
   childStdin?: "ignore" | "inherit";
+  onLiveControlsReady?: DevLiveControlsReady;
   onChildLine?: (stream: "stderr" | "stdout", line: string) => void;
   hooks?: Partial<Record<DevHookEvent, readonly DevHook[]>>;
   watch?: boolean;
@@ -3106,6 +3114,7 @@ export async function runDev(
   };
   let attachedService: DevData["attachedService"];
   let expoLaunch: DevData["expoLaunch"];
+  let expoControlEndpoint: string | undefined;
   const baseData = () => ({
     sessionId,
     adbPath: redactedPath(executable),
@@ -3662,7 +3671,10 @@ export async function runDev(
             cwd: commandCwd,
             env: { ...childCommand.env, ANDROID_SERIAL: selected.transport.serial },
             signal: childController.signal,
-            stdin: options.childStdin ?? "ignore",
+            stdin:
+              preset === "expo" && options.onLiveControlsReady !== undefined
+                ? "ignore"
+                : (options.childStdin ?? "ignore"),
             maxBufferBytes: 4 * 1024 * 1024,
             onStdoutChunk: (chunk) => childStdout.push(chunk),
             onStderrChunk: (chunk) => childStderr.push(chunk),
@@ -3821,6 +3833,9 @@ export async function runDev(
           dependencies,
           ...(signal === undefined ? {} : { signal }),
         });
+        if (expoLaunch !== undefined && attachedService === undefined) {
+          expoControlEndpoint = endpoint;
+        }
       }
     }
   }
@@ -3856,6 +3871,64 @@ export async function runDev(
   const readyHooksSucceeded =
     onReadyHooksSucceeded && (settledChild === undefined || processSucceeded(settledChild));
   if (!readyHooksSucceeded) childController?.abort();
+  let liveControlsBinding: DevLiveControlsBinding | undefined;
+  if (
+    readyHooksSucceeded &&
+    preset === "expo" &&
+    attachedService === undefined &&
+    expoControlEndpoint !== undefined &&
+    options.onLiveControlsReady !== undefined
+  ) {
+    try {
+      const executeControl = async (action: ExpoControlAction, controlSignal?: AbortSignal) => {
+        bus.emit({
+          type: "dev.control.requested",
+          source: "dev.controls",
+          severity: "info",
+          message: action === "reload" ? "Reloading Expo app" : "Opening Expo developer menu",
+          correlation: targetCorrelation,
+          data: { action, preset: "expo" },
+        });
+        const result = await (dependencies.sendExpoControl ?? sendExpoControl)({
+          action,
+          endpoint: expoControlEndpoint,
+          ...(controlSignal === undefined ? {} : { signal: controlSignal }),
+        });
+        bus.emit({
+          type: result.ok ? "dev.control.completed" : "dev.control.failed",
+          source: "dev.controls",
+          severity: result.ok ? "info" : "warning",
+          message: result.detail,
+          correlation: targetCorrelation,
+          data: { action, connectedClients: result.connectedClients, preset: "expo" },
+        });
+        return result;
+      };
+      liveControlsBinding = options.onLiveControlsReady({
+        preset: "expo",
+        execute: executeControl,
+      });
+      if (liveControlsBinding !== undefined) {
+        bus.emit({
+          type: "dev.controls.available",
+          source: "dev.controls",
+          severity: "info",
+          message: "Interactive Expo controls are active",
+          correlation: targetCorrelation,
+          data: { actions: ["reload", "dev-menu", "help", "stop"], preset: "expo" },
+        });
+      }
+    } catch {
+      bus.emit({
+        type: "dev.controls.unavailable",
+        source: "dev.controls",
+        severity: "warning",
+        message: "Interactive Expo controls could not be activated; the session is still ready",
+        correlation: targetCorrelation,
+        data: { preset: "expo" },
+      });
+    }
+  }
   if (readyHooksSucceeded) {
     transition(
       "ready",
@@ -4235,13 +4308,21 @@ export async function runDev(
     ...(verificationPromise === undefined
       ? []
       : [verificationPromise.then(() => "verification" as const)]),
+    ...(liveControlsBinding === undefined
+      ? []
+      : [liveControlsBinding.stopRequested.then(() => "controls-stop" as const)]),
     sessionAbortPromise,
   ]);
+  liveControlsBinding?.dispose();
   signal?.removeEventListener("abort", notifySessionAbort);
   watchController.abort();
   recoverySummary = await watchPromise;
   signal?.removeEventListener("abort", abortWatcher);
-  if (firstCompletion === "watch-failed" || firstCompletion === "signal") {
+  if (
+    firstCompletion === "watch-failed" ||
+    firstCompletion === "signal" ||
+    firstCompletion === "controls-stop"
+  ) {
     childController?.abort();
     verificationController.abort();
   } else if (firstCompletion === "child") {
@@ -4377,7 +4458,7 @@ export async function runDev(
     });
   }
   if (
-    signal?.aborted === true &&
+    (signal?.aborted === true || firstCompletion === "controls-stop") &&
     !problems.some(({ code }) => code === ProblemCode.OperationInterrupted)
   ) {
     problems.push(

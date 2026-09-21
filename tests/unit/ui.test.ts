@@ -290,7 +290,7 @@ describe("ProgressRenderer", () => {
     expect(sink.value).toBe("✓ Development session ready\n");
   });
 
-  test("shows framework-native controls only for an interactive dev session", () => {
+  test("shows only controls that the interactive dev session activated", () => {
     const sink = new MemorySink();
     const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
     const renderer = new ProgressRenderer({
@@ -309,6 +309,14 @@ describe("ProgressRenderer", () => {
       data: { preset: "expo" },
     });
     bus.emit({
+      type: "dev.controls.available",
+      source: "dev.controls",
+      severity: "info",
+      message: "Interactive Expo controls are active",
+      correlation: { commandId: "command-1", sessionId: "session-1" },
+      data: { preset: "expo" },
+    });
+    bus.emit({
       type: "session.state.changed",
       source: "session",
       severity: "info",
@@ -319,7 +327,7 @@ describe("ProgressRenderer", () => {
     renderer.dispose();
 
     expect(sink.value).toBe(
-      "✓ Development session ready\n  controls  r reload · m dev menu · j debugger · ? commands · Ctrl+C stop\n",
+      "✓ Development session ready\n  controls  r reload · m dev menu · ? commands · Ctrl+C stop\n",
     );
   });
 
@@ -364,12 +372,15 @@ describe("ProgressRenderer", () => {
   });
 
   test("uses compact controls in narrow terminals and never shows them by default", () => {
-    const compact = renderDevControlHint("flutter", {
+    const compact = renderDevControlHint("expo", {
       ...interactiveCapabilities,
       color: false,
       columns: 56,
     });
-    expect(compact).toBe("  controls  r reload · h commands · Ctrl+C stop\n");
+    expect(compact).toBe("  controls  r reload · ? commands · Ctrl+C stop\n");
+    expect(renderDevControlHint("flutter", interactiveCapabilities)).toBe(
+      "  controls  Ctrl+C stop\n",
+    );
 
     const sink = new MemorySink();
     const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));

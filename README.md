@@ -148,10 +148,11 @@ wins, and `--no-auto-reverse-localhost` disables discovery when required.
 IPv4 and IPv6 loopback listeners are supported; when ADB cannot reach an
 IPv6-only service directly, ADB Ready creates and cleans a local session bridge.
 
-In an interactive Expo or Flutter session, ADB Ready shows the framework's
-active reload, developer-menu, debugger, and help shortcuts as soon as the
-session is ready. Input continues directly to the framework; automation and
-redirected output stay prompt-free.
+In an interactive Expo session that ADB Ready owns, the ready state activates
+verified `r` reload, `m` developer-menu, `?` help, and `Ctrl+C` cleanup controls.
+ADB Ready advertises only actions it can execute; attached Metro servers keep
+their controls in the original terminal, while automation and redirected output
+stay prompt-free. [See live-session behavior →](./docs/dev-sessions.md#live-terminal-controls)
 
 If Expo or React Native Metro is already running, ADB Ready verifies its
 standard status endpoint and project identity before attaching the Android
