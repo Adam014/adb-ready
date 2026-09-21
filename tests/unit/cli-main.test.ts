@@ -1301,11 +1301,17 @@ describe("runCli", () => {
     fixture.prepareAvd = async () => {
       throw new Error("dry-run must not start an emulator");
     };
+    fixture.inspectAndroidTargetProfile = async () => {
+      throw new Error("dry-run must not inspect an Android target");
+    };
     fixture.resolveAndroidArtifact = async () => {
       throw new Error("dry-run must not inspect artifacts");
     };
     fixture.deployAndroidArtifact = async () => {
       throw new Error("dry-run must not deploy an artifact");
+    };
+    fixture.runner = async () => {
+      throw new Error("dry-run must not invoke ADB, a project command, or a verifier");
     };
 
     expect(
@@ -1367,6 +1373,66 @@ describe("runCli", () => {
     expect(JSON.parse(blockedStreams.output.value)).toMatchObject({
       ok: false,
       problems: [{ code: "AUTONOMOUS_BUNDLETOOL_REQUIRED" }, { code: "AUTONOMOUS_JAVA_REQUIRED" }],
+    });
+
+    for (const selector of [["--device", "emulator-5554"], ["--transport-id", "7"], ["--last"]]) {
+      const selectedStreams = io();
+      expect(
+        await runCli(
+          [
+            "run",
+            ...selector,
+            "--artifact",
+            "app-debug.apk",
+            "--dry-run",
+            "--json",
+            "--non-interactive",
+            "--",
+            "maestro",
+            "test",
+          ],
+          selectedStreams,
+          fixture,
+        ),
+      ).toBe(ExitCode.Success);
+      expect(JSON.parse(selectedStreams.output.value)).toMatchObject({
+        ok: true,
+        data: { planScope: "offline", plan: { dryRun: true } },
+      });
+    }
+
+    const selectStreams = io();
+    expect(
+      await runCli(
+        [
+          "run",
+          "--select",
+          "--artifact",
+          "app-debug.apk",
+          "--dry-run",
+          "--no-animation",
+          "--",
+          "maestro",
+          "test",
+        ],
+        selectStreams,
+        fixture,
+      ),
+    ).toBe(ExitCode.Success);
+    expect(selectStreams.error.value).toContain("Dry-run plan");
+    expect(selectStreams.error.value).not.toContain("Choose an Android target");
+
+    const devStreams = io();
+    expect(
+      await runCli(
+        ["dev", "--device", "emulator-5554", "--dry-run", "--json", "--non-interactive"],
+        devStreams,
+        fixture,
+      ),
+    ).toBe(ExitCode.Success);
+    expect(JSON.parse(devStreams.output.value)).toMatchObject({
+      ok: true,
+      data: { planScope: "offline", plan: { dryRun: true } },
     });
   });
 

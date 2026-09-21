@@ -129,7 +129,12 @@ adb-ready run --avd Pixel_9_API_36 --deploy --dry-run --json -- maestro test smo
 ```
 
 Plan steps declare their risk. A dry run performs no pairing, connection,
-mapping, hook, or child-process mutation.
+mapping, hook, deployment, or child-process mutation. `dev` and `run` plans are
+compiled offline even when `--device`, `--transport-id`, `--last`, `--select`,
+or `--avd` is present: ADB Ready does not contact the ADB server, inspect a
+target, start an emulator, resolve an artifact, launch the project, or execute
+the verifier. Target selectors and artifact paths remain declarative inputs in
+the plan and are validated only during an actual run.
 
 Port endpoints are always named by their role. Forward mappings listen on the
 host and route to the selected device; reverse mappings listen on the device
