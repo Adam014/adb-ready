@@ -11,6 +11,9 @@ breaking changes.
 
 ### Fixed
 
+- Show autonomous target inspection, artifact selection, and verified app
+  deployment as live run steps, then preserve their compact result in human and
+  plain summaries without exposing local artifact paths.
 - Restrict stable-identity probes to an explicitly selected serial, alias, or
   transport ID so target-aware commands do not query unrelated visible Android
   devices before operating on the requested target.

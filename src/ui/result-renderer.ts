@@ -17,7 +17,7 @@ import type {
   ProblemsCommandData,
   SessionCommandData,
 } from "../app/session-commands.js";
-import type { AutomationRunData } from "../automation/evidence-bundle.js";
+import type { AutomationRunData, AutonomousRunEvidence } from "../automation/evidence-bundle.js";
 import type { ReadinessAssertion } from "../automation/readiness.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
@@ -56,6 +56,93 @@ function readinessAssertionLabel(assertion: ReadinessAssertion): string {
   if (assertion.kind === "process") return `process ${assertion.package}`;
   if (assertion.kind === "ui") return `ui ${assertion.selector}`;
   return assertion.kind;
+}
+
+function artifactKindLabel(kind: NonNullable<AutonomousRunEvidence["artifact"]>["kind"]): string {
+  if (kind === "split-apks") return "split APKs";
+  if (kind === "apks") return "APK Set";
+  return kind.toUpperCase();
+}
+
+function artifactVersion(data: { versionCode?: number; versionName?: string }): string | undefined {
+  if (data.versionName !== undefined && data.versionCode !== undefined) {
+    return `${data.versionName} (${String(data.versionCode)})`;
+  }
+  if (data.versionName !== undefined) return data.versionName;
+  if (data.versionCode !== undefined) return `version code ${String(data.versionCode)}`;
+  return undefined;
+}
+
+function automationHumanLines(
+  data: AutomationRunData,
+  capabilities: TerminalCapabilities,
+): string[] {
+  const glyphs = symbols(capabilities);
+  const automation = data.automation;
+  const lines: string[] = [];
+  if (automation?.avd !== undefined) {
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Emulator ${clean(automation.avd.name)} · ${automation.avd.ownership === "owned" ? "started for this run" : "reused"}`,
+    );
+  }
+  if (automation?.artifact !== undefined) {
+    const artifact = automation.artifact;
+    const version = artifactVersion(artifact);
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Artifact ${artifactKindLabel(artifact.kind)}${artifact.variant === undefined ? "" : ` · ${clean(artifact.variant)}`} · ${String(artifact.files.length)} ${artifact.files.length === 1 ? "file" : "files"}${version === undefined ? "" : ` · ${clean(version)}`}`,
+    );
+  }
+  if (automation?.deployment !== undefined) {
+    const deployment = automation.deployment;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Deploy   ${clean(deployment.applicationId)} · installed and verified`,
+      `${style.success(glyphs.success, capabilities)} Launch   ${clean(deployment.activity)} · launchable`,
+    );
+  }
+  lines.push(
+    `${data.outcome === "success" ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Outcome  ${clean(data.outcome)}`,
+    `${style.accent(glyphs.active, capabilities)} Evidence ${clean(data.evidence.path)}`,
+  );
+  return lines;
+}
+
+function renderAutomationPlain(data: AutomationRunData, sink: TextSink): void {
+  const automation = data.automation;
+  if (automation?.avd !== undefined) {
+    sink.write(`emulator=${clean(automation.avd.name)}\n`);
+    sink.write(`emulator_ownership=${clean(automation.avd.ownership)}\n`);
+  }
+  if (automation?.artifact !== undefined) {
+    const artifact = automation.artifact;
+    sink.write(`artifact_kind=${clean(artifact.kind)}\n`);
+    sink.write(`artifact_file_count=${String(artifact.files.length)}\n`);
+    if (artifact.applicationId !== undefined) {
+      sink.write(`artifact_application_id=${clean(artifact.applicationId)}\n`);
+    }
+    if (artifact.variant !== undefined) sink.write(`artifact_variant=${clean(artifact.variant)}\n`);
+    if (artifact.versionCode !== undefined) {
+      sink.write(`artifact_version_code=${String(artifact.versionCode)}\n`);
+    }
+    if (artifact.versionName !== undefined) {
+      sink.write(`artifact_version_name=${clean(artifact.versionName)}\n`);
+    }
+  }
+  if (automation?.deployment !== undefined) {
+    const deployment = automation.deployment;
+    sink.write(`deployment_application_id=${clean(deployment.applicationId)}\n`);
+    sink.write(`deployment_serial=${clean(deployment.serial)}\n`);
+    sink.write(`deployment_installed=${String(deployment.installed)}\n`);
+    sink.write(`deployment_launchable=${String(deployment.launchable)}\n`);
+    sink.write(`deployment_activity=${clean(deployment.activity)}\n`);
+    if (deployment.versionCode !== undefined) {
+      sink.write(`deployment_version_code=${String(deployment.versionCode)}\n`);
+    }
+    if (deployment.versionName !== undefined) {
+      sink.write(`deployment_version_name=${clean(deployment.versionName)}\n`);
+    }
+  }
+  sink.write(`outcome=${clean(data.outcome)}\n`);
+  sink.write(`evidence=${clean(data.evidence.path)}\n`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -415,12 +502,10 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       `${data.recovery.failed ? style.failure(glyphs.failure, capabilities) : style.success(glyphs.success, capabilities)} Recovery ${data.recovery.failed ? "failed" : data.recovery.recoveries === 0 ? "healthy" : `${String(data.recovery.recoveries)} verified repair(s)`}`,
       `${sessionMarker} Session  ${clean(data.sessionId)} · ${clean(data.status)}`,
     );
-    if (isAutomationRunData(result.data)) {
-      lines.push(
-        `${result.data.outcome === "success" ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Outcome  ${clean(result.data.outcome)}`,
-        `${style.accent(glyphs.active, capabilities)} Evidence ${clean(result.data.evidence.path)}`,
-      );
-    }
+  }
+
+  if (result.command === "run" && isAutomationRunData(result.data)) {
+    lines.push(...automationHumanLines(result.data, capabilities));
   }
 
   if (result.command === "logs" && isLogsData(result.data)) {
@@ -927,11 +1012,8 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`verification_passed=${String(developmentData.verification.passed)}\n`);
       sink.write(`verification_exit_code=${String(developmentData.verification.exitCode)}\n`);
     }
-    if (isAutomationRunData(result.data)) {
-      sink.write(`outcome=${clean(result.data.outcome)}\n`);
-      sink.write(`evidence=${clean(result.data.evidence.path)}\n`);
-    }
   }
+  if (isAutomationRunData(result.data)) renderAutomationPlain(result.data, sink);
   if (isLogsData(result.data)) {
     sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
     sink.write(`filters=${result.data.filters.map(clean).join(",")}\n`);

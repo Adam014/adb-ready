@@ -933,6 +933,14 @@ describe("runCli", () => {
     const fixture = dependencies(
       "List of devices attached\nemulator-5554 device model:Pixel_9 transport_id:7\n",
     );
+    const preparationEvents: string[] = [];
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    bus.subscribe((event) => {
+      if (event.source.startsWith("run.")) {
+        preparationEvents.push(`${event.type}:${event.source}:${event.message}`);
+      }
+    });
+    fixture.bus = bus;
     fixture.loadConfig = async (options) => ({
       ok: true,
       config: {
@@ -1101,6 +1109,14 @@ describe("runCli", () => {
 
       expect(exitCode).toBe(ExitCode.Success);
       expect(stages).toEqual(["profile", "resolve", "deploy", "project", "verifier", "cleanup"]);
+      expect(preparationEvents).toEqual([
+        "operation.started:run.target-profile:Inspecting Android target for deployment",
+        "operation.completed:run.target-profile:Android target profile ready",
+        "operation.started:run.artifact:Resolving Android build artifact",
+        "operation.completed:run.artifact:Selected APK artifact · debug · 1 file",
+        "operation.started:run.deployment:Installing APK on emulator-5554",
+        "operation.completed:run.deployment:Installed and verified com.example.ready",
+      ]);
       expect(payload).toMatchObject({
         command: "run",
         ok: true,
@@ -1361,6 +1377,12 @@ describe("runCli", () => {
     const fixture = dependencies(
       "List of devices attached\nemulator-5554 device model:Pixel_9 transport_id:7\n",
     );
+    const preparationEvents: string[] = [];
+    const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
+    bus.subscribe((event) => {
+      if (event.source === "run.target-profile") preparationEvents.push(event.type);
+    });
+    fixture.bus = bus;
     fixture.loadConfig = async (options) => ({
       ok: true,
       config: {
@@ -1448,6 +1470,7 @@ describe("runCli", () => {
       ).toBe(ExitCode.AdbOperation);
       const payload = JSON.parse(streams.output.value);
       expect(released).toBe(1);
+      expect(preparationEvents).toEqual(["operation.started", "operation.failed"]);
       expect(payload).toMatchObject({
         ok: false,
         problems: [{ code: "TARGET_PROFILE_UNAVAILABLE" }, { code: "AVD_CLEANUP_FAILED" }],
