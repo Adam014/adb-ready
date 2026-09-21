@@ -1314,13 +1314,7 @@ async function runCliInternal(
     delete config.rememberedHardwareSerial;
     delete config.rememberedOnly;
   }
-  const offlineDevPlan =
-    (options.command === "dev" || options.command === "run") &&
-    options.dryRun &&
-    !options.select &&
-    options.device === undefined &&
-    options.transportId === undefined &&
-    !options.remembered;
+  const offlineDevPlan = (options.command === "dev" || options.command === "run") && options.dryRun;
   let preparedSelection: SelectedTarget | undefined;
   if (
     (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||

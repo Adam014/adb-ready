@@ -11,6 +11,9 @@ breaking changes.
 
 ### Fixed
 
+- Compile every `dev` and `run` dry run offline, including explicit device,
+  transport, remembered-target, interactive-selection, artifact, and AVD
+  inputs, so planning cannot inspect or mutate an Android target.
 - Show autonomous target inspection, artifact selection, and verified app
   deployment as live run steps, then preserve their compact result in human and
   plain summaries without exposing local artifact paths.
