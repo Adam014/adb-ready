@@ -258,6 +258,7 @@ describe("runPorts", () => {
         steps: [
           {
             id: "forward-add",
+            title: "Add forward mapping from host tcp:9229 to device tcp:3000",
             args: ["-t", "7", "forward", "--no-rebind", "tcp:9229", "tcp:3000"],
           },
           { id: "verify-port-mapping" },
@@ -265,6 +266,38 @@ describe("runPorts", () => {
       },
     });
     expect(requests.some(({ args }) => args?.includes("--no-rebind"))).toBe(false);
+  });
+
+  test("describes reverse additions and listener-specific removals without ambiguity", async () => {
+    const runner: ProcessRunner = async (request) => targetProbe(request) ?? result(request);
+
+    const reverseAdd = await runPorts(
+      { direction: "reverse", action: "add", devicePort: 8081, hostPort: 3000 },
+      { dryRun: true },
+      dependencies(runner),
+    );
+    const forwardRemove = await runPorts(
+      { direction: "forward", action: "remove", hostPort: 9229, devicePort: 3000 },
+      { dryRun: true },
+      dependencies(runner),
+    );
+    const reverseRemove = await runPorts(
+      { direction: "reverse", action: "remove", devicePort: 8081, hostPort: 3000 },
+      { dryRun: true },
+      dependencies(runner),
+    );
+
+    expect(reverseAdd.result.data?.plan?.steps[0]).toMatchObject({
+      title: "Add reverse mapping from device tcp:8081 to host tcp:3000",
+    });
+    expect(forwardRemove.result.data?.plan?.steps[0]).toMatchObject({
+      title: "Remove forward listener on host tcp:9229",
+      args: ["-t", "7", "forward", "--remove", "tcp:9229"],
+    });
+    expect(reverseRemove.result.data?.plan?.steps[0]).toMatchObject({
+      title: "Remove reverse listener on device tcp:8081",
+      args: ["-t", "7", "reverse", "--remove", "tcp:8081"],
+    });
   });
 
   test("adds and removes a forward mapping with verification", async () => {

@@ -788,10 +788,12 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
     } else {
       data.mappings.forEach((mapping, index) => {
         const branch = index === data.mappings.length - 1 ? glyphs.end : glyphs.branch;
-        const arrow = mapping.direction === "reverse" ? "device → host" : "host → device";
-        lines.push(
-          `${style.dim(branch, capabilities)} ${clean(arrow)} · ${clean(mapping.device)} ↔ ${clean(mapping.host)}`,
-        );
+        const arrow = capabilities.unicode ? "→" : "->";
+        const endpoints =
+          mapping.direction === "reverse"
+            ? `device ${mapping.device} ${arrow} host ${mapping.host}`
+            : `host ${mapping.host} ${arrow} device ${mapping.device}`;
+        lines.push(`${style.dim(branch, capabilities)} ${clean(endpoints)}`);
       });
     }
   }

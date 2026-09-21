@@ -11,6 +11,9 @@ breaking changes.
 
 ### Fixed
 
+- Label port mappings by explicit host and device roles and show their actual
+  direction, including listener-specific removal plans, instead of presenting
+  distinct endpoints as an ambiguous bidirectional pair.
 - Reconcile running session summaries from their complete persisted events so
   session lists, details, and AI context show current counts, timestamps, and
   the resolved preset before finalization without per-log manifest rewrites.

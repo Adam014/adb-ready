@@ -875,6 +875,21 @@ function listenEndpoint(
   return direction === "forward" ? mapping.host : mapping.device;
 }
 
+function portPlanTitle(
+  direction: PortDirection,
+  action: Exclude<PortAction, "list">,
+  mapping: { host: string; device: string },
+): string {
+  if (action === "remove") {
+    return direction === "forward"
+      ? `Remove forward listener on host ${mapping.host}`
+      : `Remove reverse listener on device ${mapping.device}`;
+  }
+  return direction === "forward"
+    ? `Add forward mapping from host ${mapping.host} to device ${mapping.device}`
+    : `Add reverse mapping from device ${mapping.device} to host ${mapping.host}`;
+}
+
 function targetForAdb(selection: SelectedTarget): { serial: string; transportId?: string } {
   return {
     serial: selection.transport.serial,
@@ -1030,7 +1045,7 @@ export async function runPorts(
           steps: [
             {
               id: `${request.direction}-${request.action}`,
-              title: `${request.action === "add" ? "Add" : "Remove"} ${request.direction} mapping ${requested.device} ↔ ${requested.host}`,
+              title: portPlanTitle(request.direction, request.action, requested),
               risk: "device-reversible",
               executable: redactedPath(executable),
               args,

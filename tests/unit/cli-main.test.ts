@@ -368,6 +368,24 @@ describe("runCli", () => {
     expect(appsStreams.output.value).toContain("--all");
   });
 
+  test("explains port endpoint roles in focused help without loading configuration or ADB", async () => {
+    const streams = io();
+    const exitCode = await runCli(["help", "ports"], streams, {
+      loadConfig: async () => {
+        throw new Error("must not load");
+      },
+      locateAdb: async () => {
+        throw new Error("must not locate ADB");
+      },
+    });
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.output.value).toContain("Forward listens on");
+    expect(streams.output.value).toContain("host -> device");
+    expect(streams.output.value).toContain("Reverse listens on");
+    expect(streams.output.value).toContain("device -> host");
+  });
+
   test("reads local session history without loading project configuration or ADB", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-session-"));
     try {
