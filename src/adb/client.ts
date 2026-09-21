@@ -180,13 +180,14 @@ export class AdbClient {
   }
 
   async getHardwareSerial(
-    serial: string,
+    target: string | AdbTargetSelector,
     signal?: AbortSignal,
   ): Promise<AdbObservation<string | undefined>> {
+    const serial = typeof target === "string" ? target : target.serial;
     return await this.#observe(
       "hardware-serial",
       `Reading stable identity for ${serial}`,
-      ["-s", serial, "shell", "getprop", "ro.serialno"],
+      [...targetArguments(target), "shell", "getprop", "ro.serialno"],
       parseSingleLine,
       signal,
     );

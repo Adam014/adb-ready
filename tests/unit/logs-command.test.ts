@@ -145,6 +145,41 @@ describe("runLogs", () => {
     );
   });
 
+  test("probes only the explicit log target before opening logcat", async () => {
+    const requests: ProcessRequest[] = [];
+    const deps = dependencies(requests);
+    deps.runner = async (request) => {
+      requests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\n" +
+            "emulator-5554 device model:Pixel_9 transport_id:7\n" +
+            "USB-1 device model:Physical_phone transport_id:8\n",
+        );
+      }
+      if (args.includes("ro.serialno")) return result(request, "EMULATOR-1\n");
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("logcat")) return result(request);
+      return result(request);
+    };
+
+    const execution = await runLogs({ dump: true }, { targetSelector: "emulator-5554" }, deps);
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(requests.filter(({ args }) => args?.includes("ro.serialno"))).toEqual([
+      expect.objectContaining({
+        args: ["-s", "emulator-5554", "shell", "getprop", "ro.serialno"],
+      }),
+    ]);
+    expect(requests.find(({ args }) => args?.includes("logcat"))?.args?.slice(0, 2)).toEqual([
+      "-t",
+      "7",
+    ]);
+  });
+
   test("follows from now by default without replaying the device buffer", async () => {
     const requests: ProcessRequest[] = [];
     await runLogs({}, {}, dependencies(requests));

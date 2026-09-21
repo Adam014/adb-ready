@@ -512,18 +512,22 @@ describe("runDevices", () => {
   });
 
   test("selects an exact configured alias without relying on list order", async () => {
+    const requests: ProcessRequest[] = [];
     const execution = await runDevices(
       { targetSelector: "desk", targetAliases: { desk: "USB-2" } },
       deterministicDependencies(
-        fixtureRunner({
-          devices:
-            "List of devices attached\n" +
-            "USB-1 device model:Pixel_8 transport_id:1\n" +
-            "USB-2 device model:Pixel_9 transport_id:2\n",
-          "hardware-serial:USB-1": "USB-1\n",
-          "hardware-serial:USB-2": "USB-2\n",
-          "mdns-services": "List of discovered mdns services\n",
-        }),
+        fixtureRunner(
+          {
+            devices:
+              "List of devices attached\n" +
+              "USB-1 device model:Pixel_8 transport_id:1\n" +
+              "USB-2 device model:Pixel_9 transport_id:2\n",
+            "hardware-serial:USB-1": "USB-1\n",
+            "hardware-serial:USB-2": "USB-2\n",
+            "mdns-services": "List of discovered mdns services\n",
+          },
+          requests,
+        ),
       ),
     );
 
@@ -532,16 +536,97 @@ describe("runDevices", () => {
       reason: "alias",
       transport: { serial: "USB-2", transportId: "2" },
     });
+    expect(requests.filter(({ args }) => args?.includes("ro.serialno"))).toEqual([
+      expect.objectContaining({ args: ["-s", "USB-2", "shell", "getprop", "ro.serialno"] }),
+    ]);
+    expect(execution.result.data?.discovery.identity).toEqual({ probed: 1, resolved: 1 });
+  });
+
+  test("uses an explicit transport ID for the only identity probe", async () => {
+    const requests: ProcessRequest[] = [];
+    const execution = await runDevices(
+      { targetTransportId: "9" },
+      deterministicDependencies(async (request) => {
+        requests.push(request);
+        const args = request.args ?? [];
+        if (args.includes("devices")) {
+          return processResult(request, {
+            stdout:
+              "List of devices attached\n" +
+              "USB-1 device model:Pixel_8 transport_id:7\n" +
+              "USB-1 device model:Pixel_9 transport_id:9\n" +
+              "USB-2 device model:Other transport_id:10\n",
+          });
+        }
+        if (args.includes("ro.serialno")) {
+          return processResult(request, { stdout: "PHONE-9\n" });
+        }
+        if (args.includes("mdns")) {
+          return processResult(request, { stdout: "List of discovered mdns services\n" });
+        }
+        return processResult(request);
+      }),
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.Success);
+    expect(execution.result.data?.selected).toMatchObject({
+      reason: "transport-id",
+      transport: { serial: "USB-1", transportId: "9" },
+    });
+    expect(requests.filter(({ args }) => args?.includes("ro.serialno"))).toEqual([
+      expect.objectContaining({ args: ["-t", "9", "shell", "getprop", "ro.serialno"] }),
+    ]);
+  });
+
+  test("bounds adb target IDs but inventories devices for hardware target IDs", async () => {
+    const outputs = {
+      devices:
+        "List of devices attached\n" +
+        "USB-1 device model:Pixel_8 transport_id:7\n" +
+        "USB-2 device model:Pixel_9 transport_id:9\n",
+      "hardware-serial:USB-1": "PHONE-1\n",
+      "hardware-serial:USB-2": "PHONE-2\n",
+      "mdns-services": "List of discovered mdns services\n",
+    };
+    const adbRequests: ProcessRequest[] = [];
+    const hardwareRequests: ProcessRequest[] = [];
+
+    const adbTarget = await runDevices(
+      { targetSelector: "adb:USB-2" },
+      deterministicDependencies(fixtureRunner(outputs, adbRequests)),
+    );
+    const hardwareTarget = await runDevices(
+      { targetSelector: "hardware:PHONE-2" },
+      deterministicDependencies(fixtureRunner(outputs, hardwareRequests)),
+    );
+
+    expect(adbTarget.result.data?.selected?.transport.serial).toBe("USB-2");
+    expect(adbRequests.filter(({ args }) => args?.includes("ro.serialno"))).toHaveLength(0);
+    expect(hardwareTarget.result.data?.selected?.transport.serial).toBe("USB-2");
+    expect(hardwareRequests.filter(({ args }) => args?.includes("ro.serialno"))).toHaveLength(2);
   });
 
   test("returns a stable target error when an explicit selector is absent", async () => {
+    const requests: ProcessRequest[] = [];
     const execution = await runDevices(
       { targetSelector: "missing" },
-      deterministicDependencies(fixtureRunner({ devices: "List of devices attached\n" })),
+      deterministicDependencies(
+        fixtureRunner(
+          {
+            devices:
+              "List of devices attached\n" +
+              "USB-1 device model:Pixel_8 transport_id:1\n" +
+              "USB-2 device model:Pixel_9 transport_id:2\n",
+            "mdns-services": "List of discovered mdns services\n",
+          },
+          requests,
+        ),
+      ),
     );
 
     expect(execution.exitCode).toBe(ExitCode.Target);
     expect(execution.result.problems.at(-1)?.code).toBe(ProblemCode.TargetNotFound);
+    expect(requests.some(({ args }) => args?.includes("ro.serialno"))).toBeFalse();
   });
 
   test("uses exit code 130 for an interrupted ADB inventory", async () => {

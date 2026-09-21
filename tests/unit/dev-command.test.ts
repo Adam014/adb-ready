@@ -450,6 +450,11 @@ describe("runDev", () => {
     expect(targetOperations).toHaveLength(2);
     expect(targetOperations.every(({ args }) => args?.[0] === "-t" && args[1] === "7")).toBeTrue();
     expect(targetOperations.flatMap(({ args }) => args ?? [])).not.toContain("10.0.0.9:41231");
+    expect(requests.filter(({ args }) => args?.includes("ro.serialno"))).toEqual([
+      expect.objectContaining({
+        args: ["-s", "emulator-5554", "shell", "getprop", "ro.serialno"],
+      }),
+    ]);
     const logcatRequests = requests.filter(
       ({ args }) => args?.includes("logcat") && !args.includes("--help"),
     );
