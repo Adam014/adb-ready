@@ -208,6 +208,10 @@ function isAutomationRunData(value: unknown): value is AutomationRunData {
   );
 }
 
+function isVersionData(value: unknown): value is { version: string } {
+  return isRecord(value) && typeof value.version === "string";
+}
+
 function isLogsData(value: unknown): value is LogsData {
   return (
     isRecord(value) &&
@@ -956,6 +960,7 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`runtime_version=${clean(data.runtime.version)}\n`);
     sink.write(`adb_version=${clean(data.adb.version.platformToolsVersion ?? "unknown")}\n`);
   }
+  if (isVersionData(result.data)) sink.write(`version=${clean(result.data.version)}\n`);
   if (isConnectData(result.data)) {
     sink.write(`endpoint=${clean(result.data.endpoint)}\n`);
     sink.write(`serial=${clean(result.data.serial)}\n`);
