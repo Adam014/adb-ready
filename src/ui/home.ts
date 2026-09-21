@@ -27,6 +27,7 @@ export type HomeAction =
   | "version";
 type HomeSection = "automation" | "debug" | "device" | "project";
 type HomeMenuValue = HomeAction | HomeSection;
+type HomeDensity = "compact" | "full" | "minimal";
 export type HomeResult =
   | { kind: "action"; action: HomeAction }
   | { kind: "cancelled"; reason: "interrupt" | "signal" }
@@ -144,13 +145,27 @@ function compactSessionPreamble(capabilities: TerminalCapabilities): string[] {
   const top = unicode ? `╭${"─".repeat(width - 2)}╮` : `+${"-".repeat(width - 2)}+`;
   const bottom = unicode ? `╰${"─".repeat(width - 2)}╯` : `+${"-".repeat(width - 2)}+`;
   const side = unicode ? "│" : "|";
-  const wordmark = width >= 45 ? COMPACT_WORDMARK : ["ADB READY"];
+  const wordmark = width >= 45 ? ["ADB READY", ...COMPACT_WORDMARK] : ["ADB READY"];
   const rows = wordmark.map((line) => {
     const content = fit(center(line, inner), inner);
     return `${style.dim(side, capabilities)} ${style.accent(content, capabilities)} ${style.dim(side, capabilities)}`;
   });
 
   return ["", style.dim(top, capabilities), ...rows, style.dim(bottom, capabilities), ""];
+}
+
+function homeDensity(
+  presentation: "full" | "menu",
+  firstRender: boolean,
+  capabilities: TerminalCapabilities,
+): HomeDensity {
+  if (capabilities.rows < 22) return "minimal";
+  if (presentation === "full" && firstRender && capabilities.rows >= 30) return "full";
+  return "compact";
+}
+
+function minimalSessionPreamble(version: string, capabilities: TerminalCapabilities): string[] {
+  return [style.accent(`ADB READY · v${version}`, capabilities)];
 }
 
 export function clearInteractiveScreen(sink: TextSink, capabilities: TerminalCapabilities): void {
@@ -314,22 +329,28 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     const currentOptions: ReadonlyArray<SelectOption<HomeMenuValue>> = atRoot
       ? rootOptions
       : sectionOptions[section ?? "device"];
+    const density = homeDensity(presentation, firstRender, options.capabilities);
+    const visibleOptions =
+      density === "minimal"
+        ? currentOptions.map(({ description: _description, ...option }) => option)
+        : currentOptions;
     const numericShortcut = `1-${String(Math.min(currentOptions.length, 9))} jump`;
     const selection = await selectOne<HomeMenuValue>({
       title: atRoot
         ? "WHAT DO YOU WANT TO DO?"
         : `HOME / ${section === "device" ? "DEVICE & APP" : section === "debug" ? "DEBUG & EVIDENCE" : section === "automation" ? "TEST & AUTOMATE" : "PROJECT & SETUP"}`,
-      options: currentOptions,
+      options: visibleOptions,
       input: options.input,
       sink: options.sink,
       capabilities:
-        presentation === "full" && firstRender
-          ? options.capabilities
-          : { ...options.capabilities, animation: false },
-      preamble: (frame: number) =>
-        presentation === "full" && firstRender
-          ? homePreamble(frame, options.version, options.capabilities)
-          : compactSessionPreamble(options.capabilities),
+        density === "full" ? options.capabilities : { ...options.capabilities, animation: false },
+      preamble: (frame: number) => {
+        if (density === "full") {
+          return homePreamble(frame, options.version, options.capabilities);
+        }
+        if (density === "compact") return compactSessionPreamble(options.capabilities);
+        return minimalSessionPreamble(options.version, options.capabilities);
+      },
       help: options.capabilities.unicode
         ? `↑↓ move · ${numericShortcut} · enter open`
         : `up/down · ${numericShortcut} · enter open`,

@@ -33,6 +33,7 @@ const interactiveCapabilities: TerminalCapabilities = {
   unicode: true,
   animation: true,
   columns: 80,
+  rows: 24,
 };
 
 describe("terminal capabilities", () => {
@@ -45,8 +46,16 @@ describe("terminal capabilities", () => {
         inputIsTTY: true,
         outputIsTTY: true,
         columns: 100,
+        rows: 42,
       }),
-    ).toEqual({ interactive: true, color: true, unicode: true, animation: true, columns: 100 });
+    ).toEqual({
+      interactive: true,
+      color: true,
+      unicode: true,
+      animation: true,
+      columns: 100,
+      rows: 42,
+    });
   });
 
   test("disables control sequences for JSON, CI, pipes, and dumb terminals", () => {

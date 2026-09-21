@@ -45,6 +45,7 @@ const interactive: TerminalCapabilities = {
   unicode: true,
   animation: false,
   columns: 80,
+  rows: 24,
 };
 
 describe("pairing code input", () => {

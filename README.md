@@ -71,8 +71,9 @@ them or require an ADB Ready account, hosted service, or model API key.
 
 Running `adb-ready` without a command opens the interactive workflow home.
 `adbr` is the shorter alias for the same CLI.
-The home and its focused menus adapt to the detected terminal width, including
-narrow split panes, without relying on horizontal scrolling.
+The home and its focused menus adapt to the detected terminal width and height,
+including narrow split panes and short terminals, without relying on scrolling
+to reveal an action.
 
 ## What ADB Ready does
 

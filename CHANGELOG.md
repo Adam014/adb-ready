@@ -11,6 +11,8 @@ breaking changes.
 
 ### Fixed
 
+- Adapt the interactive home to terminal height with full, compact, and minimal
+  layouts so every action remains visible in short panes.
 - Derive interactive-home numeric shortcut hints from the visible choices so
   every numbered action is accurately discoverable.
 - Honor plain, JSON, and NDJSON output for both the `version` command and

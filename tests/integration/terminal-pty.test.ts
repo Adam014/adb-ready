@@ -24,6 +24,7 @@ async function runPty(
   waitFor: string,
   input: string,
   columns = 80,
+  rows = 24,
 ): Promise<PtyResult> {
   return await new Promise<PtyResult>((resolve, reject) => {
     const child = spawn(
@@ -36,6 +37,7 @@ async function runPty(
           ADB_READY_PTY_WAIT_FOR: waitFor,
           ADB_READY_PTY_INPUT_HEX: Buffer.from(input).toString("hex"),
           ADB_READY_PTY_COLUMNS: String(columns),
+          ADB_READY_PTY_ROWS: String(rows),
           ADB_READY_REDUCED_MOTION: "1",
           CI: undefined,
           LANG: process.env.LANG ?? "C.UTF-8",
@@ -104,11 +106,13 @@ ptyTest("restores the real terminal after Ctrl-C in raw mode", async () => {
 
 ptyTest("keeps the interactive home within a narrow real terminal", async () => {
   const columns = 56;
+  const rows = 24;
   const result = await runPty(
     [process.execPath, "run", "src/cli.ts"],
     "WHAT DO YOU WANT TO DO?",
     "\u001B",
     columns,
+    rows,
   );
 
   expectRestored(result);
@@ -118,4 +122,25 @@ ptyTest("keeps the interactive home within a narrow real terminal", async () => 
     (line) => !line.startsWith("PTY_DRIVER_STATE "),
   );
   expect(Math.max(...renderedHome.map((line) => [...line].length))).toBeLessThan(columns);
+  expect(renderedHome.filter((line) => line !== "").length).toBeLessThanOrEqual(rows);
+});
+
+ptyTest("keeps every home action visible in a short real terminal", async () => {
+  const rows = 16;
+  const result = await runPty(
+    [process.execPath, "run", "src/cli.ts"],
+    "WHAT DO YOU WANT TO DO?",
+    "\u001B",
+    56,
+    rows,
+  );
+
+  expectRestored(result);
+  expect(result.output).toMatch(/ADB READY · v\d+\.\d+\.\d+/u);
+  expect(result.output).toContain("[6]  Exit");
+  expect(result.output).not.toContain("Android sessions. Kept ready.");
+  const renderedHome = visibleLines(result.output).filter(
+    (line) => line !== "" && !line.startsWith("PTY_DRIVER_STATE "),
+  );
+  expect(renderedHome.length).toBeLessThanOrEqual(rows);
 });

@@ -20,6 +20,7 @@ class MemoryOutput implements TextSink {
   value = "";
   isTTY = false;
   columns = 100;
+  rows = 40;
 
   write(chunk: string): void {
     this.value += chunk;

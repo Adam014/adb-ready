@@ -19,6 +19,7 @@ const capabilities: TerminalCapabilities = {
   unicode: false,
   animation: false,
   columns: 120,
+  rows: 24,
 };
 
 const result: ResultEnvelope<{
