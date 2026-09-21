@@ -24,6 +24,7 @@ import { TextLineBuffer } from "../core/text-lines.js";
 import { type ExpoLaunchResolution, resolveExpoLaunch } from "../dev/expo-launch.js";
 import { type DevHook, type DevHookEvent, type HookRun, runHooks } from "../dev/hooks.js";
 import { type DiscoveredLocalService, discoverExpoLocalServices } from "../dev/local-services.js";
+import { ensureLoopbackBridge, type LoopbackBridge } from "../dev/loopback-bridge.js";
 import { type MetroServiceProbeResult, probeMetroService } from "../dev/metro-service.js";
 import {
   type DevPreset,
@@ -110,6 +111,7 @@ export interface CommandDependencies {
     expectedProjectRoot?: string;
     signal?: AbortSignal;
   }) => Promise<MetroServiceProbeResult>;
+  ensureLoopbackBridge?: typeof ensureLoopbackBridge;
   resolveExpoLaunch?: typeof resolveExpoLaunch;
 }
 
@@ -2253,7 +2255,11 @@ function devReadinessAssertions(
     { kind: "boot" },
     ...(preset !== "expo" && preset !== "react-native"
       ? []
-      : hostPorts.map((hostPort) => ({ kind: "host-port" as const, port: hostPort }))),
+      : hostPorts.map((hostPort) => ({
+          kind: "host-port" as const,
+          host: "localhost",
+          port: hostPort,
+        }))),
   ];
 }
 
@@ -3068,6 +3074,7 @@ export async function runDev(
   const existing = listed.value.map((mapping) => normalizePortMapping("reverse", mapping));
   const created: Array<{ device: string; host: string }> = [];
   const reused: Array<{ device: string; host: string }> = [];
+  const loopbackBridges: LoopbackBridge[] = [];
   for (const requested of normalizedPorts.mappings) {
     const atDevicePort = existing.find((mapping) => mapping.device === requested.device);
     if (atDevicePort === undefined) continue;
@@ -3344,34 +3351,48 @@ export async function runDev(
   }
 
   const cleanup = async (): Promise<void> => {
-    if (options.cleanupPorts === false || created.length === 0) return;
-    bus.emit({
-      type: "session.stopping",
-      source: "session",
-      severity: "info",
-      message: "Cleaning session-owned port mappings",
-      correlation: targetCorrelation,
-    });
-    let removalSucceeded = true;
-    for (const mapping of created) {
-      const removed = await client.removePortMapping(target, "reverse", mapping.device);
-      removalSucceeded = processSucceeded(removed.process) && removalSucceeded;
+    if ((options.cleanupPorts === false || created.length === 0) && loopbackBridges.length === 0) {
+      return;
     }
-    const remaining = await client.listPortMappings(target, "reverse");
-    cleaned =
-      removalSucceeded &&
-      processSucceeded(remaining.process) &&
-      !remaining.value
-        .map((mapping) => normalizePortMapping("reverse", mapping))
-        .some((mapping) => created.some((item) => item.device === mapping.device));
-    if (!cleaned) {
+    if (options.cleanupPorts !== false && created.length > 0) {
+      bus.emit({
+        type: "session.stopping",
+        source: "session",
+        severity: "info",
+        message: "Cleaning session-owned port mappings",
+        correlation: targetCorrelation,
+      });
+    }
+    let removalSucceeded = true;
+    if (options.cleanupPorts !== false && created.length > 0) {
+      for (const mapping of created) {
+        const removed = await client.removePortMapping(target, "reverse", mapping.device);
+        removalSucceeded = processSucceeded(removed.process) && removalSucceeded;
+      }
+      const remaining = await client.listPortMappings(target, "reverse");
+      cleaned =
+        removalSucceeded &&
+        processSucceeded(remaining.process) &&
+        !remaining.value
+          .map((mapping) => normalizePortMapping("reverse", mapping))
+          .some((mapping) => created.some((item) => item.device === mapping.device));
+    }
+    let bridgesCleaned = true;
+    for (const bridge of loopbackBridges.splice(0).reverse()) {
+      try {
+        await bridge.close();
+      } catch {
+        bridgesCleaned = false;
+      }
+    }
+    if ((options.cleanupPorts !== false && created.length > 0 && !cleaned) || !bridgesCleaned) {
       problems.push({
         code: ProblemCode.PortMappingCleanupFailed,
         category: "adb.port.cleanup",
         severity: "error",
-        summary: "Session-owned reverse mappings could not be fully removed.",
+        summary: "Session-owned port resources could not be fully removed.",
         detail:
-          "ADB Ready attempted removal and verified the mapping list, but owned mappings remain or ADB failed.",
+          "ADB Ready attempted to remove its reverse mappings and local bridges, but at least one owned resource could not be verified as closed.",
         retryable: true,
         evidence: [
           {
@@ -3384,6 +3405,38 @@ export async function runDev(
         correlation: targetCorrelation,
       });
     }
+  };
+
+  const ensureBridgeForPort = async (port: number): Promise<boolean> => {
+    if (loopbackBridges.some((bridge) => bridge.port === port)) return true;
+    const result = await (dependencies.ensureLoopbackBridge ?? ensureLoopbackBridge)({
+      port,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (result.status === "bridged") {
+      loopbackBridges.push(result.bridge);
+      bus.emit({
+        type: "port.bridge.created",
+        source: "port",
+        severity: "info",
+        message: `Bridged IPv4 localhost to the IPv6 service on port ${String(port)}`,
+        correlation: targetCorrelation,
+        data: { port, sourceHost: result.bridge.sourceHost, targetHost: result.bridge.targetHost },
+      });
+      return true;
+    }
+    if (result.status !== "failed") return true;
+    problems.push(
+      commandProblem(
+        ProblemCode.ReadinessFailed,
+        "readiness.host-port",
+        `Android cannot reach the IPv6-only localhost service on port ${String(port)}.`,
+        `${result.detail} ADB Ready left the service untouched; retry after the port is available or bind the service to IPv4 localhost.`,
+        context.commandId,
+        [{ source: "loopback.bridge", field: "port", value: port }],
+      ),
+    );
+    return false;
   };
   if (problems.some(({ severity }) => severity === "error")) {
     await cleanup();
@@ -3402,7 +3455,7 @@ export async function runDev(
   const metroPort = metroServicePort(preset, normalizedPorts.mappings);
   if (metroPort !== undefined) {
     const probe = await (dependencies.probeMetroService ?? probeMetroService)({
-      host: "127.0.0.1",
+      host: "localhost",
       port: metroPort,
       expectedProjectRoot: project.root,
       ...(signal === undefined ? {} : { signal }),
@@ -3699,7 +3752,24 @@ export async function runDev(
       data: { attempts: readiness.attempts, durationMs: readiness.durationMs },
     });
   }
-  if (readiness.ready && preset === "expo") {
+  if (readiness.ready) {
+    const hostPorts = [
+      ...new Set(
+        normalizedPorts.mappings.flatMap(({ host }) => {
+          const port = host.match(/^tcp:(\d+)$/u)?.[1];
+          return port === undefined ? [] : [Number(port)];
+        }),
+      ),
+    ];
+    for (const port of hostPorts) {
+      if (!(await ensureBridgeForPort(port))) break;
+    }
+  }
+  if (
+    readiness.ready &&
+    !problems.some(({ severity }) => severity === "error") &&
+    preset === "expo"
+  ) {
     const hostPort = metroServicePort(preset, normalizedPorts.mappings);
     const devicePort = expoDevicePort(normalizedPorts.mappings);
     if (hostPort === undefined || devicePort === undefined) {
@@ -3713,17 +3783,45 @@ export async function runDev(
         ),
       );
     } else {
-      expoLaunch = await launchExpoOnSelectedTarget({
-        client,
-        target,
-        endpoint: attachedService?.endpoint ?? `http://127.0.0.1:${String(hostPort)}`,
-        devicePort,
-        runtime: project.packageJson?.hasExpoDevClient === true ? "custom" : "expo",
-        commandId: context.commandId,
-        problems,
-        dependencies,
-        ...(signal === undefined ? {} : { signal }),
-      });
+      let endpoint = attachedService?.endpoint;
+      if (endpoint === undefined) {
+        const probe = await (dependencies.probeMetroService ?? probeMetroService)({
+          host: "localhost",
+          port: hostPort,
+          ...(signal === undefined ? {} : { signal }),
+        });
+        if (probe.status === "available") {
+          endpoint = probe.endpoint;
+        } else if (probe.status !== "aborted") {
+          problems.push(
+            commandProblem(
+              ProblemCode.ExpoLaunchFailed,
+              "child.expo-launch",
+              "The started Expo server did not expose a valid Metro endpoint.",
+              probe.status === "occupied"
+                ? `${probe.detail} Check the configured Expo command and host port.`
+                : `No Metro service was reachable on localhost:${String(hostPort)} after readiness passed.`,
+              context.commandId,
+              [{ source: "metro.status", field: "endpoint", value: probe.endpoint }],
+            ),
+          );
+        }
+      }
+      if (endpoint === undefined) {
+        expoLaunch = undefined;
+      } else {
+        expoLaunch = await launchExpoOnSelectedTarget({
+          client,
+          target,
+          endpoint,
+          devicePort,
+          runtime: project.packageJson?.hasExpoDevClient === true ? "custom" : "expo",
+          commandId: context.commandId,
+          problems,
+          dependencies,
+          ...(signal === undefined ? {} : { signal }),
+        });
+      }
     }
   }
   const expoLaunchSucceeded = preset !== "expo" || expoLaunch !== undefined;
@@ -3810,7 +3908,7 @@ export async function runDev(
       attachedService === undefined
         ? undefined
         : await (dependencies.probeMetroService ?? probeMetroService)({
-            host: "127.0.0.1",
+            host: "localhost",
             port: Number(new URL(attachedService.endpoint).port),
             expectedProjectRoot: project.root,
             signal: watchSignal,

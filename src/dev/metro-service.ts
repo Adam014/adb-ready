@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { connect } from "node:net";
 import path from "node:path";
+import { connectionHosts, httpEndpoint } from "../platform/network.js";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 1_000;
 const MAX_STATUS_BYTES = 128;
@@ -32,6 +33,7 @@ export interface MetroServiceProbeOptions {
 }
 
 async function portReachable(host: string, port: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return false;
   return await new Promise<boolean>((resolve) => {
     const socket = connect({ host, port });
     let settled = false;
@@ -121,8 +123,8 @@ async function projectRootMatches(
 export async function probeMetroService(
   options: MetroServiceProbeOptions,
 ): Promise<MetroServiceProbeResult> {
-  const endpoint = `http://${options.host}:${String(options.port)}`;
-  if (aborted(options.signal)) return { status: "aborted", endpoint };
+  const unavailableEndpoint = httpEndpoint(options.host, options.port);
+  if (aborted(options.signal)) return { status: "aborted", endpoint: unavailableEndpoint };
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
     throw new RangeError("Metro probe timeoutMs must be a positive integer");
@@ -133,47 +135,52 @@ export async function probeMetroService(
   options.signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => controller.abort(new Error("Metro probe timed out")), timeoutMs);
   try {
-    const reachable = await (options.connectPort ?? portReachable)(
-      options.host,
-      options.port,
-      controller.signal,
-    );
-    if (aborted(options.signal)) return { status: "aborted", endpoint };
-    if (!reachable) return { status: "unavailable", endpoint };
-
-    try {
-      const response = await (options.fetchStatus ?? fetchStatus)(
-        `${endpoint}/status`,
+    let occupied: MetroServiceProbeResult | undefined;
+    for (const host of connectionHosts(options.host)) {
+      const endpoint = httpEndpoint(host, options.port);
+      const reachable = await (options.connectPort ?? portReachable)(
+        host,
+        options.port,
         controller.signal,
       );
-      const validStatus = response.status === 200 && response.body.trim() === METRO_STATUS;
-      if (
-        validStatus &&
-        (options.expectedProjectRoot === undefined ||
-          (await projectRootMatches(response.projectRoot, options.expectedProjectRoot)))
-      ) {
-        return { status: "available", endpoint };
-      }
-      return {
-        status: "occupied",
-        endpoint,
-        detail:
-          response.status !== 200
-            ? `The Metro status endpoint returned HTTP ${String(response.status)}.`
-            : response.body.trim() !== METRO_STATUS
-              ? "The service did not return Metro's running status."
-              : response.projectRoot === undefined
-                ? "Metro did not identify its project root, so ADB Ready cannot attach safely."
-                : "Metro belongs to a different project root.",
-      };
-    } catch {
       if (aborted(options.signal)) return { status: "aborted", endpoint };
-      return {
-        status: "occupied",
-        endpoint,
-        detail: "The port is open, but its service did not complete the Metro status probe.",
-      };
+      if (!reachable) continue;
+
+      try {
+        const response = await (options.fetchStatus ?? fetchStatus)(
+          `${endpoint}/status`,
+          controller.signal,
+        );
+        const validStatus = response.status === 200 && response.body.trim() === METRO_STATUS;
+        if (
+          validStatus &&
+          (options.expectedProjectRoot === undefined ||
+            (await projectRootMatches(response.projectRoot, options.expectedProjectRoot)))
+        ) {
+          return { status: "available", endpoint };
+        }
+        occupied ??= {
+          status: "occupied",
+          endpoint,
+          detail:
+            response.status !== 200
+              ? `The Metro status endpoint returned HTTP ${String(response.status)}.`
+              : response.body.trim() !== METRO_STATUS
+                ? "The service did not return Metro's running status."
+                : response.projectRoot === undefined
+                  ? "Metro did not identify its project root, so ADB Ready cannot attach safely."
+                  : "Metro belongs to a different project root.",
+        };
+      } catch {
+        if (aborted(options.signal)) return { status: "aborted", endpoint };
+        occupied ??= {
+          status: "occupied",
+          endpoint,
+          detail: "The port is open, but its service did not complete the Metro status probe.",
+        };
+      }
     }
+    return occupied ?? { status: "unavailable", endpoint: unavailableEndpoint };
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", abort);

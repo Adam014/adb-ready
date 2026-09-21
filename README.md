@@ -145,6 +145,8 @@ variables are discovered with Expo's own development environment resolution.
 ADB Ready safely adds their ports to the selected target and verifies the host
 services before calling the session ready. Explicit port configuration always
 wins, and `--no-auto-reverse-localhost` disables discovery when required.
+IPv4 and IPv6 loopback listeners are supported; when ADB cannot reach an
+IPv6-only service directly, ADB Ready creates and cleans a local session bridge.
 
 In an interactive Expo or Flutter session, ADB Ready shows the framework's
 active reload, developer-menu, debugger, and help shortcuts as soon as the
