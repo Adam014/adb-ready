@@ -9,6 +9,8 @@ breaking changes.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-25
+
 ### Added
 
 - Add a first-device guide under Start that walks new users through USB,
@@ -421,7 +423,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Adam014/adb-ready/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Adam014/adb-ready/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Adam014/adb-ready/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Adam014/adb-ready/compare/v0.3.5...v0.4.0
