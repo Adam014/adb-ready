@@ -61,6 +61,51 @@ const options = [
 ];
 
 describe("selectOne", () => {
+  test("renders one unmistakable selected row without noisy pending markers", async () => {
+    const input = new FakeInput();
+    const sink = new MemorySink();
+    const selection = selectOne({
+      title: "Choose an action",
+      options: [
+        { value: "dev", label: "Start development" },
+        { value: "device", label: "Device & app" },
+      ],
+      input,
+      sink,
+      capabilities: { ...capabilities, color: true, unicode: true },
+    });
+
+    input.send("\u001B[B");
+    input.send("\r");
+
+    await expect(selection).resolves.toEqual({ kind: "selected", value: "device" });
+    expect(sink.value).toContain("\u001B[1;7m[2]  Device & app\u001B[0m");
+    expect(sink.value).toContain("›");
+    expect(sink.value).not.toContain("○");
+  });
+
+  test("keeps selection explicit without color or Unicode", async () => {
+    const input = new FakeInput();
+    const sink = new MemorySink();
+    const selection = selectOne({
+      title: "Choose an action",
+      options: [
+        { value: "dev", label: "Start development" },
+        { value: "device", label: "Device & app" },
+      ],
+      input,
+      sink,
+      capabilities: { ...capabilities, color: false, unicode: false },
+    });
+
+    input.send("\u001B[B");
+    input.send("\r");
+
+    await expect(selection).resolves.toEqual({ kind: "selected", value: "device" });
+    expect(sink.value).toContain("> [2]  Device & app");
+    expect(sink.value).not.toContain("\u001B[7m");
+  });
+
   test("uses arrows while skipping unavailable choices", async () => {
     const input = new FakeInput();
     const sink = new MemorySink();

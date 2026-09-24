@@ -137,7 +137,7 @@ ptyTest("keeps every home action visible in a short real terminal", async () => 
 
   expectRestored(result);
   expect(result.output).toMatch(/ADB READY · v\d+\.\d+\.\d+/u);
-  expect(result.output).toContain("[6]  Exit");
+  expect(result.output).toContain("[5]  Exit");
   expect(result.output).not.toContain("Android sessions. Kept ready.");
   const renderedHome = visibleLines(result.output).filter(
     (line) => line !== "" && !line.startsWith("PTY_DRIVER_STATE "),

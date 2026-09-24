@@ -9,6 +9,15 @@ breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Make interactive selection unmistakable with one directional cursor and a
+  high-contrast active row, while retaining explicit no-color and ASCII
+  fallbacks and removing distracting markers from inactive choices.
+- Group session launch, planning, bounded verification, wireless connection,
+  and pairing under one focused Start workflow instead of scattering entry
+  actions across unrelated top-level categories.
+
 ## [0.5.0] - 2026-09-21
 
 ### Fixed

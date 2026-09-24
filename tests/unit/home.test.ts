@@ -82,7 +82,7 @@ const interactive: TerminalCapabilities = {
 describe("home screen", () => {
   test("clears first, renders product value, and opens on the flagship dev workflow", async () => {
     const sink = new MemorySink();
-    const input = new AutoInput("\r");
+    const input = new AutoInput("\r", "\r");
     const selected = await showHomeScreen({
       version: "0.0.0",
       input,
@@ -96,7 +96,7 @@ describe("home screen", () => {
     expect(sink.value).toContain("ADB READY");
     expect(sink.value).toContain("Android sessions. Kept ready.");
     expect(sink.value).toContain("RUN    one target + project");
-    expect(sink.value).toContain("Test & automate");
+    expect(sink.value).toContain("Development session");
     expect(sink.value).toContain("Device & app");
     expect(sink.value).toContain("Debug & evidence");
     expect(sink.value).toContain("Project & setup");
@@ -109,13 +109,13 @@ describe("home screen", () => {
     const sink = new MemorySink();
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("5\r", "4\r"),
+      input: new AutoInput("4\r", "4\r"),
       sink,
       capabilities: { ...interactive, animation: false },
     });
 
     expect(selected).toEqual({ kind: "action", action: "version" });
-    expect(sink.value).toContain("1-6 jump");
+    expect(sink.value).toContain("1-5 jump");
     expect(sink.value).toContain("1-4 jump");
   });
 
@@ -123,7 +123,7 @@ describe("home screen", () => {
     const sink = new MemorySink();
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("4\r", "2\r"),
+      input: new AutoInput("3\r", "2\r"),
       sink,
       capabilities: { ...interactive, animation: false },
     });
@@ -139,7 +139,7 @@ describe("home screen", () => {
     const sink = new MemorySink();
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("3\r", "\u001B", "\u001B"),
+      input: new AutoInput("2\r", "\u001B", "\u001B"),
       sink,
       capabilities: { ...interactive, animation: false },
     });
@@ -180,7 +180,7 @@ describe("home screen", () => {
     expect(compactSink.value).toContain(COMPACT_WORDMARK_MARKER);
     expect(compactSink.value).not.toContain("Android sessions. Kept ready.");
     expect(compactSink.value).toContain(
-      "Prepare one target, ports, logs, and your project command.",
+      "Develop, connect a device, or run a bounded verification.",
     );
 
     const minimalSink = new MemorySink();
@@ -194,9 +194,9 @@ describe("home screen", () => {
     expect(minimalSink.value).toContain("ADB READY · v0.0.0");
     expect(minimalSink.value).not.toContain(COMPACT_WORDMARK_MARKER);
     expect(minimalSink.value).not.toContain(
-      "Prepare one target, ports, logs, and your project command.",
+      "Develop, connect a device, or run a bounded verification.",
     );
-    expect(minimalSink.value).toContain("[6]  Exit");
+    expect(minimalSink.value).toContain("[5]  Exit");
   });
 
   test("keeps the compact ASCII wordmark static", async () => {
