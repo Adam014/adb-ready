@@ -331,6 +331,20 @@ describe("runCli", () => {
     expect(streams.input.isRaw).toBe(false);
   });
 
+  test("hands first-device setup to the verified target workflow", async () => {
+    const streams = io({ inputTTY: true, outputTTY: true, errorTTY: true });
+    streams.env.ADB_READY_REDUCED_MOTION = "1";
+    streams.input.autoInputs = ["\r", "2\r", "\r", "\r", "\r", "\u001B"];
+
+    const exitCode = await runCli([], streams, dependencies());
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.error.value).toContain("DEVICE SETUP · USB");
+    expect(streams.error.value).toContain("Verify USB device");
+    expect(streams.error.value).toContain("· devices");
+    expect(streams.input.isRaw).toBe(false);
+  });
+
   test("renders help without loading configuration or ADB", async () => {
     const streams = io();
     const exitCode = await runCli(["--help"], streams, {

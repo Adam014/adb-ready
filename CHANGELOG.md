@@ -9,6 +9,12 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add a first-device guide under Start that walks new users through USB,
+  Android 11+ Wireless debugging, or an existing emulator before handing off
+  to the normal verified devices, pairing, or connection workflow.
+
 ### Fixed
 
 - Make interactive selection unmistakable with one directional cursor and a

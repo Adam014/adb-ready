@@ -99,6 +99,7 @@ import type { AndroidTarget } from "../target/model.js";
 import type { SelectedTarget } from "../target/selection.js";
 import { confirmAction } from "../ui/confirm.js";
 import { startDevControls } from "../ui/dev-controls.js";
+import { showDeviceSetup } from "../ui/device-setup.js";
 import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
@@ -771,6 +772,25 @@ async function runInteractiveSession(
     }
     if (home.action === "exit") {
       return ExitCode.Success;
+    }
+    if (home.action === "setup-device") {
+      clearInteractiveScreen(io.error, terminal);
+      const setup = await showDeviceSetup({
+        input: io.input,
+        sink: io.error,
+        capabilities: terminal,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (setup.kind === "cancelled" && setup.reason !== "escape") {
+        return ExitCode.Interrupted;
+      }
+      if (setup.kind === "action") {
+        clearInteractiveScreen(io.error, terminal);
+        await runCliInternal([setup.action], io, dependencies, signal);
+      }
+      if (signal?.aborted === true) return ExitCode.Interrupted;
+      presentation = "menu";
+      continue;
     }
 
     const actionArguments: Record<Exclude<typeof home.action, "exit">, string[]> = {

@@ -24,6 +24,7 @@ export type HomeAction =
   | "pair"
   | "run-help"
   | "sessions"
+  | "setup-device"
   | "version";
 type HomeSection = "debug" | "device" | "project" | "start";
 type HomeMenuValue = HomeAction | HomeSection;
@@ -215,14 +216,9 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         recommended: true,
       },
       {
-        value: "dev-plan",
-        label: "Preview project plan",
-        description: "Resolve the development workflow without allocating a target.",
-      },
-      {
-        value: "run-help",
-        label: "Run a bounded verification",
-        description: "See how to gate a test on readiness and retain its evidence.",
+        value: "setup-device",
+        label: "Set up first device",
+        description: "Follow a guided USB, Wireless debugging, or emulator setup.",
       },
       {
         value: "connect",
@@ -233,6 +229,16 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         value: "pair",
         label: "Pair a new device",
         description: "Pair safely with Android's temporary six-digit code.",
+      },
+      {
+        value: "dev-plan",
+        label: "Preview project plan",
+        description: "Resolve the development workflow without allocating a target.",
+      },
+      {
+        value: "run-help",
+        label: "Run a bounded verification",
+        description: "See how to gate a test on readiness and retain its evidence.",
       },
     ],
     device: [
