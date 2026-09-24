@@ -28,7 +28,10 @@ npx adb-ready doctor
 ```
 
 Run `npx adb-ready` without a command for the interactive workflow home. Its
-layout automatically switches to a compact form in narrow terminal panes.
+layout automatically switches to a compact form in narrow terminal panes. Open
+**Start** for development sessions, bounded verification, wireless connection,
+and pairing; the remaining sections keep device operations, debugging, and
+project setup separate.
 
 The full source build can be tested from a repository checkout:
 

@@ -133,22 +133,25 @@ function renderMenu<T>(
   options.options.forEach((option, index) => {
     const isSelected = index === selected;
     const pointer = isSelected
-      ? style.accent(glyphs.active, capabilities)
-      : style.dim(option.disabled === true ? glyphs.skipped : glyphs.pending, capabilities);
-    const number = style.dim(`[${String(index + 1)}]`, capabilities);
+      ? style.accent(capabilities.unicode ? "›" : ">", capabilities)
+      : option.disabled === true
+        ? style.dim(glyphs.skipped, capabilities)
+        : " ";
+    const number = `[${String(index + 1)}]`;
     const disabled = option.disabled === true ? "  · unavailable" : "";
     const recommended = option.recommended === true ? "  · recommended" : "";
     const label = truncate(
       `${sanitizeTerminalText(option.label)}${disabled}${recommended}`,
       Math.max(8, availableColumns - 10),
     );
-    const styledLabel =
+    const row = `${number}  ${label}`;
+    const styledRow =
       option.disabled === true
-        ? style.dim(label, capabilities)
+        ? style.dim(row, capabilities)
         : isSelected
-          ? style.strong(label, capabilities)
-          : label;
-    lines.push(`  ${pointer} ${number}  ${styledLabel}`);
+          ? style.selected(row, capabilities)
+          : `${style.dim(number, capabilities)}  ${label}`;
+    lines.push(`  ${pointer} ${styledRow}`);
     if (isSelected && option.description !== undefined) {
       for (const description of wrap(option.description, Math.max(10, availableColumns - 9))) {
         lines.push(

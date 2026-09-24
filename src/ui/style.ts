@@ -63,10 +63,15 @@ function color(code: number, value: string, capabilities: TerminalCapabilities):
   return capabilities.color ? `\u001B[${String(code)}m${value}\u001B[0m` : value;
 }
 
+function selected(value: string, capabilities: TerminalCapabilities): string {
+  return capabilities.color ? `\u001B[1;7m${value}\u001B[0m` : value;
+}
+
 export const style = {
   accent: (value: string, capabilities: TerminalCapabilities) => color(36, value, capabilities),
   dim: (value: string, capabilities: TerminalCapabilities) => color(2, value, capabilities),
   failure: (value: string, capabilities: TerminalCapabilities) => color(31, value, capabilities),
+  selected,
   strong: (value: string, capabilities: TerminalCapabilities) => color(1, value, capabilities),
   success: (value: string, capabilities: TerminalCapabilities) => color(32, value, capabilities),
   warning: (value: string, capabilities: TerminalCapabilities) => color(33, value, capabilities),

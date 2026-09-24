@@ -25,7 +25,7 @@ export type HomeAction =
   | "run-help"
   | "sessions"
   | "version";
-type HomeSection = "automation" | "debug" | "device" | "project";
+type HomeSection = "debug" | "device" | "project" | "start";
 type HomeMenuValue = HomeAction | HomeSection;
 type HomeDensity = "compact" | "full" | "minimal";
 export type HomeResult =
@@ -184,15 +184,10 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
 
   const rootOptions: ReadonlyArray<SelectOption<HomeMenuValue>> = [
     {
-      value: "dev" as const,
-      label: "Start development",
-      description: "Prepare one target, ports, logs, and your project command.",
+      value: "start" as const,
+      label: "Start",
+      description: "Develop, connect a device, or run a bounded verification.",
       recommended: true,
-    },
-    {
-      value: "automation" as const,
-      label: "Test & automate",
-      description: "Preview readiness, run bounded checks, and keep evidence.",
     },
     {
       value: "device" as const,
@@ -212,7 +207,13 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     { value: "exit" as const, label: "Exit", description: "Close ADB Ready." },
   ];
   const sectionOptions: Record<HomeSection, ReadonlyArray<SelectOption<HomeMenuValue>>> = {
-    automation: [
+    start: [
+      {
+        value: "dev",
+        label: "Development session",
+        description: "Prepare one target, ports, logs, and your project command.",
+        recommended: true,
+      },
       {
         value: "dev-plan",
         label: "Preview project plan",
@@ -224,14 +225,14 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         description: "See how to gate a test on readiness and retain its evidence.",
       },
       {
-        value: "sessions",
-        label: "Review recent runs",
-        description: "Find completed, failed, or interrupted project sessions.",
+        value: "connect",
+        label: "Connect wirelessly",
+        description: "Discover and verify an already paired Wireless debugging target.",
       },
       {
-        value: "context",
-        label: "Create AI debug context",
-        description: "Compile the latest run into a compact redacted brief.",
+        value: "pair",
+        label: "Pair a new device",
+        description: "Pair safely with Android's temporary six-digit code.",
       },
     ],
     device: [
@@ -249,16 +250,6 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         value: "app-restart",
         label: "Restart project app",
         description: "Verify a clean stop and launch on the selected target.",
-      },
-      {
-        value: "connect",
-        label: "Connect wirelessly",
-        description: "Discover and verify an already paired Wireless debugging target.",
-      },
-      {
-        value: "pair",
-        label: "Pair a new target",
-        description: "Pair safely with Android's temporary six-digit code.",
       },
     ],
     debug: [
@@ -338,7 +329,7 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
     const selection = await selectOne<HomeMenuValue>({
       title: atRoot
         ? "WHAT DO YOU WANT TO DO?"
-        : `HOME / ${section === "device" ? "DEVICE & APP" : section === "debug" ? "DEBUG & EVIDENCE" : section === "automation" ? "TEST & AUTOMATE" : "PROJECT & SETUP"}`,
+        : `HOME / ${section === "start" ? "START" : section === "device" ? "DEVICE & APP" : section === "debug" ? "DEBUG & EVIDENCE" : "PROJECT & SETUP"}`,
       options: visibleOptions,
       input: options.input,
       sink: options.sink,
@@ -372,7 +363,7 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
       }
       return { kind: "cancelled", reason: selection.reason };
     }
-    if (atRoot && selection.value !== "dev" && selection.value !== "exit") {
+    if (atRoot && selection.value !== "exit") {
       section = selection.value as HomeSection;
       continue;
     }
