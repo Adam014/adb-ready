@@ -3010,6 +3010,7 @@ export async function runDev(
         {
           ...options.sessionStore,
           projectRoot: options.sessionStore.projectRoot ?? options.cwd,
+          ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
         },
       );
     } catch {

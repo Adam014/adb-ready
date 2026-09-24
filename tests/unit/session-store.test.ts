@@ -54,7 +54,11 @@ describe("SessionRecorder", () => {
           startedAt: "2026-09-10T10:00:00.000Z",
           projectRoot: "/workspace/sample-app",
         },
-        { directory, redaction: { additionalLiterals: ["private-marker"] } },
+        {
+          directory,
+          redaction: { additionalLiterals: ["private-marker"] },
+          clock: () => new Date("2026-09-10T10:02:00.000Z"),
+        },
       );
       bus.emit({
         type: "target.selected",
@@ -293,7 +297,7 @@ describe("SessionRecorder", () => {
             startedAt: "2026-09-10T10:00:00.000Z",
             projectRoot,
           },
-          { directory },
+          { directory, clock: () => new Date("2026-09-10T10:01:00.000Z") },
         );
         await recorder.finish({
           status: "completed",

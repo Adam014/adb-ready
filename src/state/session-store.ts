@@ -59,6 +59,7 @@ export interface SessionStoreOptions {
   projectId?: string;
   allProjects?: boolean;
   redaction?: RedactionOptions;
+  clock?: () => Date;
 }
 
 export interface SessionRecorderInput {
@@ -428,7 +429,8 @@ async function pruneSessions(options: SessionStoreOptions): Promise<void> {
   const completed = listed.value
     .filter(({ status }) => status !== "running")
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1_000;
+  const cutoff =
+    (options.clock ?? (() => new Date()))().getTime() - maxAgeDays * 24 * 60 * 60 * 1_000;
   const groups = new Map<string, SessionManifest[]>();
   for (const manifest of completed) {
     const key = manifest.projectFingerprint ?? "legacy-unscoped";
