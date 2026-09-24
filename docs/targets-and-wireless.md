@@ -3,6 +3,10 @@
 ADB Ready models USB devices, emulators, TCP transports, and TLS Wireless
 debugging transports behind one deterministic selection contract.
 
+For a first connection, run `adb-ready` and open **Start → Set up first
+device**. The interactive guide explains the Android-side steps, then reuses the
+same verified `devices`, `pair`, or `connect` workflow documented below.
+
 ## Inspect visible targets
 
 ```bash

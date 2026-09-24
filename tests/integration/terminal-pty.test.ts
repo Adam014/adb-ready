@@ -104,6 +104,26 @@ ptyTest("restores the real terminal after Ctrl-C in raw mode", async () => {
   expect(result.output).toContain("Fixture result: cancelled. No target was changed.");
 });
 
+ptyTest("renders first-device setup safely in a narrow real terminal", async () => {
+  const columns = 56;
+  const result = await runPty(
+    [process.execPath, "run", "scripts/ui-playground.ts", "--scenario=device-setup"],
+    "SET UP YOUR FIRST ANDROID TARGET",
+    "\u001B",
+    columns,
+    24,
+  );
+
+  expectRestored(result);
+  expect(result.output).toContain("Physical Android device");
+  expect(result.output).toContain("Android emulator");
+  expect(result.output).toContain("Fixture result: cancelled. No target was changed.");
+  const rendered = visibleLines(result.output).filter(
+    (line) => !line.startsWith("PTY_DRIVER_STATE "),
+  );
+  expect(Math.max(...rendered.map((line) => [...line].length))).toBeLessThan(columns);
+});
+
 ptyTest("keeps the interactive home within a narrow real terminal", async () => {
   const columns = 56;
   const rows = 24;

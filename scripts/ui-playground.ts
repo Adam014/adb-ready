@@ -2,6 +2,7 @@ import process from "node:process";
 import { EventBus } from "../src/core/event-bus.js";
 import { type Problem, type ResultEnvelope, SCHEMA_VERSION } from "../src/domain/contracts.js";
 import { confirmAction } from "../src/ui/confirm.js";
+import { showDeviceSetup } from "../src/ui/device-setup.js";
 import { readPairingCode } from "../src/ui/pairing-code.js";
 import { ProgressRenderer } from "../src/ui/progress-renderer.js";
 import { renderResult } from "../src/ui/result-renderer.js";
@@ -19,6 +20,7 @@ type ScenarioName =
   | "recovery"
   | "interrupt"
   | "confirmation"
+  | "device-setup"
   | "pairing-code"
   | "output-modes";
 
@@ -52,6 +54,11 @@ const SCENARIOS: Array<{ value: ScenarioName; label: string; description: string
     value: "confirmation",
     label: "Safe confirmation",
     description: "Action, scope, risk, and automation equivalent",
+  },
+  {
+    value: "device-setup",
+    label: "First-device setup",
+    description: "Guided USB, wireless, and emulator entry points",
   },
   {
     value: "pairing-code",
@@ -347,6 +354,17 @@ async function runScenario(name: ScenarioName): Promise<void> {
         "Confirmation unavailable in non-interactive mode. No target was changed.\n",
       );
     }
+  } else if (name === "device-setup") {
+    const setup = await showDeviceSetup({
+      input: process.stdin,
+      sink: process.stderr,
+      capabilities,
+    });
+    process.stderr.write(
+      setup.kind === "action"
+        ? `Fixture result: ${setup.action}. No target was changed.\n`
+        : `Fixture result: ${setup.kind}. No target was changed.\n`,
+    );
   } else if (name === "pairing-code") {
     if (capabilities.interactive) {
       const pairing = await readPairingCode({

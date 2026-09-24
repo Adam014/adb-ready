@@ -71,6 +71,8 @@ them or require an ADB Ready account, hosted service, or model API key.
 
 Running `adb-ready` without a command opens the interactive workflow home.
 `adbr` is the shorter alias for the same CLI.
+New to Android device setup? Open **Start → Set up first device** for a guided
+USB, Wireless debugging, or emulator path.
 The home and its focused menus adapt to the detected terminal width and height,
 including narrow split panes and short terminals, without relying on scrolling
 to reveal an action.

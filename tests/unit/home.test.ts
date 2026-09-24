@@ -97,12 +97,38 @@ describe("home screen", () => {
     expect(sink.value).toContain("Android sessions. Kept ready.");
     expect(sink.value).toContain("RUN    one target + project");
     expect(sink.value).toContain("Development session");
+    expect(sink.value).toContain("Set up first device");
     expect(sink.value).toContain("Device & app");
     expect(sink.value).toContain("Debug & evidence");
     expect(sink.value).toContain("Project & setup");
     expect(sink.value).toContain("WHAT DO YOU WANT TO DO?");
     expect(sink.value).toEndWith("\u001B[?25h");
     expect(input.isRaw).toBe(false);
+  });
+
+  test("keeps connection entry points together under Start", async () => {
+    const startSink = new MemorySink();
+    const selected = await showHomeScreen({
+      version: "0.0.0",
+      input: new AutoInput("\r", "3\r"),
+      sink: startSink,
+      capabilities: { ...interactive, animation: false },
+    });
+
+    expect(selected).toEqual({ kind: "action", action: "connect" });
+    expect(startSink.value).toContain("Set up first device");
+    expect(startSink.value).toContain("Connect wirelessly");
+    expect(startSink.value).toContain("Pair a new device");
+
+    const deviceSink = new MemorySink();
+    await showHomeScreen({
+      version: "0.0.0",
+      input: new AutoInput("2\r", "\u001B", "\u001B"),
+      sink: deviceSink,
+      capabilities: { ...interactive, animation: false },
+    });
+    expect(deviceSink.value).toContain("HOME / DEVICE & APP");
+    expect(deviceSink.value).not.toContain("Pair a new device");
   });
 
   test("opens a focused section and supports its version shortcut", async () => {
