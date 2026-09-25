@@ -9,6 +9,11 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add the project-local `bun what` command browser for contributors who want
+  to discover and launch repository tasks without scanning `package.json`.
+
 ## [0.5.1] - 2026-09-25
 
 ### Added
