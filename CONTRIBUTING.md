@@ -28,6 +28,7 @@ bun run verify
 Useful focused commands:
 
 ```bash
+bun what
 bun run dev -- --help
 bun run test
 bun run test:coverage
@@ -35,6 +36,9 @@ bun run test:integration
 bun run ui:playground
 bun run verify:real-adb
 ```
+
+`bun what` opens the project-local Runpalette command browser when you want to
+find a task without scanning `package.json`.
 
 The authoritative verification enforces at least 95% LCOV line and function
 coverage, then generates `coverage/lcov.info`. CI requires at least 95% overall
