@@ -36,6 +36,7 @@ function fixture(
     deniedDropbox?: boolean;
     failedDropbox?: boolean;
     invalidClock?: boolean;
+    unavailableLogs?: boolean;
   } = {},
 ): CommandDependencies {
   let id = 0;
@@ -61,6 +62,7 @@ function fixture(
       if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
       if (args.includes("packages")) {
         if (options.unavailableApp === true) return result(request, "");
+        if (options.unavailableLogs === true && args.includes("-U")) return result(request, "");
         return result(
           request,
           args.includes("-U")
@@ -348,6 +350,24 @@ ANR in com.example.app
           { name: "application-exit-info", available: false },
           { name: "logcat", available: true },
           { name: "dropbox", available: false },
+        ],
+      },
+    });
+  });
+
+  test("keeps retained exit evidence when live package logs are unavailable", async () => {
+    const execution = await runInspectFailures(
+      { cwd: "/project", applicationId: "com.example.app" },
+      {},
+      fixture({ unavailableLogs: true }),
+    );
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        sources: [
+          { name: "application-exit-info", available: true },
+          { name: "logcat", available: false, limitation: expect.any(String) },
+          { name: "dropbox", available: true },
         ],
       },
     });
