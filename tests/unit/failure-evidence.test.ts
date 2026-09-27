@@ -29,7 +29,7 @@ function result(request: ProcessRequest, stdout = "", exitCode = 0): ProcessResu
 }
 
 function fixture(
-  options: { unavailableExit?: boolean; deniedDropbox?: boolean } = {},
+  options: { unavailableExit?: boolean; deniedDropbox?: boolean; invalidClock?: boolean } = {},
 ): CommandDependencies {
   let id = 0;
   return {
@@ -73,7 +73,12 @@ function fixture(
         );
       }
       if (args.includes("date") && args.includes("+%s%3N")) {
-        return result(request, `${String(Date.parse("2026-09-10T10:00:00.000Z"))}\n`);
+        return result(
+          request,
+          options.invalidClock === true
+            ? "not-a-clock\n"
+            : `${String(Date.parse("2026-09-10T10:00:00.000Z"))}\n`,
+        );
       }
       if (args.includes("date") && args.includes("+%z")) return result(request, "+0000\n");
       if (args.includes("exit-info")) {
@@ -96,6 +101,10 @@ function fixture(
           timestamp=2026-09-10 09:59:40.000 pid=999 realUid=10999 packageUid=10999 definingUid=10999 user=0
           process=com.other.app reason=5 (APP CRASH(NATIVE)) subreason=0 (UNKNOWN) status=0
           importance=100 pss=20MB rss=40MB description=unrelated state=empty trace=null
+        ApplicationExitInfo #3:
+          timestamp=2026-09-10 09:59:45.000 pid=400 realUid=10123 packageUid=10123 definingUid=10123 user=0
+          process=com.example.app reason=2 (SIGNALED) subreason=0 (UNKNOWN) status=0
+          importance=100 pss=20MB rss=40MB description=not a classified app failure state=empty trace=null
 `,
         );
       }
@@ -172,13 +181,28 @@ ANR in com.example.app
     });
   });
 
+  test("classifies Java DropBox evidence and ignores unknown exit reasons", () => {
+    expect(
+      parseDropboxFailures(
+        "2026-09-10 09:59:30 data_app_crash (text, 100 bytes)\nPackage: com.example.app\nFATAL EXCEPTION\n",
+        "com.example.app",
+        "+0000",
+      )[0]?.kind,
+    ).toBe("java-crash");
+    expect(
+      parseApplicationExitInfo(
+        "ApplicationExitInfo #0:\n timestamp=2026-09-10 09:59:30.000 pid=42 realUid=1\n process=com.example.app reason=2 (SIGNALED) subreason=0 (UNKNOWN) status=0\n",
+        "+0000",
+      ),
+    ).toHaveLength(1);
+  });
+
   test("merges one crash corroborated by independent Android sources", () => {
     const incidents = correlateFailureIncidents([
       {
         kind: "java-crash",
         source: "application-exit-info",
         observedAt: "2026-09-10T09:59:30.123Z",
-        process: "com.example.app",
         pid: 321,
         summary: "Android classified an app crash.",
         evidence: ["reason=4"],
@@ -186,7 +210,8 @@ ANR in com.example.app
       {
         kind: "java-crash",
         source: "dropbox",
-        observedAt: "2026-09-10T09:59:30.000Z",
+        observedAt: "2026-09-10T09:59:30.123Z",
+        process: "com.example.app",
         summary: "DropBox retained the crash.",
         evidence: ["FATAL EXCEPTION"],
       },
@@ -194,6 +219,7 @@ ANR in com.example.app
         kind: "java-crash",
         source: "logcat",
         pid: 321,
+        process: "com.example.app",
         summary: "Logcat retained the crash.",
         evidence: ["RuntimeException"],
       },
@@ -202,6 +228,7 @@ ANR in com.example.app
       expect.objectContaining({
         source: "application-exit-info",
         corroboratedBy: ["dropbox", "logcat"],
+        observedAt: "2026-09-10T09:59:30.123Z",
         evidence: ["reason=4", "FATAL EXCEPTION", "RuntimeException"],
       }),
     ]);
@@ -222,7 +249,7 @@ ANR in com.example.app
         summary: { "java-crash": 1, "native-crash": 1, anr: 1, "react-native": 1 },
         window: { durationMs: 60_000, deviceUtcOffset: "+0000" },
         sources: [
-          { name: "application-exit-info", available: true, records: 3 },
+          { name: "application-exit-info", available: true, records: 4 },
           { name: "logcat", available: true, records: 1 },
           { name: "dropbox", available: true, records: 1 },
         ],
@@ -253,6 +280,19 @@ ANR in com.example.app
           { name: "dropbox", available: false, limitation: expect.stringContaining("denied") },
         ],
       },
+    });
+  });
+
+  test("fails closed when Android cannot anchor the evidence window", async () => {
+    const execution = await runInspectFailures(
+      { cwd: "/project", applicationId: "com.example.app" },
+      {},
+      fixture({ invalidClock: true }),
+    );
+    expect(execution.result).toMatchObject({
+      ok: false,
+      data: null,
+      problems: [{ code: "FAILURE_CLOCK_UNAVAILABLE" }],
     });
   });
 

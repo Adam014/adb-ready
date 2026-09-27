@@ -182,6 +182,8 @@ describe("runCli", () => {
         ["ui", "clear", "id=com.example:id/email", "--dry-run"],
         ["ui", "wait", "text=Open", "--timeout", "100ms"],
         ["capture", "screen-record", "--duration", "1s", "--out", "demo.mp4"],
+        ["inspect", "failures", "com.example.app", "--since", "5m", "--max-records", "5"],
+        ["inspect", "failures", "--package", "com.example.app"],
         ["run", "--dry-run", "--", "node", "verify.mjs"],
       ];
 
@@ -209,7 +211,12 @@ describe("runCli", () => {
           if (args.includes("reverse") && args.includes("--list")) return result(request, "");
           if (args.includes("forward") && args.includes("--list")) return result(request, "");
           if (args.includes("list") && args.includes("packages")) {
-            return result(request, "package:/data/app/com.example.app/base.apk=com.example.app\n");
+            return result(
+              request,
+              args.includes("-U")
+                ? "package:com.example.app uid:10123\n"
+                : "package:/data/app/com.example.app/base.apk=com.example.app\n",
+            );
           }
           if (args.includes("resolve-activity")) {
             return result(request, "com.example.app/.MainActivity\n");
@@ -227,6 +234,23 @@ describe("runCli", () => {
             );
           }
           if (args.includes("pidof")) return result(request, "321\n");
+          if (args.includes("date") && args.includes("+%s%3N")) {
+            return result(request, `${String(Date.parse("2026-09-09T10:00:00.000Z"))}\n`);
+          }
+          if (args.includes("date") && args.includes("+%z")) return result(request, "+0000\n");
+          if (args.includes("exit-info")) {
+            return result(
+              request,
+              "ACTIVITY MANAGER PROCESS EXIT INFO (dumpsys activity exit-info)\n",
+            );
+          }
+          if (args.includes("--help") && args.includes("logcat")) {
+            return result(request, "--uid=UIDS filter by UID\n");
+          }
+          if (args.includes("logcat")) return result(request, "");
+          if (args.includes("dropbox")) {
+            return result(request, "Drop box contents: 0 entries\n(No entries found.)\n");
+          }
           if (args.includes("wm") && args.includes("size")) {
             return result(request, "Physical size: 1080x2400\n");
           }

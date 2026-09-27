@@ -638,6 +638,11 @@ describe("parseArguments", () => {
   });
 
   test("parses bounded package-scoped failure inspection", () => {
+    expect(parseArguments(["inspect"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+      message: "inspect requires app, failures, or ui.",
+    });
     expect(
       parseArguments([
         "inspect",
