@@ -56,6 +56,8 @@ The MCP surface is intentionally narrower than the CLI:
 - mutating UI tools accept only typed actions; digest-scoped references are
   checked against fresh UI evidence, coordinates are display-bounded, and text
   uses a conservative shell-safe allowlist;
+- keyboard and runtime-permission mutations require typed preconditions and
+  fresh postconditions; unknown system or OEM dialogs fail closed;
 - capture is explicit and never implied by an inspection call; and
 - data clearing and app uninstall are not available as MCP tools.
 

@@ -160,7 +160,7 @@ UI Automation service per target.
 | Durable development lifecycle | `start_dev_session`, `get_dev_session`, `stop_dev_session` |
 | App identity and lifecycle | `resolve_app`, `install_app`, `launch_app`, `restart_app`, `open_url` |
 | Current evidence | `inspect_app`, `inspect_ui`, `capture_screenshot` |
-| Safe UI queries and actions | `audit_ui`, `get_ui`, `find_ui`, `assert_ui`, `compare_ui`, `tap_ui`, `long_press_ui`, `scroll_ui`, `swipe_ui`, `fill_ui`, `clear_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui` |
+| Safe UI queries and actions | `audit_ui`, `get_ui`, `find_ui`, `assert_ui`, `compare_ui`, `tap_ui`, `long_press_ui`, `scroll_ui`, `swipe_ui`, `fill_ui`, `clear_ui`, `type_text_ui`, `press_key_ui`, `wait_for_ui`, `inspect_keyboard`, `dismiss_keyboard`, `inspect_permission_dialog`, `respond_to_permission_dialog` |
 | Saved diagnostics | `list_sessions`, `get_session_problems`, `compile_debug_context` |
 
 MCP resources keep larger read-only context outside tool calls:

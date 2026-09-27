@@ -28,6 +28,11 @@ breaking changes.
   out of host process arguments, operation plans, terminal output, retained
   results, journals, screenshots, and AI context, with documented Android-side
   trust boundaries.
+- Add guarded keyboard status and dismissal using agreeing InputMethodManager
+  and WindowInsets signals, plus exact PermissionController runtime-permission
+  inspection and responses with fresh post-action verification across CLI and
+  MCP. Unknown or ambiguous system UI now fails closed instead of pressing or
+  tapping speculatively.
 
 ## [0.5.1] - 2026-09-25
 

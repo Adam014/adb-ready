@@ -36,6 +36,9 @@ adb-ready context --since 5m --only problems,recovery,logs
 | `UI_NOT_IDLE` | Android UI Automator could not observe a quiet accessibility window | Pause continuous UI changes or navigate to a stable screen, then retry |
 | `UI_UNICODE_INPUT_UNAVAILABLE` | Unicode/multiline input was requested but ADBKeyBoard is not installed and enabled | Install a compatible official ADBKeyBoard release, enable it in Android settings, and retry; ADB Ready will not enable an IME silently |
 | `UI_INPUT_METHOD_UNKNOWN` | Android did not expose the current IME, so it cannot be restored safely | Select a keyboard on the target before retrying Unicode input |
+| `UI_KEYBOARD_STATE_AMBIGUOUS` | InputMethodManager and WindowInsets disagree about keyboard visibility | Wait for the transition to settle, then inspect again; ADB Ready will not press Back while state is uncertain |
+| `UI_KEYBOARD_STATE_UNSUPPORTED` | The Android build omitted one of the two required keyboard signals | Dismiss the keyboard in the app or use a target that exposes both dumpsys states |
+| `UI_PERMISSION_DIALOG_UNSUPPORTED` | The current PermissionController or OEM dialog is not one exact supported runtime-permission prompt | Handle the dialog manually; notification, biometric, Settings, and unknown OEM dialogs are not auto-accepted |
 | `SESSION_RECOVERY_FAILED` | The bounded target/port recovery budget was exhausted | Inspect `problems`, network state, and saved recovery events |
 | `SESSION_PERSISTENCE_FAILED` | The private session record could not be written | Check user-state directory permissions and capacity |
 | `FRAMEWORK_LAUNCHER_NOT_FOUND` | The detected Flutter or Gradle project has no runnable launcher | Install Flutter and expose `flutter` on PATH, or restore the project's checked-in Gradle Wrapper |

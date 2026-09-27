@@ -17,6 +17,11 @@ import {
   type UiNode,
 } from "./ui-hierarchy.js";
 import { acquireUiSnapshot } from "./ui-hierarchy-capture.js";
+import {
+  runUiSystemAction,
+  type UiSystemActionData,
+  type UiSystemActionRequest,
+} from "./ui-system-actions.js";
 
 export type UiAction =
   | "assert"
@@ -27,6 +32,8 @@ export type UiAction =
   | "find"
   | "get"
   | "long-press"
+  | "keyboard"
+  | "permission"
   | "press"
   | "scroll"
   | "swipe"
@@ -52,6 +59,7 @@ export interface UiSelectorSpec {
 export type UiSelector = string | UiSelectorSpec;
 
 export type UiActionRequest =
+  | UiSystemActionRequest
   | { action: "audit" }
   | { action: "tap"; ref: string; dryRun?: boolean }
   | { action: "tap"; x: number; y: number; dryRun?: boolean }
@@ -953,7 +961,10 @@ export async function runUiAction(
   config: CommandConfig = {},
   dependencies: CommandDependencies = {},
   signal?: AbortSignal,
-): Promise<CommandExecution<UiActionData>> {
+): Promise<CommandExecution<UiActionData | UiSystemActionData>> {
+  if (request.action === "keyboard" || request.action === "permission") {
+    return await runUiSystemAction(request, config, dependencies, signal);
+  }
   const current = context(`ui ${request.action}`, dependencies);
   const problems: Problem[] = [];
   const ready = await readyTarget(current, config, dependencies, problems, signal);

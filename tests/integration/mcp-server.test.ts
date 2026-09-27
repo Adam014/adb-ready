@@ -83,6 +83,10 @@ function dependencies(
         return result(request, "text keyevent keycombination\n");
       }
       if (args.includes("uiautomator")) return result(request, options.ui?.() ?? UI);
+      if (args.includes("input_method")) return result(request, "mInputShown=false\n");
+      if (args.includes("dumpsys") && args.includes("window")) {
+        return result(request, "InsetsSource id=3 type=ime visible=false sideHint=NONE\n");
+      }
       if (args.includes("screencap")) {
         request.onStdoutChunk?.(PNG);
         return result(request);
@@ -218,7 +222,7 @@ describe("MCP server protocol", () => {
       await peer.notify("notifications/initialized");
 
       const listed = resultBody(await peer.request("tools/list"));
-      expect(listed.tools).toBeArrayOfSize(31);
+      expect(listed.tools).toBeArrayOfSize(35);
       expect(resultBody(await peer.request("resources/list")).resources).toBeArrayOfSize(2);
       expect(
         resultBody(await peer.request("resources/templates/list")).resourceTemplates,
@@ -292,6 +296,10 @@ describe("MCP server protocol", () => {
         ["inspect_app", { ...target, applicationId: "com.example.app" }],
         ["inspect_ui", target],
         ["audit_ui", target],
+        ["inspect_keyboard", target],
+        ["dismiss_keyboard", { ...target, dryRun: true }],
+        ["inspect_permission_dialog", target],
+        ["respond_to_permission_dialog", { ...target, decision: "deny", dryRun: true }],
         ["find_ui", { ...target, selector: "text=Open" }],
         ["get_ui", { ...target, selector: "id=com.example:id/open" }],
         ["assert_ui", { ...target, selector: "text=Open" }],

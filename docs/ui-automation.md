@@ -200,6 +200,41 @@ password field and assert a non-secret postcondition. A protected field cannot
 expose its value for exact verification, so ADB Ready returns
 `text-not-observable` rather than inventing success.
 
+## Keyboard and runtime-permission dialogs
+
+Inspect or dismiss the software keyboard without sending a blind Back action:
+
+```bash
+adb-ready ui keyboard status --json
+adb-ready ui keyboard dismiss
+```
+
+ADB Ready requires Android's InputMethodManager `mInputShown` state and its
+WindowInsets `type=ime` visibility to both exist and agree. `dismiss` sends Back
+only after both report visible, then reads both services again and succeeds only
+after both report hidden. An already hidden keyboard is a verified no-op.
+Missing or conflicting signals return `UI_KEYBOARD_STATE_UNSUPPORTED` or
+`UI_KEYBOARD_STATE_AMBIGUOUS`; ADB Ready does not guess from inset height or
+press Back against an unknown screen.
+
+Inspect one standard Android runtime-permission prompt before choosing an exact
+decision:
+
+```bash
+adb-ready ui permission inspect --json
+adb-ready ui permission respond allow-while-using
+adb-ready ui permission respond allow-once --dry-run --json
+adb-ready ui permission respond deny
+```
+
+Inspection returns only the decisions actually present on the current dialog.
+Responses match PermissionController package and resource IDs, never translated
+button labels or coordinates copied from another device. A fresh hierarchy must
+show that the specific prompt changed or disappeared after the tap. Multiple,
+unknown, or OEM-specific states fail closed. Notification permission setup,
+biometric prompts, Settings mutation, and generic system-dialog acceptance are
+intentionally outside this workflow.
+
 ## Find, assert, compare, and wait
 
 Query or assert the current hierarchy without changing it:
@@ -255,7 +290,9 @@ the next state is known.
 ## AI agents
 
 The MCP server exposes the same intent-level workflow through `audit_ui`, `get_ui`,
-`find_ui`, `fill_ui`, `clear_ui`, `scroll_ui`, `assert_ui`, and `compare_ui`.
+`find_ui`, `fill_ui`, `clear_ui`, `scroll_ui`, `assert_ui`, `compare_ui`,
+`inspect_keyboard`, `dismiss_keyboard`, `inspect_permission_dialog`, and
+`respond_to_permission_dialog`.
 Its structured selectors can match exact values, prefixes, or substrings and
 qualify enabled/actionable state. An optional one-based occurrence is accepted
 only when repeated nodes are intentional. Arguments are schema-validated, each

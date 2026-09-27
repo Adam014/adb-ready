@@ -59,6 +59,12 @@ waits are bounded. Results distinguish process acceptance (`ok`) from observed
 postconditions (`verified`). An unchanged UI is reported as a verification gap,
 not silently upgraded to verified success.
 
+Keyboard dismissal requires two independent Android visibility signals to
+agree before Back is sent and after it completes. Runtime-permission responses
+require one recognized PermissionController dialog and one exact resource ID;
+localized labels, generic system dialogs, biometric prompts, notification
+setup, and ambiguous OEM states are never accepted speculatively.
+
 ### Network exposure
 
 The 0.2 MCP server uses stdio and opens no listener. ADB itself may connect to a
