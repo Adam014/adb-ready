@@ -7,6 +7,7 @@ import type {
   UiActionRequest,
   UiDirection,
   UiKey,
+  UiTextInputMode,
   UiWaitState,
 } from "../evidence/ui-actions.js";
 import type { UiAcquisitionProfile } from "../evidence/ui-hierarchy.js";
@@ -127,6 +128,7 @@ export interface CliOptions {
   interactiveOnly?: boolean;
   maxDepth?: number;
   uiAcquisition?: UiAcquisitionProfile;
+  uiSecretStdin?: boolean;
   agentClient?: AgentClient;
   uiRequest?: UiActionRequest;
 }
@@ -241,6 +243,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--all-projects",
   "--interactive-only",
   "--submit",
+  "--secret-stdin",
 ]);
 
 function editDistance(left: string, right: string): number {
@@ -390,6 +393,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   const uiOperands: string[] = [];
   let uiWaitState: UiWaitState | undefined;
   let uiSubmit = false;
+  let uiSecretStdin = false;
+  let uiInputMode: UiTextInputMode | undefined;
+  let uiTypingDelayMs: number | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -920,6 +926,31 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       uiAcquisition = value;
     } else if (option === "--submit") {
       uiSubmit = true;
+    } else if (option === "--secret-stdin") {
+      uiSecretStdin = true;
+    } else if (option === "--input-mode") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value !== "ascii" && value !== "auto" && value !== "unicode") {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid UI input mode: ${value}. Expected ascii, auto, or unicode.`,
+          option,
+        );
+      }
+      uiInputMode = value;
+    } else if (option === "--typing-delay") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed > 2_000) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid typing delay: ${value}. Expected whole milliseconds from 0 to 2000.`,
+          option,
+        );
+      }
+      uiTypingDelayMs = parsed;
     } else if (option === "--state") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -1126,6 +1157,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         "--out",
         "--duration",
         "--acquisition",
+        "--input-mode",
+        "--typing-delay",
         "--state",
         "--max-depth",
         "--activity",
@@ -1370,22 +1403,40 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     } else if (uiAction === "type" || uiAction === "fill") {
       if (uiAction === "fill") {
         const selected = selector(uiOperands[0]);
-        if (uiOperands.length !== 2 || selected === undefined) {
-          return failure("CLI_USAGE", "ui fill requires one valid selector and one text value.");
+        const expectedOperands = uiSecretStdin ? 1 : 2;
+        if (uiOperands.length !== expectedOperands || selected === undefined) {
+          return failure(
+            "CLI_USAGE",
+            uiSecretStdin
+              ? "ui fill --secret-stdin requires one valid selector and reads text from stdin."
+              : "ui fill requires one valid selector and one text value.",
+          );
         }
         uiRequest = {
           action: "fill",
           selector: selected,
-          text: uiOperands[1] ?? "",
+          text: uiSecretStdin ? "pending-secret-stdin" : (uiOperands[1] ?? ""),
           ...(uiSubmit ? { submit: true } : {}),
+          ...(uiInputMode === undefined ? {} : { inputMode: uiInputMode }),
+          ...(uiTypingDelayMs === undefined ? {} : { typingDelayMs: uiTypingDelayMs }),
+          ...(uiSecretStdin ? { secret: true } : {}),
         };
       } else {
-        if (uiOperands.length !== 1)
-          return failure("CLI_USAGE", "ui type requires one text value.");
+        const expectedOperands = uiSecretStdin ? 0 : 1;
+        if (uiOperands.length !== expectedOperands)
+          return failure(
+            "CLI_USAGE",
+            uiSecretStdin
+              ? "ui type --secret-stdin reads text from stdin and accepts no text operand."
+              : "ui type requires one text value.",
+          );
         uiRequest = {
           action: "type",
-          text: uiOperands[0] ?? "",
+          text: uiSecretStdin ? "pending-secret-stdin" : (uiOperands[0] ?? ""),
           ...(uiSubmit ? { submit: true } : {}),
+          ...(uiInputMode === undefined ? {} : { inputMode: uiInputMode }),
+          ...(uiTypingDelayMs === undefined ? {} : { typingDelayMs: uiTypingDelayMs }),
+          ...(uiSecretStdin ? { secret: true } : {}),
         };
       }
     } else if (uiAction === "press") {
@@ -1458,6 +1509,15 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   }
   if (uiSubmit && (command !== "ui" || (uiAction !== "type" && uiAction !== "fill"))) {
     return failure("CLI_USAGE", "--submit can only be used with ui type or ui fill.");
+  }
+  if (
+    (uiSecretStdin || uiInputMode !== undefined || uiTypingDelayMs !== undefined) &&
+    (command !== "ui" || (uiAction !== "type" && uiAction !== "fill"))
+  ) {
+    return failure(
+      "CLI_USAGE",
+      "--secret-stdin, --input-mode, and --typing-delay can only be used with ui type or ui fill.",
+    );
   }
   if (
     uiWaitState !== undefined &&
@@ -1702,6 +1762,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(interactiveOnly ? { interactiveOnly: true } : {}),
       ...(maxDepth === undefined ? {} : { maxDepth }),
       ...(uiAcquisition === undefined ? {} : { uiAcquisition }),
+      ...(uiSecretStdin ? { uiSecretStdin: true } : {}),
       ...(agentClient === undefined ? {} : { agentClient }),
       ...(uiRequest === undefined
         ? {}

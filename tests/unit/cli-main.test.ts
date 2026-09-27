@@ -53,6 +53,10 @@ class FakeInput implements CliInput {
   off(_event: "data", listener: (chunk: Uint8Array | string) => void): void {
     this.#listeners.delete(listener);
   }
+
+  once(_event: "end", listener: () => void): void {
+    queueMicrotask(listener);
+  }
 }
 
 interface TestIo extends CliIo {
@@ -1860,6 +1864,83 @@ describe("runCli", () => {
       },
     });
     expect(streams.error.value).toBe("");
+  });
+
+  test("reads protected UI text from stdin without retaining plaintext", async () => {
+    const streams = io();
+    const secret = "private value";
+    streams.input.autoInput = `${secret}\n`;
+    const processRequests: ProcessRequest[] = [];
+    const fixture = dependencies(
+      "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+    );
+    let snapshots = 0;
+    fixture.runner = async (request) => {
+      processRequests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:7\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
+      if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
+      if (args.includes("uiautomator")) {
+        snapshots += 1;
+        return result(
+          request,
+          snapshots === 1
+            ? '<?xml version="1.0"?><hierarchy><node text="Open" /></hierarchy>'
+            : '<?xml version="1.0"?><hierarchy><node text="Done" /></hierarchy>',
+        );
+      }
+      return result(request, "");
+    };
+
+    const exitCode = await runCli(
+      ["ui", "type", "--secret-stdin", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(streams.output.value).not.toContain(secret);
+    expect(streams.error.value).not.toContain(secret);
+    expect(processRequests.some((request) => request.args?.join(" ").includes(secret))).toBe(false);
+    expect(JSON.parse(streams.output.value)).toMatchObject({
+      ok: true,
+      data: { input: { secret: true, characters: 13 } },
+    });
+  });
+
+  test("rejects unsafe protected-input sources before target mutation", async () => {
+    const tty = io({ inputTTY: true });
+    expect(await runCli(["ui", "type", "--secret-stdin", "--json"], tty, dependencies())).toBe(
+      ExitCode.InvalidInput,
+    );
+    expect(JSON.parse(tty.output.value)).toMatchObject({
+      problems: [{ code: "UI_SECRET_STDIN_REQUIRED" }],
+    });
+
+    for (const [input, summary] of [
+      ["\n", "No secret text"],
+      ["x".repeat(4_097), "exceeds the 4096-byte limit"],
+    ] as const) {
+      const streams = io();
+      streams.input.autoInput = input;
+      expect(
+        await runCli(
+          ["ui", "type", "--secret-stdin", "--json", "--non-interactive"],
+          streams,
+          dependencies(),
+        ),
+      ).toBe(ExitCode.InvalidInput);
+      expect(JSON.parse(streams.output.value)).toMatchObject({
+        problems: [{ code: "UI_SECRET_INPUT_INVALID", summary: expect.stringContaining(summary) }],
+      });
+    }
   });
 
   test("dry-runs a destructive app command without confirmation or mutation", async () => {

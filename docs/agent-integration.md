@@ -197,6 +197,9 @@ silently restarting the list.
 - UI hierarchy and app inspection are marked sensitive and remain bounded.
 - UI references are checked against a fresh hierarchy digest before mutation;
   stale references are rejected.
+- Secret UI text is referenced by local environment-variable name rather than
+  sent in MCP arguments; Unicode input is capability-checked before mutation
+  and restores the prior Android IME.
 - Data clearing and uninstall are intentionally absent from the agent surface.
 - Tool annotations help clients request approval, but ADB Ready enforces its
   own target, path, and destructive-action rules.

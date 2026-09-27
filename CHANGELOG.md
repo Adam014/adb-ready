@@ -20,6 +20,14 @@ breaking changes.
 - Add bounded `compare_ui` hierarchy diffs for agents, reporting semantic nodes
   that were added, removed, updated, or moved while refusing stale,
   cross-target, partial, differently filtered, or display-incompatible bases.
+- Add capability-detected Unicode, emoji, RTL, CJK, and multiline UI input
+  through an already enabled ADBKeyBoard IME, configurable per-code-point
+  pacing, exact prior-IME restoration, and explicit pre-mutation failures when
+  the target cannot meet the requested input contract.
+- Add protected CLI stdin and MCP environment-variable input so secrets stay
+  out of host process arguments, operation plans, terminal output, retained
+  results, journals, screenshots, and AI context, with documented Android-side
+  trust boundaries.
 
 ## [0.5.1] - 2026-09-25
 

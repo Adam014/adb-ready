@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CommandDependencies } from "../../src/app/commands.js";
+import { EventBus } from "../../src/core/event-bus.js";
+import type { AdbReadyEvent } from "../../src/domain/contracts.js";
 import { runUiAction } from "../../src/evidence/ui-actions.js";
 import { parseUiHierarchy } from "../../src/evidence/ui-hierarchy.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
@@ -44,6 +46,7 @@ function fixture(
   requests: string[][] = [],
   sleep: CommandDependencies["sleep"] = async () => false,
   keyCombination = true,
+  processRequests: ProcessRequest[] = [],
 ): CommandDependencies & { runner: NonNullable<CommandDependencies["runner"]> } {
   let id = 0;
   let snapshot = 0;
@@ -53,6 +56,7 @@ function fixture(
     locateAdb: async () => "/sdk/adb",
     sleep,
     runner: async (request) => {
+      processRequests.push(request);
       const args = [...(request.args ?? [])];
       requests.push(args);
       if (args.includes("devices")) {
@@ -365,10 +369,10 @@ describe("safe UI actions", () => {
     });
   });
 
-  test("rejects unsupported typed text instead of passing shell syntax to Android", async () => {
+  test("rejects shell syntax in explicit ASCII mode before passing it to Android", async () => {
     const requests: string[][] = [];
     const execution = await runUiAction(
-      { action: "type", text: "hello; reboot" },
+      { action: "type", text: "hello; reboot", inputMode: "ascii" },
       {},
       fixture([BEFORE], requests),
     );
@@ -623,11 +627,272 @@ describe("safe UI actions", () => {
     });
 
     const unsafe = await runUiAction(
-      { action: "fill", selector: "id=com.example:id/email", text: "unsafe$(value)" },
+      {
+        action: "fill",
+        selector: "id=com.example:id/email",
+        text: "unsafe$(value)",
+        inputMode: "ascii",
+      },
       {},
       fixture([FIELD]),
     );
     expect(unsafe.result).toMatchObject({ ok: false, problems: [{ code: "UI_TEXT_UNSUPPORTED" }] });
+  });
+
+  test("fails Unicode input before mutation when ADBKeyBoard is not enabled", async () => {
+    const requests: string[][] = [];
+    const execution = await runUiAction(
+      { action: "type", text: "Příliš žluťoučký 🦊" },
+      {},
+      fixture([BEFORE], requests),
+    );
+
+    expect(execution.result).toMatchObject({
+      ok: false,
+      problems: [{ code: "UI_UNICODE_INPUT_UNAVAILABLE" }],
+    });
+    expect(requests).toContainEqual(expect.arrayContaining(["ime", "list", "-s"]));
+    expect(requests.some((args) => args.includes("broadcast"))).toBe(false);
+    expect(requests.some((args) => args.includes("tap"))).toBe(false);
+  });
+
+  test("types Unicode through protected stdin, paces input, and restores the prior IME", async () => {
+    const value = "Příliš 好 مرحبا 🦊\nřádek";
+    const filled = FIELD.replace('text="old"', `text="${value.replace("\n", "&#10;")}"`);
+    const requests: string[][] = [];
+    const processRequests: ProcessRequest[] = [];
+    const delays: number[] = [];
+    const deps = fixture(
+      [FIELD, filled],
+      requests,
+      async (milliseconds) => {
+        delays.push(milliseconds);
+        return true;
+      },
+      true,
+      processRequests,
+    );
+    const base = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("ime") && request.args.includes("list")) {
+        return processResult(request, "com.android.adbkeyboard/.AdbIME\n");
+      }
+      if (request.args?.includes("settings")) {
+        return processResult(request, "com.google.android.inputmethod.latin/.LatinIME\n");
+      }
+      return await base(request);
+    };
+
+    const execution = await runUiAction(
+      {
+        action: "fill",
+        selector: "id=com.example:id/email",
+        text: value,
+        typingDelayMs: 25,
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        verified: true,
+        verification: "text-matched",
+        textInput: {
+          backend: "adb-keyboard",
+          mode: "unicode",
+          typingDelayMs: 25,
+          secret: false,
+        },
+      },
+    });
+    expect(requests).toContainEqual(
+      expect.arrayContaining(["ime", "set", "com.android.adbkeyboard/.AdbIME"]),
+    );
+    expect(requests.at(-2)).toEqual(
+      expect.arrayContaining(["ime", "set", "com.google.android.inputmethod.latin/.LatinIME"]),
+    );
+    const protectedCommands = processRequests.filter(
+      (request) => request.args?.at(-1) === "shell" && request.input !== undefined,
+    );
+    expect(protectedCommands.length).toBe(Array.from(value).length);
+    expect(protectedCommands.every((request) => !request.args?.join(" ").includes(value))).toBe(
+      true,
+    );
+    expect(delays).toEqual(Array.from({ length: Array.from(value).length - 1 }, () => 25));
+  });
+
+  test("restores the prior IME when Unicode delivery fails", async () => {
+    const requests: string[][] = [];
+    const deps = fixture([BEFORE], requests);
+    const base = deps.runner;
+    deps.runner = async (request) => {
+      if (request.args?.includes("ime") && request.args.includes("list")) {
+        return processResult(request, "com.android.adbkeyboard/.AdbIME\n");
+      }
+      if (request.args?.includes("settings")) {
+        return processResult(request, "com.google.android.inputmethod.latin/.LatinIME\n");
+      }
+      if (request.input !== undefined) return processResult(request, "", 1);
+      return await base(request);
+    };
+
+    const execution = await runUiAction({ action: "type", text: "čau" }, {}, deps);
+
+    expect(execution.result).toMatchObject({
+      ok: false,
+      problems: [{ code: "ADB_COMMAND_FAILED" }],
+    });
+    expect(requests.at(-1)).toEqual(
+      expect.arrayContaining(["ime", "set", "com.google.android.inputmethod.latin/.LatinIME"]),
+    );
+  });
+
+  test("rejects invalid text bounds and typing delays", async () => {
+    for (const [request, code] of [
+      [{ action: "type" as const, text: "" }, "UI_TEXT_INVALID"],
+      [{ action: "type" as const, text: "x".repeat(257) }, "UI_TEXT_INVALID"],
+      [{ action: "type" as const, text: "ok", typingDelayMs: 2_001 }, "UI_TYPING_DELAY_INVALID"],
+    ] as const) {
+      expect((await runUiAction(request, {}, fixture([BEFORE]))).result).toMatchObject({
+        ok: false,
+        problems: [{ code }],
+      });
+    }
+  });
+
+  test("reports every Unicode IME capability and restoration failure boundary", async () => {
+    const unicode = { action: "type" as const, text: "čau" };
+    const enabledIme = "com.android.adbkeyboard/.AdbIME\n";
+    const originalIme = "com.google.android.inputmethod.latin/.LatinIME";
+
+    const listFailure = fixture([BEFORE]);
+    const listBase = listFailure.runner;
+    listFailure.runner = async (request) =>
+      request.args?.includes("ime") && request.args.includes("list")
+        ? processResult(request, "", 1)
+        : await listBase(request);
+    expect((await runUiAction(unicode, {}, listFailure)).result).toMatchObject({
+      ok: false,
+      problems: [{ code: "ADB_COMMAND_FAILED" }],
+    });
+
+    const currentFailure = fixture([BEFORE]);
+    const currentBase = currentFailure.runner;
+    currentFailure.runner = async (request) => {
+      if (request.args?.includes("ime") && request.args.includes("list")) {
+        return processResult(request, enabledIme);
+      }
+      if (request.args?.includes("settings")) return processResult(request, "", 1);
+      return await currentBase(request);
+    };
+    expect((await runUiAction(unicode, {}, currentFailure)).result).toMatchObject({
+      ok: false,
+      problems: [{ code: "ADB_COMMAND_FAILED" }],
+    });
+
+    const unknownCurrent = fixture([BEFORE]);
+    const unknownBase = unknownCurrent.runner;
+    unknownCurrent.runner = async (request) => {
+      if (request.args?.includes("ime") && request.args.includes("list")) {
+        return processResult(request, enabledIme);
+      }
+      if (request.args?.includes("settings")) return processResult(request, "null\n");
+      return await unknownBase(request);
+    };
+    expect((await runUiAction(unicode, {}, unknownCurrent)).result).toMatchObject({
+      ok: false,
+      problems: [{ code: "UI_INPUT_METHOD_UNKNOWN" }],
+    });
+
+    const switchFailure = fixture([BEFORE]);
+    const switchBase = switchFailure.runner;
+    switchFailure.runner = async (request) => {
+      if (request.args?.includes("ime") && request.args.includes("list")) {
+        return processResult(request, enabledIme);
+      }
+      if (request.args?.includes("settings")) return processResult(request, `${originalIme}\n`);
+      if (
+        request.args?.includes("ime") &&
+        request.args.includes("set") &&
+        request.args.includes("com.android.adbkeyboard/.AdbIME")
+      ) {
+        return processResult(request, "", 1);
+      }
+      return await switchBase(request);
+    };
+    expect((await runUiAction(unicode, {}, switchFailure)).result).toMatchObject({
+      ok: false,
+      problems: [{ code: "ADB_COMMAND_FAILED" }],
+    });
+
+    const restoreFailure = fixture([BEFORE]);
+    const restoreBase = restoreFailure.runner;
+    restoreFailure.runner = async (request) => {
+      if (request.args?.includes("ime") && request.args.includes("list")) {
+        return processResult(request, enabledIme);
+      }
+      if (request.args?.includes("settings")) return processResult(request, `${originalIme}\n`);
+      if (
+        request.args?.includes("ime") &&
+        request.args.includes("set") &&
+        request.args.includes(originalIme)
+      ) {
+        return processResult(request, "", 1);
+      }
+      return await restoreBase(request);
+    };
+    expect((await runUiAction(unicode, {}, restoreFailure)).result).toMatchObject({
+      ok: false,
+      problems: [{ code: "ADB_COMMAND_FAILED" }],
+    });
+  });
+
+  test("reports interrupted paced input without observing a false postcondition", async () => {
+    const execution = await runUiAction(
+      { action: "type", text: "abc", typingDelayMs: 10 },
+      {},
+      fixture([BEFORE], [], async () => false),
+    );
+    expect(execution.result).toMatchObject({
+      ok: false,
+      problems: [{ code: "UI_INPUT_INTERRUPTED" }],
+    });
+  });
+
+  test("keeps secret plaintext out of arguments, plans, and retained action data", async () => {
+    const secret = "S3cret phrase";
+    const processRequests: ProcessRequest[] = [];
+    const events: AdbReadyEvent[] = [];
+    const bus = new EventBus(() => new Date("2026-09-10T10:00:00.000Z"));
+    bus.subscribe((event) => events.push(event));
+    const deps = fixture([BEFORE, AFTER], [], async () => false, true, processRequests);
+    deps.bus = bus;
+    const execution = await runUiAction(
+      { action: "type", text: secret, secret: true, dryRun: false },
+      {},
+      deps,
+    );
+
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        input: { secret: true, characters: Array.from(secret).length },
+        textInput: { backend: "android-input", secret: true },
+      },
+    });
+    expect(JSON.stringify(execution.result)).not.toContain(secret);
+    expect(JSON.stringify(events)).not.toContain(secret);
+    expect(processRequests.some((request) => request.args?.join(" ").includes(secret))).toBe(false);
+    expect(processRequests.some((request) => request.input !== undefined)).toBe(true);
+
+    const planned = await runUiAction(
+      { action: "type", text: secret, secret: true, dryRun: true },
+      {},
+      fixture([BEFORE]),
+    );
+    expect(JSON.stringify(planned.result)).not.toContain(secret);
   });
 
   test("plans long press, explicit swipe, typed submit, clear, and filled submit exactly", async () => {

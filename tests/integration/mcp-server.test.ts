@@ -185,6 +185,7 @@ describe("MCP server protocol", () => {
     const env = {
       ...process.env,
       ADB_READY_INTERACTIVE: "false",
+      ADB_READY_TEST_SECRET: "private value",
       XDG_CONFIG_HOME: path.join(root, "config"),
       XDG_STATE_HOME: path.join(root, "state"),
     };
@@ -325,6 +326,54 @@ describe("MCP server protocol", () => {
         const response = await callTool(peer, name, args);
         expect(response).toHaveProperty("structuredContent");
       }
+      const protectedInput = await callTool(peer, "type_text_ui", {
+        ...target,
+        secretEnv: "ADB_READY_TEST_SECRET",
+        dryRun: true,
+      });
+      expect(protectedInput).toMatchObject({
+        structuredContent: {
+          ok: true,
+          data: {
+            input: { secret: true, characters: 13 },
+            textInput: { backend: "android-input", secret: true },
+          },
+        },
+      });
+      expect(JSON.stringify(protectedInput)).not.toContain("private value");
+      expect(
+        await callTool(peer, "type_text_ui", {
+          ...target,
+          text: "visible",
+          secretEnv: "ADB_READY_TEST_SECRET",
+        }),
+      ).toMatchObject({
+        structuredContent: { ok: false, problems: [{ code: "MCP_INVALID_INPUT" }] },
+      });
+      expect(
+        await callTool(peer, "fill_ui", {
+          ...target,
+          selector: "id=com.example:id/email",
+          secretEnv: "MISSING_SECRET",
+        }),
+      ).toMatchObject({
+        structuredContent: { ok: false, problems: [{ code: "MCP_SECRET_ENV_UNAVAILABLE" }] },
+      });
+      expect(
+        await callTool(peer, "type_text_ui", { ...target, secretEnv: "MISSING_SECRET" }),
+      ).toMatchObject({
+        structuredContent: { ok: false, problems: [{ code: "MCP_SECRET_ENV_UNAVAILABLE" }] },
+      });
+      expect(
+        await callTool(peer, "fill_ui", {
+          ...target,
+          selector: "id=com.example:id/email",
+          text: "visible",
+          secretEnv: "ADB_READY_TEST_SECRET",
+        }),
+      ).toMatchObject({
+        structuredContent: { ok: false, problems: [{ code: "MCP_INVALID_INPUT" }] },
+      });
       expect(
         await callTool(peer, "install_app", { ...target, path: "app.apk", paths: ["app.apk"] }),
       ).toMatchObject({

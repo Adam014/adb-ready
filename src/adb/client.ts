@@ -53,6 +53,7 @@ export interface AdbTargetSelector {
 
 export interface AdbCommandOptions {
   acceptExitCodes?: readonly number[];
+  input?: string | Uint8Array;
   maxBufferBytes?: number;
   onStderrChunk?: (chunk: Uint8Array) => void;
   onStdoutChunk?: (chunk: Uint8Array) => void;

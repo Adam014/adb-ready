@@ -761,7 +761,7 @@
     },
     {
       "name": "fill_ui",
-      "description": "Focus one semantic editable field, replace its value with conservative shell-safe text, and verify the observable value.",
+      "description": "Focus one semantic editable field, replace it with bounded ASCII or capability-detected Unicode text, and verify the observable value; secretEnv keeps sensitive text out of MCP arguments and retained results.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -812,7 +812,20 @@
           "text": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 4096
+          },
+          "secretEnv": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+          },
+          "inputMode": {
+            "type": "string",
+            "enum": ["ascii", "auto", "unicode"]
+          },
+          "typingDelayMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
           },
           "submit": {
             "type": "boolean"
@@ -821,7 +834,7 @@
             "type": "boolean"
           }
         },
-        "required": ["selector", "text"]
+        "required": ["selector"]
       },
       "annotations": {
         "readOnlyHint": false,
@@ -2946,7 +2959,7 @@
     },
     {
       "name": "type_text_ui",
-      "description": "Type conservative shell-safe text into the focused Android field and optionally press enter.",
+      "description": "Type bounded ASCII or capability-detected Unicode text into the focused Android field; use secretEnv to keep a sensitive value out of MCP arguments and retained results.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2959,7 +2972,20 @@
           "text": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 4096
+          },
+          "secretEnv": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+          },
+          "inputMode": {
+            "type": "string",
+            "enum": ["ascii", "auto", "unicode"]
+          },
+          "typingDelayMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
           },
           "submit": {
             "type": "boolean"
@@ -2967,8 +2993,7 @@
           "dryRun": {
             "type": "boolean"
           }
-        },
-        "required": ["text"]
+        }
       },
       "annotations": {
         "readOnlyHint": false,

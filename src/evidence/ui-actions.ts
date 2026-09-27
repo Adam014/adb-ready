@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import {
   context,
   finish,
@@ -35,6 +36,12 @@ export type UiAction =
 export type UiDirection = "down" | "left" | "right" | "up";
 export type UiKey = "back" | "enter" | "home" | "menu" | "volume-down" | "volume-up";
 export type UiWaitState = "gone" | "visible";
+export type UiTextInputMode = "ascii" | "auto" | "unicode";
+export interface UiTextInputOptions {
+  inputMode?: UiTextInputMode;
+  typingDelayMs?: number;
+  secret?: boolean;
+}
 export interface UiSelectorSpec {
   field: "class" | "desc" | "id" | "package" | "text";
   value: string;
@@ -54,15 +61,15 @@ export type UiActionRequest =
   | { action: "long-press"; selector: UiSelector; occurrence?: number; dryRun?: boolean }
   | { action: "swipe"; direction: UiDirection; dryRun?: boolean }
   | { action: "swipe"; x1: number; y1: number; x2: number; y2: number; dryRun?: boolean }
-  | { action: "type"; text: string; submit?: boolean; dryRun?: boolean }
-  | {
+  | ({ action: "type"; text: string; submit?: boolean; dryRun?: boolean } & UiTextInputOptions)
+  | ({
       action: "fill";
       selector: UiSelector;
       occurrence?: number;
       text: string;
       submit?: boolean;
       dryRun?: boolean;
-    }
+    } & UiTextInputOptions)
   | { action: "clear"; selector: UiSelector; occurrence?: number; dryRun?: boolean }
   | { action: "press"; key: UiKey; dryRun?: boolean }
   | { action: "find"; selector: UiSelector; limit?: number }
@@ -109,6 +116,13 @@ export interface UiActionData {
     | "ui-changed"
     | "ui-unchanged";
   verificationGap?: "text-mismatch" | "text-not-observable" | "ui-unchanged";
+  textInput?: {
+    backend: "adb-keyboard" | "android-input";
+    mode: "ascii" | "unicode";
+    typingDelayMs: number;
+    secret: boolean;
+    characters: number;
+  };
   matched?: UiNode;
   matches?: UiNode[];
   matchCount?: number;
@@ -145,6 +159,10 @@ export interface UiAuditReport {
 const MAX_COORDINATE = 100_000;
 const REF_PATTERN = /^ui:([a-f0-9]{12}):(\d+)$/u;
 const SAFE_TEXT_PATTERN = /^[A-Za-z0-9 ._@+,:/-]{1,256}$/u;
+const ADB_KEYBOARD_IME = "com.android.adbkeyboard/.AdbIME";
+const MAX_TEXT_CHARACTERS = 256;
+const MAX_TEXT_BYTES = 4_096;
+const MAX_TYPING_DELAY_MS = 2_000;
 const KEYCODES: Record<UiKey, number> = {
   back: 4,
   enter: 66,
@@ -281,6 +299,153 @@ async function supportsKeyCombination(
     return false;
   }
   return true;
+}
+
+interface TextInputContract {
+  backend: "adb-keyboard" | "android-input";
+  mode: "ascii" | "unicode";
+  typingDelayMs: number;
+  secret: boolean;
+  characters: string[];
+}
+
+interface UnicodeInputCapability {
+  originalIme: string;
+  switchRequired: boolean;
+}
+
+function textInputContract(
+  request: Extract<UiActionRequest, { action: "fill" | "type" }>,
+  commandId: string,
+  problems: Problem[],
+): TextInputContract | undefined {
+  const characters = Array.from(request.text);
+  const bytes = new TextEncoder().encode(request.text).byteLength;
+  if (
+    characters.length < 1 ||
+    characters.length > MAX_TEXT_CHARACTERS ||
+    bytes > MAX_TEXT_BYTES ||
+    request.text.includes("\u0000")
+  ) {
+    problems.push(
+      problem(
+        "UI_TEXT_INVALID",
+        "input.ui.text",
+        "Text input must contain 1-256 Unicode characters, at most 4096 UTF-8 bytes, and no NUL character.",
+        "Provide one bounded text value; use repeated actions for larger content.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  const typingDelayMs = request.typingDelayMs ?? 0;
+  if (
+    !Number.isSafeInteger(typingDelayMs) ||
+    typingDelayMs < 0 ||
+    typingDelayMs > MAX_TYPING_DELAY_MS
+  ) {
+    problems.push(
+      problem(
+        "UI_TYPING_DELAY_INVALID",
+        "input.ui.typing-delay",
+        "Typing delay must be a whole number from 0 to 2000 milliseconds.",
+        "Use 0 for one bounded input operation or a small delay for apps that drop fast input.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  const requestedMode = request.inputMode ?? "auto";
+  const asciiCompatible = SAFE_TEXT_PATTERN.test(request.text);
+  const mode = requestedMode === "auto" ? (asciiCompatible ? "ascii" : "unicode") : requestedMode;
+  if (mode === "ascii" && !asciiCompatible) {
+    problems.push(
+      problem(
+        "UI_TEXT_UNSUPPORTED",
+        "input.ui.text",
+        "The requested ASCII input mode cannot represent this text safely.",
+        "Use --input-mode unicode with an enabled ADBKeyBoard IME, or provide conservative ASCII text.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  return {
+    backend: mode === "ascii" ? "android-input" : "adb-keyboard",
+    mode,
+    typingDelayMs,
+    secret: request.secret === true,
+    characters,
+  };
+}
+
+async function unicodeInputCapability(
+  ready: Ready,
+  commandId: string,
+  problems: Problem[],
+  signal?: AbortSignal,
+): Promise<UnicodeInputCapability | undefined> {
+  const enabled = await ready.client.targetCommand(
+    ready.target,
+    "ui-input-methods",
+    "Checking enabled Android input methods",
+    ["shell", "ime", "list", "-s"],
+    (output) =>
+      output
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    signal,
+  );
+  if (!succeeded(enabled.process)) {
+    problems.push(operationProblem("ui-input-methods", enabled, commandId));
+    return undefined;
+  }
+  if (!enabled.value.includes(ADB_KEYBOARD_IME)) {
+    problems.push(
+      problem(
+        "UI_UNICODE_INPUT_UNAVAILABLE",
+        "capability.ui.input",
+        "Unicode input requires the ADBKeyBoard IME to be installed and enabled on this target.",
+        "Install ADBKeyBoard from its official project, enable it in Android settings, then retry. ADB Ready never installs or enables an input method silently.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  const current = await ready.client.targetCommand(
+    ready.target,
+    "ui-current-input-method",
+    "Reading the current Android input method",
+    ["shell", "settings", "get", "secure", "default_input_method"],
+    (output) => output.trim(),
+    signal,
+  );
+  if (!succeeded(current.process)) {
+    problems.push(operationProblem("ui-current-input-method", current, commandId));
+    return undefined;
+  }
+  if (current.value === "" || current.value === "null") {
+    problems.push(
+      problem(
+        "UI_INPUT_METHOD_UNKNOWN",
+        "capability.ui.input",
+        "Android did not report a current input method, so ADB Ready cannot restore it safely.",
+        "Select a keyboard on the target and retry Unicode input.",
+        commandId,
+      ),
+    );
+    return undefined;
+  }
+  return { originalIme: current.value, switchRequired: current.value !== ADB_KEYBOARD_IME };
+}
+
+function shellInputCommand(text: string, contract: TextInputContract): string {
+  if (contract.backend === "adb-keyboard") {
+    const encoded = Buffer.from(text, "utf8").toString("base64");
+    return `am broadcast -a ADB_INPUT_B64 --es msg ${encoded}\nexit\n`;
+  }
+  return `input text ${text.replaceAll(" ", "%s")}\nexit\n`;
 }
 
 function validatePoint(
@@ -1075,7 +1240,20 @@ export async function runUiAction(
   let matched: UiActionData["matched"];
   let actionNode: UiActionData["actionNode"];
   let matchedNode: UiNode | undefined;
-  const followingSteps: Array<{ id: string; title: string; args: string[] }> = [];
+  const textContract =
+    request.action === "fill" || request.action === "type"
+      ? textInputContract(request, current.commandId, problems)
+      : undefined;
+  if ((request.action === "fill" || request.action === "type") && textContract === undefined) {
+    return finish<UiActionData>(current, null, problems);
+  }
+  const followingSteps: Array<{
+    id: string;
+    title: string;
+    args: string[];
+    input?: string;
+    delayAfterMs?: number;
+  }> = [];
 
   if (request.action === "tap" || request.action === "long-press") {
     const size = await screenSize(ready, current.commandId, problems, signal);
@@ -1198,6 +1376,9 @@ export async function runUiAction(
       "350",
     ];
   } else if (request.action === "fill" || request.action === "clear") {
+    if (request.action === "fill" && textContract === undefined) {
+      throw new Error("Validated fill action is missing its text input contract.");
+    }
     matchedNode = selectUniqueNode(
       request.selector,
       request.occurrence,
@@ -1224,18 +1405,6 @@ export async function runUiAction(
     if (!validatePoint(resolved, size, current.commandId, problems)) {
       return finish<UiActionData>(current, null, problems);
     }
-    if (request.action === "fill" && !SAFE_TEXT_PATTERN.test(request.text)) {
-      problems.push(
-        problem(
-          "UI_TEXT_UNSUPPORTED",
-          "input.ui.text",
-          "Text contains characters that cannot be typed safely through Android input.",
-          "Use 1-256 ASCII letters, numbers, spaces, or ._@+,:/- characters.",
-          current.commandId,
-        ),
-      );
-      return finish<UiActionData>(current, null, problems);
-    }
     if (
       request.dryRun !== true &&
       config.dryRun !== true &&
@@ -1247,7 +1416,16 @@ export async function runUiAction(
     input = {
       selector: selectorLabel(request.selector),
       ...(request.occurrence === undefined ? {} : { occurrence: request.occurrence }),
-      ...(request.action === "fill" ? { text: request.text, submit: request.submit === true } : {}),
+      ...(request.action === "fill"
+        ? {
+            ...(request.secret === true
+              ? { secret: true, characters: textContract?.characters.length ?? 0 }
+              : { text: request.text }),
+            submit: request.submit === true,
+            inputMode: textContract?.mode ?? "ascii",
+            typingDelayMs: textContract?.typingDelayMs ?? 0,
+          }
+        : {}),
     };
     args = ["shell", "input", "tap", String(resolved.x), String(resolved.y)];
     followingSteps.push(
@@ -1263,11 +1441,26 @@ export async function runUiAction(
       },
     );
     if (request.action === "fill") {
-      followingSteps.push({
-        id: "type-text",
-        title: "Type Android field text",
-        args: ["shell", "input", "text", request.text.replaceAll(" ", "%s")],
-      });
+      const chunks = textContract?.typingDelayMs === 0 ? [request.text] : textContract?.characters;
+      for (const [index, chunk] of (chunks ?? []).entries()) {
+        const protectedInput = request.secret === true || textContract?.backend === "adb-keyboard";
+        followingSteps.push({
+          id: chunks?.length === 1 ? "type-text" : `type-text-${String(index + 1)}`,
+          title:
+            request.secret === true
+              ? "Type protected Android field text"
+              : "Type Android field text",
+          args: protectedInput
+            ? ["shell"]
+            : ["shell", "input", "text", chunk.replaceAll(" ", "%s")],
+          ...(protectedInput && textContract !== undefined
+            ? { input: shellInputCommand(chunk, textContract) }
+            : {}),
+          ...(index < (chunks?.length ?? 0) - 1 && (textContract?.typingDelayMs ?? 0) > 0
+            ? { delayAfterMs: textContract?.typingDelayMs ?? 0 }
+            : {}),
+        });
+      }
       if (request.submit === true) {
         followingSteps.push({
           id: "submit",
@@ -1277,21 +1470,33 @@ export async function runUiAction(
       }
     }
   } else if (request.action === "type") {
-    if (!SAFE_TEXT_PATTERN.test(request.text)) {
-      problems.push(
-        problem(
-          "UI_TEXT_UNSUPPORTED",
-          "input.ui.text",
-          "Text contains characters that cannot be typed safely through Android input.",
-          "Use 1-256 ASCII letters, numbers, spaces, or ._@+,:/- characters.",
-          current.commandId,
-        ),
-      );
-      return finish<UiActionData>(current, null, problems);
+    if (textContract === undefined) {
+      throw new Error("Validated type action is missing its text input contract.");
     }
-    const encoded = request.text.replaceAll(" ", "%s");
-    input = { text: request.text, submit: request.submit === true };
-    args = ["shell", "input", "text", encoded];
+    input = {
+      ...(request.secret === true
+        ? { secret: true, characters: textContract?.characters.length ?? 0 }
+        : { text: request.text }),
+      submit: request.submit === true,
+      inputMode: textContract?.mode ?? "ascii",
+      typingDelayMs: textContract?.typingDelayMs ?? 0,
+    };
+    const chunks = textContract?.typingDelayMs === 0 ? [request.text] : textContract?.characters;
+    args = [];
+    for (const [index, chunk] of (chunks ?? []).entries()) {
+      const protectedInput = request.secret === true || textContract?.backend === "adb-keyboard";
+      followingSteps.push({
+        id: index === 0 ? "type" : `type-text-${String(index + 1)}`,
+        title: request.secret === true ? "Type protected Android text" : "Type Android text",
+        args: protectedInput ? ["shell"] : ["shell", "input", "text", chunk.replaceAll(" ", "%s")],
+        ...(protectedInput && textContract !== undefined
+          ? { input: shellInputCommand(chunk, textContract) }
+          : {}),
+        ...(index < (chunks?.length ?? 0) - 1 && (textContract?.typingDelayMs ?? 0) > 0
+          ? { delayAfterMs: textContract.typingDelayMs }
+          : {}),
+      });
+    }
     if (request.submit === true) {
       followingSteps.push({
         id: "submit",
@@ -1307,14 +1512,35 @@ export async function runUiAction(
     throw new Error(`Unsupported UI action: ${String(unreachable)}`);
   }
 
+  let unicodeCapability: UnicodeInputCapability | undefined;
+  if (textContract?.backend === "adb-keyboard") {
+    unicodeCapability = await unicodeInputCapability(ready, current.commandId, problems, signal);
+    if (unicodeCapability === undefined) return finish<UiActionData>(current, null, problems);
+  }
+
   const steps: OperationPlan["steps"] = [
-    {
-      id: request.action,
-      title: `Send Android UI ${request.action}`,
-      risk: "device-reversible",
-      executable: ready.adbPath,
-      args: remoteArgs(ready, config, args),
-    },
+    ...(unicodeCapability?.switchRequired === true
+      ? [
+          {
+            id: "select-input-method",
+            title: "Select Unicode Android input method",
+            risk: "device-reversible" as const,
+            executable: ready.adbPath,
+            args: remoteArgs(ready, config, ["shell", "ime", "set", ADB_KEYBOARD_IME]),
+          },
+        ]
+      : []),
+    ...(args.length === 0
+      ? []
+      : [
+          {
+            id: request.action,
+            title: `Send Android UI ${request.action}`,
+            risk: "device-reversible" as const,
+            executable: ready.adbPath,
+            args: remoteArgs(ready, config, args),
+          },
+        ]),
     ...followingSteps.map((step) => ({
       id: step.id,
       title: step.title,
@@ -1322,6 +1548,17 @@ export async function runUiAction(
       executable: ready.adbPath,
       args: remoteArgs(ready, config, step.args),
     })),
+    ...(unicodeCapability?.switchRequired === true
+      ? [
+          {
+            id: "restore-input-method",
+            title: "Restore previous Android input method",
+            risk: "device-reversible" as const,
+            executable: ready.adbPath,
+            args: remoteArgs(ready, config, ["shell", "ime", "set", unicodeCapability.originalIme]),
+          },
+        ]
+      : []),
   ];
   if (request.dryRun === true || config.dryRun === true) {
     return finish(
@@ -1337,6 +1574,17 @@ export async function runUiAction(
         ...(resolved === undefined ? {} : { resolved }),
         ...(matched === undefined ? {} : { matched }),
         ...(actionNode === undefined ? {} : { actionNode }),
+        ...(textContract === undefined
+          ? {}
+          : {
+              textInput: {
+                backend: textContract.backend,
+                mode: textContract.mode,
+                typingDelayMs: textContract.typingDelayMs,
+                secret: textContract.secret,
+                characters: textContract.characters.length,
+              },
+            }),
         verification: "planned",
         plan: { schemaVersion: SCHEMA_VERSION, dryRun: true, steps },
       },
@@ -1344,28 +1592,89 @@ export async function runUiAction(
     );
   }
 
-  const commands = [
-    { id: `ui-${request.action}`, title: `Sending Android UI ${request.action}`, args },
+  const commands: Array<{
+    id: string;
+    title: string;
+    args: string[];
+    input?: string;
+    delayAfterMs?: number;
+  }> = [
+    ...(args.length === 0
+      ? []
+      : [{ id: `ui-${request.action}`, title: `Sending Android UI ${request.action}`, args }]),
     ...followingSteps.map((step) => ({
       id: `ui-${step.id}`,
       title: step.title,
       args: step.args,
+      ...(step.input === undefined ? {} : { input: step.input }),
+      ...(step.delayAfterMs === undefined ? {} : { delayAfterMs: step.delayAfterMs }),
     })),
   ];
-  for (const command of commands) {
-    const operation = await ready.client.targetCommand(
-      ready.target,
-      command.id,
-      command.title,
-      command.args,
-      () => undefined,
-      signal,
-    );
-    if (!succeeded(operation.process)) {
-      problems.push(operationProblem(command.id, operation, current.commandId));
-      return finish<UiActionData>(current, null, problems);
+  let commandFailed = false;
+  try {
+    if (unicodeCapability?.switchRequired === true) {
+      const selected = await ready.client.targetCommand(
+        ready.target,
+        "ui-select-adb-keyboard",
+        "Selecting Unicode Android input method",
+        ["shell", "ime", "set", ADB_KEYBOARD_IME],
+        () => undefined,
+        signal,
+      );
+      if (!succeeded(selected.process)) {
+        problems.push(operationProblem("ui-select-adb-keyboard", selected, current.commandId));
+        commandFailed = true;
+      }
+    }
+    for (const command of commandFailed ? [] : commands) {
+      const operation = await ready.client.targetCommand(
+        ready.target,
+        command.id,
+        command.title,
+        command.args,
+        () => undefined,
+        signal,
+        command.input === undefined ? {} : { input: command.input },
+      );
+      if (!succeeded(operation.process)) {
+        problems.push(operationProblem(command.id, operation, current.commandId));
+        commandFailed = true;
+        break;
+      }
+      if (
+        command.delayAfterMs !== undefined &&
+        !(await delay(command.delayAfterMs, dependencies, signal))
+      ) {
+        problems.push(
+          problem(
+            "UI_INPUT_INTERRUPTED",
+            "ui.input",
+            "Text input was interrupted during the configured typing delay.",
+            "Inspect the field before retrying; part of the value may have been entered.",
+            current.commandId,
+          ),
+        );
+        commandFailed = true;
+        break;
+      }
+    }
+  } finally {
+    if (unicodeCapability?.switchRequired === true) {
+      const restored = await ready.client.targetCommand(
+        ready.target,
+        "ui-restore-input-method",
+        "Restoring the previous Android input method",
+        ["shell", "ime", "set", unicodeCapability.originalIme],
+        () => undefined,
+        signal,
+      );
+      if (!succeeded(restored.process)) {
+        problems.push(operationProblem("ui-restore-input-method", restored, current.commandId));
+        commandFailed = true;
+      }
     }
   }
+  if (commandFailed) return finish<UiActionData>(current, null, problems);
   const after = await hierarchy(
     ready,
     current.commandId,
@@ -1433,6 +1742,17 @@ export async function runUiAction(
       ...(resolved === undefined ? {} : { resolved }),
       ...(matched === undefined ? {} : { matched }),
       ...(actionNode === undefined ? {} : { actionNode }),
+      ...(textContract === undefined
+        ? {}
+        : {
+            textInput: {
+              backend: textContract.backend,
+              mode: textContract.mode,
+              typingDelayMs: textContract.typingDelayMs,
+              secret: textContract.secret,
+              characters: textContract.characters.length,
+            },
+          }),
       verification,
       ...(verified
         ? {}
