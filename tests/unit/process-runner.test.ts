@@ -170,6 +170,30 @@ describe("runProcess", () => {
     expect(result.timedOut).toBe(false);
   });
 
+  testOnUnix(
+    "bounds an owned process tree whose grandchild keeps output streams open",
+    async () => {
+      const started = Date.now();
+      const result = await runProcess({
+        executable: process.execPath,
+        args: [
+          "-e",
+          `const {spawn}=require("node:child_process"); spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});process.stdout.write('ready');setInterval(()=>{},1000)"],{stdio:["ignore",process.stdout,process.stderr]}); setInterval(()=>{},1000);`,
+        ],
+        stopAfterIdleMs: 50,
+        timeoutMs: 2_000,
+        killGraceMs: 30,
+        killProcessGroup: true,
+      });
+
+      expect(result.stdout).toBe("ready");
+      expect(result.stoppedAfterIdle).toBe(true);
+      expect(result.timedOut).toBe(false);
+      expect(result.killEscalated).toBe(true);
+      expect(Date.now() - started).toBeLessThan(1_000);
+    },
+  );
+
   test("applies an explicit working directory and environment overlay", async () => {
     const directory = await temporaryDirectory();
     const result = await runProcess({

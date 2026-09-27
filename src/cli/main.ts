@@ -58,6 +58,7 @@ import {
 } from "../automation/capabilities.js";
 import type { AutonomousRunEvidence } from "../automation/evidence-bundle.js";
 import { type AutomationRunData, writeEvidenceBundle } from "../automation/evidence-bundle.js";
+import { runGradleManagedTest } from "../automation/gradle-managed-devices.js";
 import {
   inspectAndroidTargetProfile,
   type TargetProfileFailure,
@@ -143,6 +144,7 @@ Commands:
   pair [HOST:PORT]       Pair using Android's six-digit pairing code
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
   sessions [ACTION]      Inspect saved development sessions
+  test gradle [TASK]     Discover or run a Gradle managed-device test
   ui ACTION              Perform a bounded, verified Android UI action
   problems [SESSION]     Show problems from a saved session
   help [COMMAND]         Show help
@@ -451,6 +453,25 @@ List filters:
   --since DURATION       Keep sessions updated in the final window
   --preset NAME          Keep sessions using one development preset
   --limit COUNT          Return at most 1-100 sessions
+`,
+  test: `Usage:
+  adb-ready test gradle
+  adb-ready test gradle TASK [options]
+
+Discovers declared Gradle Managed Device tasks or hands one exact task to the
+project's checked-in Gradle Wrapper. Gradle owns provisioning, test execution,
+sharding, and teardown; ADB Ready never leases or controls its transient target.
+
+Gradle managed-device options:
+  --gradle PATH           Use an explicit Gradle Wrapper or executable
+  --shards COUNT          Request 1-256 uniform managed-device shards
+  --software-rendering    Request Gradle's SwiftShader server rendering mode
+  --run-timeout DURATION  Bound task execution (default: 15m)
+  --dry-run               Print the exact task plan without starting Gradle
+
+Native JUnit XML and HTML reports are retained with bounded Gradle output under
+.adb-ready/artifacts/. Product assertion failures, infrastructure failures,
+timeouts, cancellation, and missing tasks remain distinct structured outcomes.
 `,
   version: `Usage: adb-ready version
 
@@ -848,6 +869,7 @@ async function runInteractiveSession(
       pair: ["pair"],
       "run-help": ["help", "run"],
       sessions: ["sessions"],
+      "test-gradle": ["test", "gradle"],
       version: ["version"],
     };
     clearInteractiveScreen(io.error, terminal);
@@ -1074,6 +1096,32 @@ async function runCliInternal(
         ...(options.dryRun ? { dryRun: true } : {}),
       },
       { ...dependencies, env: io.env },
+    );
+    renderResult(execution.result, {
+      format: options.format,
+      capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return execution.exitCode;
+  }
+  if (options.command === "test") {
+    const execution = await runGradleManagedTest(
+      {
+        cwd: io.cwd,
+        ...(options.gradleTask === undefined ? {} : { task: options.gradleTask }),
+        ...(options.gradlePath === undefined ? {} : { gradlePath: options.gradlePath }),
+        ...(options.gradleShards === undefined ? {} : { shards: options.gradleShards }),
+        ...(options.gradleSoftwareRendering === true ? { softwareRendering: true } : {}),
+        ...(options.runTimeoutMs === undefined ? {} : { timeoutMs: options.runTimeoutMs }),
+        ...(options.dryRun ? { dryRun: true } : {}),
+      },
+      {
+        ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+        ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
+        ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+      },
+      signal,
     );
     renderResult(execution.result, {
       format: options.format,

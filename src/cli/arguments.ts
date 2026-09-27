@@ -36,6 +36,7 @@ export type CommandName =
   | "problems"
   | "run"
   | "sessions"
+  | "test"
   | "ui"
   | "version";
 export type OutputFormat = "human" | "json" | "markdown" | "ndjson" | "plain";
@@ -86,6 +87,11 @@ export interface CliOptions {
   customCommand?: { executable: string; args: string[] };
   runCommand?: { executable: string; args: string[] };
   runTimeoutMs?: number;
+  testKind?: "gradle";
+  gradleTask?: string;
+  gradlePath?: string;
+  gradleShards?: number;
+  gradleSoftwareRendering?: boolean;
   avdName?: string;
   deployArtifact?: boolean;
   runArtifactPaths?: string[];
@@ -175,6 +181,7 @@ const COMMANDS = new Set<CommandName>([
   "problems",
   "run",
   "sessions",
+  "test",
   "ui",
   "version",
 ]);
@@ -250,6 +257,7 @@ const BOOLEAN_OPTIONS = new Set([
   "--all",
   "--all-projects",
   "--interactive-only",
+  "--software-rendering",
   "--submit",
   "--secret-stdin",
 ]);
@@ -351,6 +359,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let customCommand: CliOptions["customCommand"];
   let runCommand: CliOptions["runCommand"];
   let runTimeoutMs: number | undefined;
+  let testKind: CliOptions["testKind"];
+  let gradleTask: string | undefined;
+  let gradlePath: string | undefined;
+  let gradleShards: number | undefined;
+  let gradleSoftwareRendering = false;
   let avdName: string | undefined;
   let deployArtifact = false;
   const runArtifactPaths: string[] = [];
@@ -466,6 +479,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "problems" ||
           candidate === "run" ||
           candidate === "sessions" ||
+          candidate === "test" ||
           candidate === "ui" ||
           candidate === "version"
         ) {
@@ -480,6 +494,16 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (command === "agent" && argument === "setup" && !agentSetupSeen) {
         agentSetupSeen = true;
         continue;
+      }
+      if (command === "test") {
+        if (testKind === undefined && argument === "gradle") {
+          testKind = "gradle";
+          continue;
+        }
+        if (testKind === "gradle" && gradleTask === undefined) {
+          gradleTask = argument;
+          continue;
+        }
       }
       if (command === "agent" && agentSetupSeen && agentClient === undefined) {
         if (!AGENT_CLIENTS.has(argument as AgentClient)) {
@@ -1088,6 +1112,23 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           option,
         );
       }
+    } else if (option === "--gradle") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() !== value || value.length === 0 || !printableValue(value)) {
+        return failure("CLI_INVALID_VALUE", "--gradle must be a non-empty printable path.", option);
+      }
+      gradlePath = value;
+    } else if (option === "--shards") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 256) {
+        return failure("CLI_INVALID_VALUE", "--shards must be an integer from 1 to 256.", option);
+      }
+      gradleShards = parsed;
+    } else if (option === "--software-rendering") {
+      gradleSoftwareRendering = true;
     } else if (option === "--avd") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -1229,6 +1270,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         "--max-records",
         "--budget",
         "--run-timeout",
+        "--gradle",
+        "--shards",
         "--avd",
         "--artifact",
         "--variant",
@@ -1344,11 +1387,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     command !== "ports" &&
     command !== "init" &&
     command !== "agent" &&
+    command !== "test" &&
     command !== "ui"
   ) {
     return failure(
       "CLI_USAGE",
-      "--dry-run can only be used with app, connect, dev, run, init, open, pair, or ports.",
+      "--dry-run can only be used with app, connect, dev, run, init, open, pair, ports, test, or agent setup.",
       "--dry-run",
     );
   }
@@ -1700,7 +1744,25 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     return failure("CLI_USAGE", "run requires a bounded command after --.");
   }
   if (runTimeoutMs !== undefined && command !== "run") {
-    return failure("CLI_USAGE", "--run-timeout can only be used with run.", "--run-timeout");
+    if (command !== "test") {
+      return failure(
+        "CLI_USAGE",
+        "--run-timeout can only be used with run or test gradle.",
+        "--run-timeout",
+      );
+    }
+  }
+  if (command === "test" && testKind !== "gradle") {
+    return failure("CLI_USAGE", "test requires the gradle workflow: adb-ready test gradle [TASK].");
+  }
+  if (
+    command !== "test" &&
+    (gradlePath !== undefined || gradleShards !== undefined || gradleSoftwareRendering)
+  ) {
+    return failure(
+      "CLI_USAGE",
+      "--gradle, --shards, and --software-rendering can only be used with test gradle.",
+    );
   }
   const autonomousRunOptions =
     avdName !== undefined ||
@@ -1856,6 +1918,11 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(customCommand === undefined ? {} : { customCommand }),
       ...(runCommand === undefined ? {} : { runCommand }),
       ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
+      ...(testKind === undefined ? {} : { testKind }),
+      ...(gradleTask === undefined ? {} : { gradleTask }),
+      ...(gradlePath === undefined ? {} : { gradlePath }),
+      ...(gradleShards === undefined ? {} : { gradleShards }),
+      ...(gradleSoftwareRendering ? { gradleSoftwareRendering: true } : {}),
       ...(avdName === undefined ? {} : { avdName }),
       ...(deployArtifact ? { deployArtifact: true } : {}),
       ...(runArtifactPaths.length === 0 ? {} : { runArtifactPaths }),

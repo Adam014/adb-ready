@@ -26,6 +26,7 @@ export type HomeAction =
   | "run-help"
   | "sessions"
   | "setup-device"
+  | "test-gradle"
   | "version";
 type HomeSection = "debug" | "device" | "project" | "start";
 type HomeMenuValue = HomeAction | HomeSection;
@@ -235,6 +236,11 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         value: "dev-plan",
         label: "Preview project plan",
         description: "Resolve the development workflow without allocating a target.",
+      },
+      {
+        value: "test-gradle",
+        label: "Gradle managed-device tests",
+        description: "Discover build-owned virtual-device and group test tasks.",
       },
       {
         value: "run-help",

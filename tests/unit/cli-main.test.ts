@@ -152,6 +152,43 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
 }
 
 describe("runCli", () => {
+  test("routes a complete Gradle managed-device plan through the public CLI", async () => {
+    const terminal = io();
+    const exitCode = await runCli(
+      [
+        "test",
+        "gradle",
+        ":app:pixel2api35DebugAndroidTest",
+        "--gradle",
+        "./gradlew",
+        "--shards",
+        "3",
+        "--software-rendering",
+        "--run-timeout",
+        "10m",
+        "--dry-run",
+        "--json",
+      ],
+      terminal,
+      dependencies(),
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(terminal.output.value)).toMatchObject({
+      command: "test gradle",
+      data: {
+        status: "planned",
+        task: ":app:pixel2api35DebugAndroidTest",
+        command: {
+          args: expect.arrayContaining([
+            "-Pandroid.experimental.androidTest.numManagedDeviceShards=3",
+            "-Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect",
+          ]),
+        },
+      },
+    });
+  });
+
   test("routes the complete non-interactive public command surface", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-surface-"));
     const ui =

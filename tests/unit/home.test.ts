@@ -119,6 +119,7 @@ describe("home screen", () => {
     expect(startSink.value).toContain("Set up first device");
     expect(startSink.value).toContain("Connect wirelessly");
     expect(startSink.value).toContain("Pair a new device");
+    expect(startSink.value).toContain("Gradle managed-device tests");
 
     const deviceSink = new MemorySink();
     await showHomeScreen({

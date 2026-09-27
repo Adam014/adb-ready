@@ -18,6 +18,7 @@ import type {
   SessionCommandData,
 } from "../app/session-commands.js";
 import type { AutomationRunData, AutonomousRunEvidence } from "../automation/evidence-bundle.js";
+import type { GradleManagedTestData } from "../automation/gradle-managed-devices.js";
 import type { ReadinessAssertion } from "../automation/readiness.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
@@ -206,6 +207,14 @@ function isAutomationRunData(value: unknown): value is AutomationRunData {
     typeof value.outcome === "string" &&
     isRecord(value.evidence) &&
     (value.session === null || isDevData(value.session))
+  );
+}
+
+function isGradleManagedTestData(value: unknown): value is GradleManagedTestData {
+  return (
+    isRecord(value) &&
+    (value.status === "completed" || value.status === "discovered" || value.status === "planned") &&
+    typeof value.wrapper === "string"
   );
 }
 
@@ -527,6 +536,43 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
 
   if (result.command === "run" && isAutomationRunData(result.data)) {
     lines.push(...automationHumanLines(result.data, capabilities));
+  }
+
+  if (result.command === "test gradle" && isGradleManagedTestData(result.data)) {
+    const data = result.data;
+    if (data.status === "discovered") {
+      const tasks = data.tasks ?? [];
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Gradle   ${clean(data.wrapper)}`,
+        "",
+        style.strong(`Managed-device tasks (${String(tasks.length)})`, capabilities),
+        ...(tasks.length === 0
+          ? [`${style.dim(glyphs.end, capabilities)} None declared`]
+          : tasks.map((task, index) => {
+              const branch = index === tasks.length - 1 ? glyphs.end : glyphs.branch;
+              return `${style.dim(branch, capabilities)} ${clean(task)}`;
+            })),
+      );
+    } else {
+      const marker =
+        data.outcome === undefined || data.outcome === "passed"
+          ? style.success(glyphs.success, capabilities)
+          : style.failure(glyphs.failure, capabilities);
+      lines.push(
+        `${style.success(glyphs.success, capabilities)} Gradle   ${clean(data.wrapper)}`,
+        `${marker} Task     ${clean(data.task ?? "unresolved")}${data.outcome === undefined ? " · planned" : ` · ${clean(data.outcome)}`}`,
+      );
+      if (data.tests !== undefined) {
+        lines.push(
+          `${data.tests.failed + data.tests.errors === 0 ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Tests    ${String(data.tests.total)} total · ${String(data.tests.failed)} failed · ${String(data.tests.errors)} errors · ${String(data.tests.skipped)} skipped`,
+        );
+      }
+      if (data.evidence !== undefined) {
+        lines.push(
+          `${style.accent(glyphs.active, capabilities)} Evidence ${clean(data.evidence.path)} · ${String(data.evidence.nativeFiles)} native files · ${clean(data.evidence.provenance)}`,
+        );
+      }
+    }
   }
 
   if (result.command === "logs" && isLogsData(result.data)) {
@@ -1075,6 +1121,29 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     }
   }
   if (isAutomationRunData(result.data)) renderAutomationPlain(result.data, sink);
+  if (isGradleManagedTestData(result.data)) {
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`gradle=${clean(result.data.wrapper)}\n`);
+    if (result.data.task !== undefined) sink.write(`task=${clean(result.data.task)}\n`);
+    if (result.data.tasks !== undefined) {
+      sink.write(`task_count=${String(result.data.tasks.length)}\n`);
+      result.data.tasks.forEach((task, index) => {
+        sink.write(`task_${String(index)}=${clean(task)}\n`);
+      });
+    }
+    if (result.data.outcome !== undefined) sink.write(`outcome=${clean(result.data.outcome)}\n`);
+    if (result.data.tests !== undefined) {
+      sink.write(`tests=${String(result.data.tests.total)}\n`);
+      sink.write(`test_failures=${String(result.data.tests.failed)}\n`);
+      sink.write(`test_errors=${String(result.data.tests.errors)}\n`);
+      sink.write(`test_skipped=${String(result.data.tests.skipped)}\n`);
+    }
+    if (result.data.evidence !== undefined) {
+      sink.write(`evidence=${clean(result.data.evidence.path)}\n`);
+      sink.write(`native_file_count=${String(result.data.evidence.nativeFiles)}\n`);
+      sink.write(`evidence_provenance=${clean(result.data.evidence.provenance)}\n`);
+    }
+  }
   if (isLogsData(result.data)) {
     sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
     sink.write(`filters=${result.data.filters.map(clean).join(",")}\n`);
