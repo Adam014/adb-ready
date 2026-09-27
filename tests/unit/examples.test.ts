@@ -12,6 +12,7 @@ const cases = [
   ["flutter", "flutter"],
   ["capacitor", "capacitor"],
   ["custom", "custom"],
+  ["ci-emulator", "custom"],
 ] as const;
 
 describe("public configuration examples", () => {

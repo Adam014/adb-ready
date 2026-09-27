@@ -15,6 +15,8 @@ adb-ready dev --dry-run
 - [`flutter/adb-ready.config.json`](./flutter/adb-ready.config.json)
 - [`capacitor/adb-ready.config.json`](./capacitor/adb-ready.config.json)
 - [`custom/adb-ready.config.json`](./custom/adb-ready.config.json)
+- [`ci-emulator/`](./ci-emulator/) — maintained GitHub-hosted emulator
+  acceptance with a finite run and retained failure evidence
 - [`automation/README.md`](./automation/README.md) — one finite AVD, deployment,
   verifier, evidence, and cleanup job
 
