@@ -82,7 +82,8 @@ to reveal an action.
 - [**Run the project**](./docs/dev-sessions.md) — select one target, prepare
   ports, launch the framework, and keep the session healthy.
 - [**Connect the device**](./docs/targets-and-wireless.md) — discover, pair,
-  reconnect, and deterministically bind a physical device or emulator.
+  reconnect, and deterministically bind a physical device, emulator, or
+  protected remote ADB server without silently restarting shared infrastructure.
 - [**Operate the app**](./docs/apps-and-evidence.md#app-lifecycle) — resolve,
   install, launch, restart, deep-link, and inspect the project app.
 - [**Verify the UI**](./docs/ui-automation.md) — find semantic elements, act

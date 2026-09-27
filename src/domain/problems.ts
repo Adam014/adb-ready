@@ -1,3 +1,4 @@
+import type { AdbClientFailure } from "../adb/client.js";
 import type { AdbDevice, AdbMdnsService } from "../adb/parsers.js";
 import { redactText } from "../core/redaction.js";
 import type { ProcessResult } from "../platform/process-runner.js";
@@ -12,6 +13,9 @@ export const ProblemCode = {
   AdbNotFound: "ADB_NOT_FOUND",
   AdbOptionalProbeFailed: "ADB_OPTIONAL_PROBE_FAILED",
   AdbServerUnavailable: "ADB_SERVER_UNAVAILABLE",
+  AdbRemoteServerInvalidResponse: "ADB_REMOTE_SERVER_INVALID_RESPONSE",
+  AdbRemoteServerProtocolMismatch: "ADB_REMOTE_SERVER_PROTOCOL_MISMATCH",
+  AdbRemoteServerUnreachable: "ADB_REMOTE_SERVER_UNREACHABLE",
   AdbVersionMismatch: "ADB_VERSION_MISMATCH",
   AdbTimeout: "ADB_TIMEOUT",
   InteractiveSelectionUnavailable: "INTERACTIVE_SELECTION_UNAVAILABLE",
@@ -339,6 +343,7 @@ export function adbProcessProblem(
   operation: string,
   result: ProcessResult,
   correlation: Correlation,
+  clientFailure?: AdbClientFailure,
 ): Problem {
   if (result.spawnError?.code === "ENOENT") {
     return adbNotFoundProblem(correlation, result.executable);
@@ -354,6 +359,101 @@ export function adbProcessProblem(
       retryable: true,
       evidence: processEvidence(result),
       actions: [],
+      correlation,
+    };
+  }
+
+  if (clientFailure?.kind === "protocol-mismatch") {
+    return {
+      code: ProblemCode.AdbRemoteServerProtocolMismatch,
+      category: "adb.remote-server",
+      severity: "error",
+      summary: "The remote ADB server uses a different protocol version.",
+      detail:
+        "ADB Ready stopped before launching the ADB client because upstream ADB can terminate a mismatched shared server automatically.",
+      retryable: true,
+      evidence: [
+        {
+          source: "adb.remote-preflight",
+          field: "expectedProtocolVersion",
+          value: clientFailure.expectedProtocolVersion ?? null,
+        },
+        {
+          source: "adb.remote-preflight",
+          field: "actualProtocolVersion",
+          value: clientFailure.actualProtocolVersion ?? null,
+        },
+      ],
+      actions: [
+        {
+          id: "align_remote_platform_tools",
+          title: "Align Platform-Tools on the client and remote ADB host",
+          kind: "user",
+          risk: "shared-global",
+          automatic: false,
+        },
+      ],
+      correlation,
+    };
+  }
+
+  if (clientFailure?.kind === "unreachable") {
+    return {
+      code: ProblemCode.AdbRemoteServerUnreachable,
+      category: "network.route",
+      severity: "error",
+      summary: "The configured remote ADB server is unreachable.",
+      detail:
+        "Verify the explicit host and port, then check the WSL, container, VM, VPN, firewall, or tunnel route without exposing the ADB socket publicly.",
+      retryable: true,
+      evidence: [
+        ...(clientFailure.networkCode === undefined
+          ? []
+          : [
+              {
+                source: "adb.remote-preflight",
+                field: "networkCode",
+                value: clientFailure.networkCode,
+              } satisfies Evidence,
+            ]),
+      ],
+      actions: [
+        {
+          id: "review_remote_adb_route",
+          title: "Check the protected route to the configured ADB server",
+          kind: "user",
+          risk: "none",
+          automatic: false,
+        },
+      ],
+      correlation,
+    };
+  }
+
+  if (
+    clientFailure !== undefined &&
+    (clientFailure.kind === "invalid-response" ||
+      clientFailure.kind === "rejected" ||
+      clientFailure.kind === "client-version-unavailable")
+  ) {
+    return {
+      code: ProblemCode.AdbRemoteServerInvalidResponse,
+      category: "adb.remote-server",
+      severity: "error",
+      summary: "The configured endpoint could not be verified as a compatible ADB server.",
+      detail:
+        "ADB Ready refused to send a normal ADB command until the endpoint and local client protocol can be verified safely.",
+      retryable: true,
+      evidence: [{ source: "adb.remote-preflight", field: "failure", value: clientFailure.kind }],
+      actions: [
+        {
+          id: "verify_remote_adb_endpoint",
+          title: "Verify the configured ADB host, port, and Platform-Tools installation",
+          kind: "user",
+          risk: "none",
+          automatic: false,
+        },
+      ],
       correlation,
     };
   }
@@ -421,8 +521,9 @@ export function adbOptionalProbeProblem(
   operation: string,
   result: ProcessResult,
   correlation: Correlation,
+  clientFailure?: AdbClientFailure,
 ): Problem {
-  const failure = adbProcessProblem(operation, result, correlation);
+  const failure = adbProcessProblem(operation, result, correlation, clientFailure);
 
   return {
     ...failure,

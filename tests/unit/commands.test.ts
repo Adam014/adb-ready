@@ -181,6 +181,33 @@ describe("runDoctor", () => {
     ).toBeTrue();
   });
 
+  test("stops with the exact safety problem when an explicit remote server fails preflight", async () => {
+    const requests: ProcessRequest[] = [];
+    const dependencies = deterministicDependencies(
+      fixtureRunner({ version: "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n" }, requests),
+    );
+    const execution = await runDoctor(
+      { adbHost: "lab.internal", adbPort: 5038 },
+      {
+        ...dependencies,
+        remoteServerProbe: async () => ({
+          ok: false,
+          kind: "protocol-mismatch",
+          message: "server replaced",
+          expectedProtocolVersion: 41,
+          actualProtocolVersion: 42,
+        }),
+      },
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.AdbOperation);
+    expect(execution.result.data).toBeNull();
+    expect(execution.result.problems).toEqual([
+      expect.objectContaining({ code: ProblemCode.AdbRemoteServerProtocolMismatch }),
+    ]);
+    expect(requests.map(({ args }) => args)).toEqual([["version"]]);
+  });
+
   test("collects portable runtime, ADB capabilities, status, and target data", async () => {
     const execution = await runDoctor(
       {},
@@ -366,6 +393,32 @@ describe("runDoctor", () => {
 });
 
 describe("runDevices", () => {
+  test("fails closed before invoking a mismatched explicit remote ADB server", async () => {
+    const requests: ProcessRequest[] = [];
+    const dependencies = deterministicDependencies(
+      fixtureRunner({ version: "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n" }, requests),
+    );
+    const execution = await runDevices(
+      { adbHost: "lab.internal", adbPort: 5038 },
+      {
+        ...dependencies,
+        remoteServerProbe: async () => ({
+          ok: false,
+          kind: "protocol-mismatch",
+          message: "server replaced",
+          expectedProtocolVersion: 41,
+          actualProtocolVersion: 42,
+        }),
+      },
+    );
+
+    expect(execution.exitCode).toBe(ExitCode.AdbOperation);
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.AdbRemoteServerProtocolMismatch }),
+    );
+    expect(requests.map(({ args }) => args)).toEqual([["version"]]);
+  });
+
   test("fails when ADB is missing or target inventory cannot be read", async () => {
     const missing = await runDevices(
       { adbPath: "/missing/adb" },

@@ -29,6 +29,10 @@ claims move to the CI tier only after they have a reproducible test environment.
   capabilities rather than host-runtime guarantees.
 - USB and wireless visibility depend on what the selected ADB server can access.
   Remote servers are supported through `--adb-host` and `--adb-port`.
+- Explicit ADB server endpoints receive a bounded read-only `host:version`
+  safety preflight before every upstream ADB command. Route loss, endpoint
+  replacement, invalid protocol responses, and client/server protocol mismatch
+  fail without asking upstream ADB to kill or restart the shared server.
 - Target-pool leases coordinate processes sharing one host-local per-user state
   directory. They are not a cross-runner distributed lock; multi-host labs need
   explicit runner routing or an external coordination backend.
@@ -63,3 +67,10 @@ cancellation, stale-owner recovery, and aggregate semantics are covered by
 deterministic fixtures. Cross-host contention and paid provider fan-out remain
 outside the observed acceptance boundary until suitable infrastructure is
 available.
+
+Remote-server safety is exercised against real loopback TCP fixtures carrying
+the ADB framing protocol, including connection refusal, timeout, cancellation,
+malformed/rejected responses, matching versions, and server replacement. This
+does not claim that every WSL, container, VPN, or remote lab route has been
+observed; those environments remain upstream-capable until recorded on the real
+host network.

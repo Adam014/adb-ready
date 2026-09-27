@@ -96,6 +96,21 @@ This is useful for WSL, containers, VMs, SSH-forwarded workstations, and device
 labs. ADB Ready does not start, kill, or reconfigure that shared server
 implicitly.
 
+Before every command sent through an explicit `--adb-host` or `--adb-port`, ADB
+Ready opens a bounded read-only connection and requests only `host:version`.
+The real `adb` process starts only when the server protocol matches the local
+client. This matters because the upstream ADB client automatically sends
+`host:kill` when it encounters a mismatched server version (see the
+[AOSP ADB client implementation](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/client/adb_client.cpp)).
+ADB Ready instead returns `ADB_REMOTE_SERVER_PROTOCOL_MISMATCH` and leaves the
+shared server untouched.
+
+The preflight also distinguishes an unreachable route, timeout, cancellation,
+and a non-ADB response. It is repeated before each command so replacement of a
+server during a long session fails closed. This is a narrow safety handshake,
+not a replacement ADB transport; all device operations still use the selected
+`adb` executable.
+
 ## Network limitations
 
 Wireless discovery and connection can be blocked by guest Wi-Fi, client
@@ -109,6 +124,12 @@ Start with:
 adb-ready doctor --verbose
 adb-ready devices
 ```
+
+For WSL, a container, VM, or remote runner, first verify that its network
+namespace can reach the exact protected ADB host and port. A successful DNS
+lookup or mDNS discovery does not prove that the TCP route is usable. ADB Ready
+reports this as `ADB_REMOTE_SERVER_UNREACHABLE` rather than an empty target
+list.
 
 If discovery is unavailable but the device shows a reachable connection
 endpoint, pass it explicitly. Do not assume port `5555`; modern Wireless
