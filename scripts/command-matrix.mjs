@@ -290,10 +290,7 @@ try {
     }
     assertions += 1;
 
-    const fakeGradle = path.join(
-      consumer,
-      process.platform === "win32" ? "gradlew.bat" : "gradlew",
-    );
+    const fakeGradle = path.join(temp, process.platform === "win32" ? "gradlew.bat" : "gradlew");
     await writeFile(fakeGradle, "");
     const gradleManagedPlan = command(
       alias,
