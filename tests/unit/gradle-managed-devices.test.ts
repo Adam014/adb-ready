@@ -91,6 +91,133 @@ lintDebug - Runs lint.
     }
   });
 
+  test("accepts an explicit Gradle Wrapper path without requiring project discovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-gmd-explicit-"));
+    try {
+      const execution = await runGradleManagedTest({
+        cwd: root,
+        gradlePath: "tools/gradlew",
+        task: "pixel2api35DebugAndroidTest",
+        dryRun: true,
+      });
+
+      expect(execution.exitCode).toBe(0);
+      expect(execution.result.data).toMatchObject({
+        status: "planned",
+        wrapper: "tools/gradlew",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reports a missing Wrapper before attempting Gradle discovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-gmd-missing-"));
+    let calls = 0;
+    try {
+      const execution = await runGradleManagedTest(
+        { cwd: root },
+        {
+          runner: async (request) => {
+            calls += 1;
+            return processResult(request);
+          },
+        },
+      );
+
+      expect(calls).toBe(0);
+      expect(execution.exitCode).toBe(10);
+      expect(execution.result.problems[0]?.code).toBe("GRADLE_WRAPPER_NOT_FOUND");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("discovers declared tasks and keeps discovery failures and cancellation distinct", async () => {
+    const scenarios: Array<{
+      result: Partial<ProcessResult>;
+      exit: number;
+      code?: string;
+      tasks?: string[];
+    }> = [
+      {
+        result: {
+          stdout:
+            "pixel2api35DebugAndroidTest - Executes tests using a Gradle managed device.\nconnectedDebugAndroidTest - Runs connected tests.",
+        },
+        exit: 0,
+        tasks: ["pixel2api35DebugAndroidTest"],
+      },
+      {
+        result: { exitCode: 1, timedOut: true, stderr: "discovery timed out" },
+        exit: 40,
+        code: "GRADLE_DISCOVERY_FAILED",
+      },
+      {
+        result: { exitCode: null, aborted: true },
+        exit: 130,
+        code: "GRADLE_DISCOVERY_CANCELLED",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const root = await project();
+      try {
+        const execution = await runGradleManagedTest(
+          { cwd: root },
+          {
+            runner: async (request) => processResult(request, scenario.result),
+          },
+        );
+        expect(execution.exitCode).toBe(scenario.exit);
+        if (scenario.tasks !== undefined) {
+          expect(execution.result.data).toMatchObject({
+            status: "discovered",
+            tasks: scenario.tasks,
+          });
+        } else {
+          expect(execution.result.problems[0]?.code).toBe(scenario.code);
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("rejects malformed and non-managed Gradle tasks before execution", async () => {
+    const root = await project();
+    try {
+      let calls = 0;
+      const malformed = await runGradleManagedTest(
+        { cwd: root, task: "connectedDebugAndroidTest" },
+        {
+          runner: async (request) => {
+            calls += 1;
+            return processResult(request);
+          },
+        },
+      );
+      expect(calls).toBe(0);
+      expect(malformed.exitCode).toBe(2);
+      expect(malformed.result.problems[0]?.code).toBe("GRADLE_MANAGED_TASK_INVALID");
+
+      const unrelated = await runGradleManagedTest(
+        { cwd: root, task: "customDebugAndroidTest" },
+        {
+          runner: async (request) => {
+            calls += 1;
+            return processResult(request, { stdout: "Type\nTask (org.gradle.api.Task)" });
+          },
+        },
+      );
+      expect(calls).toBe(1);
+      expect(unrelated.exitCode).toBe(2);
+      expect(unrelated.result.problems[0]?.code).toBe("GRADLE_TASK_NOT_MANAGED_DEVICE");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("preflights one declared task and retains fresh JUnit and HTML evidence", async () => {
     const root = await project();
     const results = path.join(
