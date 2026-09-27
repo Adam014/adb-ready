@@ -22,6 +22,10 @@ breaking changes.
   ownership, supports explicit sharding and server rendering, and normalizes
   current JUnit, report, timeout, cancellation, assertion, and infrastructure
   evidence.
+- Add an explicit Firebase Test Lab adapter for live catalog validation,
+  instrumentation and Robo matrices, stable provider outcome categories,
+  bounded native artifact retention, local-observer timeouts that leave remote
+  work running, and separately confirmed matrix cancellation.
 
 ## [0.6.0] - 2026-09-27
 

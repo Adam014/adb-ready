@@ -26,6 +26,7 @@ export type HomeAction =
   | "run-help"
   | "sessions"
   | "setup-device"
+  | "test-firebase"
   | "test-gradle"
   | "version";
 type HomeSection = "debug" | "device" | "project" | "start";
@@ -241,6 +242,11 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         value: "test-gradle",
         label: "Gradle managed-device tests",
         description: "Discover build-owned virtual-device and group test tasks.",
+      },
+      {
+        value: "test-firebase",
+        label: "Firebase Test Lab",
+        description: "Browse cloud devices before running a remote test matrix.",
       },
       {
         value: "run-help",

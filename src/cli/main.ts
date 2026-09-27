@@ -58,6 +58,7 @@ import {
 } from "../automation/capabilities.js";
 import type { AutonomousRunEvidence } from "../automation/evidence-bundle.js";
 import { type AutomationRunData, writeEvidenceBundle } from "../automation/evidence-bundle.js";
+import { runFirebaseTestLab } from "../automation/firebase-test-lab.js";
 import { runGradleManagedTest } from "../automation/gradle-managed-devices.js";
 import {
   inspectAndroidTargetProfile,
@@ -145,6 +146,7 @@ Commands:
   ports DIRECTION ACTION Manage verified TCP forward/reverse mappings
   sessions [ACTION]      Inspect saved development sessions
   test gradle [TASK]     Discover or run a Gradle managed-device test
+  test firebase ACTION   Run or manage a Firebase Test Lab matrix
   ui ACTION              Perform a bounded, verified Android UI action
   problems [SESSION]     Show problems from a saved session
   help [COMMAND]         Show help
@@ -457,6 +459,10 @@ List filters:
   test: `Usage:
   adb-ready test gradle
   adb-ready test gradle TASK [options]
+  adb-ready test firebase devices [options]
+  adb-ready test firebase instrumentation [options]
+  adb-ready test firebase robo [options]
+  adb-ready test firebase cancel MATRIX_ID --project PROJECT [options]
 
 Discovers declared Gradle Managed Device tasks or hands one exact task to the
 project's checked-in Gradle Wrapper. Gradle owns provisioning, test execution,
@@ -472,6 +478,24 @@ Gradle managed-device options:
 Native JUnit XML and HTML reports are retained with bounded Gradle output under
 .adb-ready/artifacts/. Product assertion failures, infrastructure failures,
 timeouts, cancellation, and missing tasks remain distinct structured outcomes.
+
+Firebase Test Lab options:
+  --project PROJECT          Use one explicit Google Cloud project
+  --gcloud PATH              Use an explicit gcloud executable
+  --app PATH                 App APK or supported app bundle
+  --test-apk PATH            Instrumentation test APK
+  --test-device DIMENSIONS   Exact model=ID,version=ID[,locale=..,orientation=..]
+  --test-timeout DURATION    Provider-side timeout for each execution
+  --run-timeout DURATION     Bound local observation (default: 30m)
+  --results-bucket GS_URI    Store provider artifacts in an owned GCS bucket
+  --results-dir PATH         Unique bucket-relative result directory
+  --allow-deprecated         Explicitly accept a deprecated catalog dimension
+  --allow-reduced-stability  Explicitly accept a reduced-stability dimension
+  --allow-low-capacity       Explicitly accept a low-capacity dimension
+
+Every run validates dimensions against the live catalog before upload. Stopping
+local observation leaves the remote matrix running; only the explicit cancel
+action cancels it.
 `,
   version: `Usage: adb-ready version
 
@@ -510,6 +534,7 @@ export interface CliDependencies extends CommandDependencies {
   resolveAndroidArtifact?: typeof resolveAndroidArtifact;
   inspectAndroidTargetProfile?: typeof inspectAndroidTargetProfile;
   deployAndroidArtifact?: typeof deployAndroidArtifact;
+  firebaseFetch?: typeof fetch;
 }
 
 function requiresTargetLease(options: CliOptions): boolean {
@@ -869,6 +894,7 @@ async function runInteractiveSession(
       pair: ["pair"],
       "run-help": ["help", "run"],
       sessions: ["sessions"],
+      "test-firebase": ["test", "firebase", "devices"],
       "test-gradle": ["test", "gradle"],
       version: ["version"],
     };
@@ -1106,6 +1132,54 @@ async function runCliInternal(
     return execution.exitCode;
   }
   if (options.command === "test") {
+    if (options.testKind === "firebase" && options.firebaseAction !== undefined) {
+      const execution = await runFirebaseTestLab(
+        {
+          cwd: io.cwd,
+          action: options.firebaseAction,
+          ...(options.gcloudPath === undefined ? {} : { gcloudPath: options.gcloudPath }),
+          ...(options.cloudProject === undefined ? {} : { project: options.cloudProject }),
+          ...(options.firebaseApp === undefined ? {} : { app: options.firebaseApp }),
+          ...(options.firebaseTest === undefined ? {} : { test: options.firebaseTest }),
+          ...(options.firebaseDevices === undefined ? {} : { devices: options.firebaseDevices }),
+          ...(options.firebaseMatrixId === undefined ? {} : { matrixId: options.firebaseMatrixId }),
+          ...(options.firebaseResultsBucket === undefined
+            ? {}
+            : { resultsBucket: options.firebaseResultsBucket }),
+          ...(options.firebaseResultsDir === undefined
+            ? {}
+            : { resultsDir: options.firebaseResultsDir }),
+          ...(options.firebaseTestTimeout === undefined
+            ? {}
+            : { testTimeout: options.firebaseTestTimeout }),
+          ...(options.runTimeoutMs === undefined
+            ? {}
+            : { observationTimeoutMs: options.runTimeoutMs }),
+          ...(options.firebaseAllowDeprecated === true ? { allowDeprecated: true } : {}),
+          ...(options.firebaseAllowReducedStability === true
+            ? { allowReducedStability: true }
+            : {}),
+          ...(options.firebaseAllowLowCapacity === true ? { allowLowCapacity: true } : {}),
+          ...(options.dryRun ? { dryRun: true } : {}),
+        },
+        {
+          ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+          ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
+          ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+          ...(dependencies.firebaseFetch === undefined
+            ? {}
+            : { fetch: dependencies.firebaseFetch }),
+        },
+        signal,
+      );
+      renderResult(execution.result, {
+        format: options.format,
+        capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
+        sink: options.format === "human" ? io.error : io.output,
+        verbose: options.verbose,
+      });
+      return execution.exitCode;
+    }
     const execution = await runGradleManagedTest(
       {
         cwd: io.cwd,

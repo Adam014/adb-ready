@@ -274,6 +274,97 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses Firebase Test Lab catalog, test, and explicit cancellation workflows", () => {
+    expect(
+      parseArguments(["test", "firebase", "devices", "--project", "demo-project"]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "test",
+        testKind: "firebase",
+        firebaseAction: "devices",
+        cloudProject: "demo-project",
+      },
+    });
+    expect(
+      parseArguments([
+        "test",
+        "firebase",
+        "instrumentation",
+        "--project",
+        "demo-project",
+        "--app",
+        "app.apk",
+        "--test-apk",
+        "app-test.apk",
+        "--test-device",
+        "model=Pixel2.arm,version=35,locale=en,orientation=portrait",
+        "--results-bucket",
+        "gs://demo-results",
+        "--results-dir",
+        "ci/run-42",
+        "--test-timeout",
+        "10m",
+        "--run-timeout",
+        "30m",
+        "--gcloud",
+        "/opt/google-cloud-sdk/bin/gcloud",
+        "--allow-deprecated",
+        "--allow-reduced-stability",
+        "--allow-low-capacity",
+        "--dry-run",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        testKind: "firebase",
+        firebaseAction: "instrumentation",
+        firebaseApp: "app.apk",
+        firebaseTest: "app-test.apk",
+        firebaseDevices: [
+          { model: "Pixel2.arm", version: "35", locale: "en", orientation: "portrait" },
+        ],
+        firebaseResultsBucket: "gs://demo-results",
+        firebaseResultsDir: "ci/run-42",
+        firebaseTestTimeout: "10m",
+        runTimeoutMs: 1_800_000,
+        gcloudPath: "/opt/google-cloud-sdk/bin/gcloud",
+        firebaseAllowDeprecated: true,
+        firebaseAllowReducedStability: true,
+        firebaseAllowLowCapacity: true,
+      },
+    });
+    expect(
+      parseArguments([
+        "test",
+        "firebase",
+        "cancel",
+        "matrix-123",
+        "--project",
+        "demo-project",
+        "--dry-run",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        firebaseAction: "cancel",
+        firebaseMatrixId: "matrix-123",
+        cloudProject: "demo-project",
+      },
+    });
+    for (const argv of [
+      ["test", "firebase"],
+      ["test", "firebase", "instrumentation", "--app", "app.apk"],
+      ["test", "firebase", "robo"],
+      ["test", "firebase", "cancel", "matrix-123"],
+      ["test", "firebase", "devices", "--app", "app.apk"],
+      ["test", "firebase", "robo", "--results-dir", "ci/run-42"],
+      ["doctor", "--gcloud", "gcloud"],
+    ]) {
+      expect(parseArguments(argv)).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    }
+  });
+
   test("parses one explicit autonomous AVD, deployment, and verifier workflow", () => {
     expect(
       parseArguments([
@@ -1200,6 +1291,22 @@ describe("parseArguments", () => {
       { argv: ["doctor", "--adb-port", "0"], option: "--adb-port" },
       { argv: ["doctor", "--config="], option: "--config" },
       { argv: ["doctor", "--profile", "bad profile"], option: "--profile" },
+      {
+        argv: ["test", "firebase", "devices", "--project", "invalid.project"],
+        option: "--project",
+      },
+      {
+        argv: ["test", "firebase", "robo", "--app", "gs://bucket-only"],
+        option: "--app",
+      },
+      {
+        argv: ["test", "firebase", "robo", "--results-bucket", "https://bucket"],
+        option: "--results-bucket",
+      },
+      {
+        argv: ["test", "firebase", "robo", "--results-dir", "ci/../private"],
+        option: "--results-dir",
+      },
     ];
 
     for (const scenario of cases) {
