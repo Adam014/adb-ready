@@ -52,7 +52,27 @@ const ROOT_KEYS = new Set([
 const PROFILE_KEYS = new Set(["extends", "adb", "timeoutMs", "output", "targets", "app", "dev"]);
 const ADB_KEYS = new Set(["path", "host", "port"]);
 const OUTPUT_KEYS = new Set(["color", "unicode", "animation", "interactive"]);
-const TARGET_KEYS = new Set(["aliases"]);
+const TARGET_KEYS = new Set(["aliases", "pools"]);
+const TARGET_POOL_KEYS = new Set(["members", "maxConcurrency", "failFast", "leaseWaitMs"]);
+const TARGET_POOL_MEMBER_KEYS = new Set([
+  "id",
+  "kind",
+  "required",
+  "serial",
+  "name",
+  "host",
+  "port",
+  "model",
+  "version",
+  "locale",
+  "orientation",
+]);
+const TARGET_POOL_MEMBER_KEYS_BY_KIND = {
+  adb: new Set(["id", "kind", "required", "serial"]),
+  avd: new Set(["id", "kind", "required", "name"]),
+  "remote-adb": new Set(["id", "kind", "required", "host", "port", "serial"]),
+  firebase: new Set(["id", "kind", "required", "model", "version", "locale", "orientation"]),
+} as const;
 const APP_KEYS = new Set(["android"]);
 const ANDROID_APP_KEYS = new Set(["package"]);
 const DEV_KEYS = new Set([
@@ -402,6 +422,244 @@ function validateDocument(
             }
           }
           values.targetAliases = aliases;
+        }
+      }
+      if (document.targets.pools !== undefined) {
+        if (!isObject(document.targets.pools)) {
+          errors.push(error(source, location, "targets.pools", "targets.pools must be an object."));
+        } else {
+          const pools: NonNullable<ConfigValues["targetPools"]> = {};
+          for (const [poolName, candidate] of Object.entries(document.targets.pools)) {
+            const poolPath = `targets.pools.${poolName}`;
+            if (!PROFILE_NAME.test(poolName)) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  poolPath,
+                  "Target pool name must be 1-64 letters, numbers, dots, underscores, or hyphens.",
+                ),
+              );
+              continue;
+            }
+            if (!isObject(candidate)) {
+              errors.push(error(source, location, poolPath, "Target pool must be an object."));
+              continue;
+            }
+            validateUnknownKeys(
+              candidate,
+              TARGET_POOL_KEYS,
+              `${poolPath}.`,
+              source,
+              location,
+              errors,
+            );
+            const members = candidate.members;
+            const maxConcurrency = candidate.maxConcurrency;
+            const failFast = candidate.failFast ?? false;
+            const leaseWaitMs = candidate.leaseWaitMs ?? 30_000;
+            let valid = true;
+            if (!Array.isArray(members) || members.length < 1 || members.length > 64) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `${poolPath}.members`,
+                  "Target pool members must be an array with 1-64 entries.",
+                ),
+              );
+              valid = false;
+            }
+            if (
+              !Number.isSafeInteger(maxConcurrency) ||
+              (maxConcurrency as number) < 1 ||
+              (maxConcurrency as number) > 32
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `${poolPath}.maxConcurrency`,
+                  "Target pool maxConcurrency must be an integer from 1 to 32.",
+                ),
+              );
+              valid = false;
+            }
+            if (typeof failFast !== "boolean") {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `${poolPath}.failFast`,
+                  "Target pool failFast must be a boolean.",
+                ),
+              );
+              valid = false;
+            }
+            if (
+              !Number.isSafeInteger(leaseWaitMs) ||
+              (leaseWaitMs as number) < 0 ||
+              (leaseWaitMs as number) > 3_600_000
+            ) {
+              errors.push(
+                error(
+                  source,
+                  location,
+                  `${poolPath}.leaseWaitMs`,
+                  "Target pool leaseWaitMs must be an integer from 0 to 3600000.",
+                ),
+              );
+              valid = false;
+            }
+            const parsedMembers: NonNullable<ConfigValues["targetPools"]>[string]["members"] = [];
+            const memberIds = new Set<string>();
+            const resourceIds = new Set<string>();
+            if (Array.isArray(members)) {
+              members.forEach((member, index) => {
+                const memberPath = `${poolPath}.members.${String(index)}`;
+                if (!isObject(member)) {
+                  errors.push(
+                    error(source, location, memberPath, "Target pool member must be an object."),
+                  );
+                  valid = false;
+                  return;
+                }
+                validateUnknownKeys(
+                  member,
+                  TARGET_POOL_MEMBER_KEYS,
+                  `${memberPath}.`,
+                  source,
+                  location,
+                  errors,
+                );
+                const id = member.id;
+                const kind = member.kind;
+                const required = member.required ?? true;
+                if (
+                  kind === "adb" ||
+                  kind === "avd" ||
+                  kind === "remote-adb" ||
+                  kind === "firebase"
+                ) {
+                  validateUnknownKeys(
+                    member,
+                    TARGET_POOL_MEMBER_KEYS_BY_KIND[kind],
+                    `${memberPath}.`,
+                    source,
+                    location,
+                    errors,
+                  );
+                }
+                if (typeof id !== "string" || !PROFILE_NAME.test(id) || memberIds.has(id)) {
+                  errors.push(
+                    error(
+                      source,
+                      location,
+                      `${memberPath}.id`,
+                      "Target pool member id must be unique and use 1-64 letters, numbers, dots, underscores, or hyphens.",
+                    ),
+                  );
+                  valid = false;
+                  return;
+                }
+                memberIds.add(id);
+                if (typeof required !== "boolean") {
+                  errors.push(
+                    error(
+                      source,
+                      location,
+                      `${memberPath}.required`,
+                      "Target pool member required must be a boolean.",
+                    ),
+                  );
+                  valid = false;
+                  return;
+                }
+                const optionalRequired = required ? {} : { required: false as const };
+                const nonEmpty = (value: unknown): value is string =>
+                  typeof value === "string" && value.trim() === value && value.length > 0;
+                let resourceId: string | undefined;
+                if (kind === "adb" && nonEmpty(member.serial)) {
+                  parsedMembers.push({ id, kind, serial: member.serial, ...optionalRequired });
+                  resourceId = `adb:${member.serial}`;
+                } else if (kind === "avd" && nonEmpty(member.name)) {
+                  parsedMembers.push({ id, kind, name: member.name, ...optionalRequired });
+                  resourceId = `avd:${member.name}`;
+                } else if (
+                  kind === "remote-adb" &&
+                  nonEmpty(member.host) &&
+                  nonEmpty(member.serial) &&
+                  (member.port === undefined ||
+                    (Number.isSafeInteger(member.port) &&
+                      (member.port as number) >= 1 &&
+                      (member.port as number) <= 65_535))
+                ) {
+                  parsedMembers.push({
+                    id,
+                    kind,
+                    host: member.host,
+                    port: (member.port as number | undefined) ?? 5037,
+                    serial: member.serial,
+                    ...optionalRequired,
+                  });
+                  resourceId = `remote-adb:${member.host}:${String((member.port as number | undefined) ?? 5037)}:${member.serial}`;
+                } else if (
+                  kind === "firebase" &&
+                  nonEmpty(member.model) &&
+                  nonEmpty(member.version) &&
+                  (member.locale === undefined || nonEmpty(member.locale)) &&
+                  (member.orientation === undefined ||
+                    member.orientation === "landscape" ||
+                    member.orientation === "portrait")
+                ) {
+                  parsedMembers.push({
+                    id,
+                    kind,
+                    model: member.model,
+                    version: member.version,
+                    locale: (member.locale as string | undefined) ?? "en",
+                    orientation:
+                      (member.orientation as "landscape" | "portrait" | undefined) ?? "portrait",
+                    ...optionalRequired,
+                  });
+                  resourceId = `firebase:${member.model}:${member.version}:${String(member.locale ?? "en")}:${String(member.orientation ?? "portrait")}`;
+                } else {
+                  errors.push(
+                    error(
+                      source,
+                      location,
+                      memberPath,
+                      "Target pool member must be adb(serial), avd(name), remote-adb(host, optional port, serial), or firebase(model, version, optional locale/orientation).",
+                    ),
+                  );
+                  valid = false;
+                }
+                if (resourceId !== undefined) {
+                  if (resourceIds.has(resourceId)) {
+                    errors.push(
+                      error(
+                        source,
+                        location,
+                        memberPath,
+                        "Target pool members must identify unique resources or provider dimensions.",
+                      ),
+                    );
+                    valid = false;
+                  }
+                  resourceIds.add(resourceId);
+                }
+              });
+            }
+            if (valid) {
+              pools[poolName] = {
+                members: parsedMembers,
+                maxConcurrency: maxConcurrency as number,
+                failFast: failFast as boolean,
+                leaseWaitMs: leaseWaitMs as number,
+              };
+            }
+          }
+          values.targetPools = pools;
         }
       }
     }

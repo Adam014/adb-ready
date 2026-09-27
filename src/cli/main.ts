@@ -61,11 +61,21 @@ import { type AutomationRunData, writeEvidenceBundle } from "../automation/evide
 import { runFirebaseTestLab } from "../automation/firebase-test-lab.js";
 import { runGradleManagedTest } from "../automation/gradle-managed-devices.js";
 import {
+  runTargetPool,
+  type TargetPoolExecution,
+  targetPoolMemberArguments,
+} from "../automation/target-pool.js";
+import {
   inspectAndroidTargetProfile,
   type TargetProfileFailure,
 } from "../automation/target-profile.js";
 import { loadConfig } from "../config/loader.js";
-import type { ConfigError, ConfigValues } from "../config/types.js";
+import type {
+  ConfigError,
+  ConfigTargetPool,
+  ConfigTargetPoolMember,
+  ConfigValues,
+} from "../config/types.js";
 import { EventBus } from "../core/event-bus.js";
 import { redactText } from "../core/redaction.js";
 import {
@@ -290,6 +300,10 @@ waits for every readiness assertion, runs one bounded verification command,
 then cleans owned resources. The verification exit code is preserved.
 
 Run options:
+  --pool NAME             Fan out through one explicit project target pool
+  --max-concurrency N     Override the pool's bounded concurrency (1-32)
+  --[no-]fail-fast        Override whether a required failure stops queued work
+  --lease-wait DURATION   Bound host-local target queueing (maximum: 1h)
   --avd NAME              Reuse or start this exact existing AVD
   --deploy                Discover and deploy one compatible Android artifact
   --artifact PATH         Deploy this project-local APK, APK Set, or AAB; repeat for splits
@@ -306,6 +320,8 @@ Verification processes also receive ANDROID_SERIAL, ADB_READY_TARGET_SERIAL, and
 ADB_READY_VERIFIER_OUTPUT_DIR. Direct Maestro test and Android CLI layout/screen-capture commands
 are pinned to the selected target and their native reports are retained automatically.
 AVDs must already exist. ADB Ready never creates or upgrades an SDK or AVD implicitly.
+Pool members each retain an isolated session and result. Pool mode never changes the
+single-target invariant inside a run.
 `,
   doctor: `Usage: adb-ready doctor [options]
 
@@ -480,6 +496,9 @@ Native JUnit XML and HTML reports are retained with bounded Gradle output under
 timeouts, cancellation, and missing tasks remain distinct structured outcomes.
 
 Firebase Test Lab options:
+  --pool NAME                Run one matrix per named Firebase dimension
+  --max-concurrency N        Bound simultaneously observed matrices (1-32)
+  --[no-]fail-fast           Stop submitting queued dimensions after a required failure
   --project PROJECT          Use one explicit Google Cloud project
   --gcloud PATH              Use an explicit gcloud executable
   --app PATH                 App APK or supported app bundle
@@ -535,6 +554,131 @@ export interface CliDependencies extends CommandDependencies {
   inspectAndroidTargetProfile?: typeof inspectAndroidTargetProfile;
   deployAndroidArtifact?: typeof deployAndroidArtifact;
   firebaseFetch?: typeof fetch;
+}
+
+class CapturedOutput implements CliOutput {
+  readonly isTTY = false;
+  readonly columns = 120;
+  readonly rows = 40;
+  #chunks: string[] = [];
+
+  write(value: string): void {
+    this.#chunks.push(value);
+  }
+
+  text(): string {
+    return this.#chunks.join("");
+  }
+}
+
+function parsedResultEnvelope(value: string): ResultEnvelope<unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value.trim());
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const result = parsed as Partial<ResultEnvelope<unknown>>;
+    return result.schemaVersion === SCHEMA_VERSION &&
+      typeof result.command === "string" &&
+      typeof result.commandId === "string" &&
+      typeof result.ok === "boolean" &&
+      typeof result.startedAt === "string" &&
+      typeof result.finishedAt === "string" &&
+      typeof result.durationMs === "number" &&
+      Array.isArray(result.problems)
+      ? (result as ResultEnvelope<unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function targetPoolProblem(
+  code: string,
+  summary: string,
+  detail: string,
+  commandId = "target-pool",
+  retryable = false,
+): Problem {
+  return {
+    code,
+    category: "automation.pool",
+    severity: "error",
+    summary,
+    detail,
+    retryable,
+    evidence: [],
+    actions: [],
+    correlation: { commandId },
+  };
+}
+
+function targetPoolProgress(
+  options: CliOptions,
+  io: CliIo,
+): Pick<Parameters<typeof runTargetPool>[0], "onMemberFinish" | "onMemberStart"> {
+  if (options.format !== "human" || options.quiet) return {};
+  return {
+    onMemberStart: (member) => io.error.write(`pool ${member.id}  running\n`),
+    onMemberFinish: (member) =>
+      io.error.write(`pool ${member.id}  ${member.status} · exit ${String(member.exitCode)}\n`),
+  };
+}
+
+async function runLocalTargetPool(
+  argv: readonly string[],
+  options: CliOptions,
+  pool: ConfigTargetPool,
+  io: CliIo,
+  dependencies: CliDependencies,
+  signal?: AbortSignal,
+): Promise<TargetPoolExecution> {
+  return await runTargetPool(
+    {
+      name: options.poolName ?? "",
+      pool,
+      ...(options.maxConcurrency === undefined ? {} : { maxConcurrency: options.maxConcurrency }),
+      ...(options.failFast === undefined ? {} : { failFast: options.failFast }),
+      ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+      ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
+      ...(signal === undefined ? {} : { signal }),
+      ...targetPoolProgress(options, io),
+    },
+    async (member, memberSignal) => {
+      if (member.kind === "firebase") {
+        throw new Error("Firebase dimensions cannot execute through a local run pool.");
+      }
+      const output = new CapturedOutput();
+      const error = new CapturedOutput();
+      const memberDependencies: CliDependencies = {
+        ...dependencies,
+        targetLease:
+          dependencies.targetLease === false
+            ? false
+            : {
+                ...(dependencies.targetLease ?? {}),
+                waitTimeoutMs: options.leaseWaitMs ?? pool.leaseWaitMs,
+                signal: memberSignal,
+              },
+        writeRememberedTarget: async () => ({ ok: true, path: "target-pool" }),
+      };
+      const exitCode = await runCli(
+        targetPoolMemberArguments(argv, member),
+        {
+          input: io.input,
+          output,
+          error,
+          cwd: io.cwd,
+          env: io.env,
+        },
+        memberDependencies,
+        memberSignal,
+      );
+      const result = parsedResultEnvelope(output.text());
+      if (result === undefined) {
+        throw new Error(`Pool member ${member.id} did not return one JSON result envelope.`);
+      }
+      return { exitCode, result };
+    },
+  );
 }
 
 function requiresTargetLease(options: CliOptions): boolean {
@@ -1133,45 +1277,143 @@ async function runCliInternal(
   }
   if (options.command === "test") {
     if (options.testKind === "firebase" && options.firebaseAction !== undefined) {
-      const execution = await runFirebaseTestLab(
-        {
+      const firebaseAction = options.firebaseAction;
+      const executeFirebase = async (
+        devices: NonNullable<CliOptions["firebaseDevices"]> | undefined,
+        memberSignal: AbortSignal | undefined,
+        resultsDirSuffix?: string,
+      ) =>
+        await runFirebaseTestLab(
+          {
+            cwd: io.cwd,
+            action: firebaseAction,
+            ...(options.gcloudPath === undefined ? {} : { gcloudPath: options.gcloudPath }),
+            ...(options.cloudProject === undefined ? {} : { project: options.cloudProject }),
+            ...(options.firebaseApp === undefined ? {} : { app: options.firebaseApp }),
+            ...(options.firebaseTest === undefined ? {} : { test: options.firebaseTest }),
+            ...(devices === undefined ? {} : { devices }),
+            ...(options.firebaseMatrixId === undefined
+              ? {}
+              : { matrixId: options.firebaseMatrixId }),
+            ...(options.firebaseResultsBucket === undefined
+              ? {}
+              : { resultsBucket: options.firebaseResultsBucket }),
+            ...(options.firebaseResultsDir === undefined
+              ? {}
+              : {
+                  resultsDir:
+                    resultsDirSuffix === undefined
+                      ? options.firebaseResultsDir
+                      : `${options.firebaseResultsDir}/${resultsDirSuffix}`,
+                }),
+            ...(options.firebaseTestTimeout === undefined
+              ? {}
+              : { testTimeout: options.firebaseTestTimeout }),
+            ...(options.runTimeoutMs === undefined
+              ? {}
+              : { observationTimeoutMs: options.runTimeoutMs }),
+            ...(options.firebaseAllowDeprecated === true ? { allowDeprecated: true } : {}),
+            ...(options.firebaseAllowReducedStability === true
+              ? { allowReducedStability: true }
+              : {}),
+            ...(options.firebaseAllowLowCapacity === true ? { allowLowCapacity: true } : {}),
+            ...(options.dryRun ? { dryRun: true } : {}),
+          },
+          {
+            ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+            ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
+            ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+            ...(dependencies.firebaseFetch === undefined
+              ? {}
+              : { fetch: dependencies.firebaseFetch }),
+          },
+          memberSignal,
+        );
+      let execution: Awaited<ReturnType<typeof executeFirebase>> | TargetPoolExecution;
+      if (options.poolName === undefined) {
+        execution = await executeFirebase(options.firebaseDevices, signal);
+      } else {
+        const loadedPool = await (dependencies.loadConfig ?? loadConfig)({
           cwd: io.cwd,
-          action: options.firebaseAction,
-          ...(options.gcloudPath === undefined ? {} : { gcloudPath: options.gcloudPath }),
-          ...(options.cloudProject === undefined ? {} : { project: options.cloudProject }),
-          ...(options.firebaseApp === undefined ? {} : { app: options.firebaseApp }),
-          ...(options.firebaseTest === undefined ? {} : { test: options.firebaseTest }),
-          ...(options.firebaseDevices === undefined ? {} : { devices: options.firebaseDevices }),
-          ...(options.firebaseMatrixId === undefined ? {} : { matrixId: options.firebaseMatrixId }),
-          ...(options.firebaseResultsBucket === undefined
-            ? {}
-            : { resultsBucket: options.firebaseResultsBucket }),
-          ...(options.firebaseResultsDir === undefined
-            ? {}
-            : { resultsDir: options.firebaseResultsDir }),
-          ...(options.firebaseTestTimeout === undefined
-            ? {}
-            : { testTimeout: options.firebaseTestTimeout }),
-          ...(options.runTimeoutMs === undefined
-            ? {}
-            : { observationTimeoutMs: options.runTimeoutMs }),
-          ...(options.firebaseAllowDeprecated === true ? { allowDeprecated: true } : {}),
-          ...(options.firebaseAllowReducedStability === true
-            ? { allowReducedStability: true }
-            : {}),
-          ...(options.firebaseAllowLowCapacity === true ? { allowLowCapacity: true } : {}),
-          ...(options.dryRun ? { dryRun: true } : {}),
-        },
-        {
-          ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
-          ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
-          ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
-          ...(dependencies.firebaseFetch === undefined
-            ? {}
-            : { fetch: dependencies.firebaseFetch }),
-        },
-        signal,
-      );
+          env: io.env,
+          ...(options.configPath === undefined ? {} : { projectConfigPath: options.configPath }),
+          explicitProjectConfig: options.configPath !== undefined,
+          ...(options.profileName === undefined ? {} : { profileName: options.profileName }),
+          cli: cliConfig(options),
+        });
+        if (!loadedPool.ok) {
+          const failed = failureResult(
+            "test firebase pool",
+            configProblems(loadedPool.errors),
+            dependencies,
+          );
+          renderFailure(failed, options.format, io);
+          return ExitCode.InvalidInput;
+        }
+        const pool = loadedPool.config.values.targetPools?.[options.poolName];
+        if (pool === undefined) {
+          const failed = failureResult(
+            "test firebase pool",
+            [
+              targetPoolProblem(
+                "TARGET_POOL_NOT_FOUND",
+                `Target pool ${options.poolName} was not found.`,
+                "Define the named pool under targets.pools in the project configuration.",
+              ),
+            ],
+            dependencies,
+          );
+          renderFailure(failed, options.format, io);
+          return ExitCode.InvalidInput;
+        }
+        if (pool.members.some((member) => member.kind !== "firebase")) {
+          const failed = failureResult(
+            "test firebase pool",
+            [
+              targetPoolProblem(
+                "TARGET_POOL_KIND_MISMATCH",
+                `Target pool ${options.poolName} contains a non-Firebase member.`,
+                "Firebase pool runs require every member to declare kind firebase.",
+              ),
+            ],
+            dependencies,
+          );
+          renderFailure(failed, options.format, io);
+          return ExitCode.InvalidInput;
+        }
+        execution = await runTargetPool(
+          {
+            name: options.poolName,
+            command: "test firebase pool",
+            pool,
+            coordination: "provider-managed",
+            cancelRunningOnFailFast: false,
+            ...(options.maxConcurrency === undefined
+              ? {}
+              : { maxConcurrency: options.maxConcurrency }),
+            ...(options.failFast === undefined ? {} : { failFast: options.failFast }),
+            ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
+            ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
+            ...(signal === undefined ? {} : { signal }),
+            ...targetPoolProgress(options, io),
+          },
+          async (member, memberSignal) => {
+            const firebase = member as Extract<ConfigTargetPoolMember, { kind: "firebase" }>;
+            return await executeFirebase(
+              [
+                {
+                  model: firebase.model,
+                  version: firebase.version,
+                  locale: firebase.locale,
+                  orientation: firebase.orientation,
+                },
+              ],
+              memberSignal,
+              firebase.id,
+            );
+          },
+        );
+      }
       renderResult(execution.result, {
         format: options.format,
         capabilities: capabilities(options, cliConfig(options), io, "output", options.format),
@@ -1285,6 +1527,47 @@ async function runCliInternal(
   }
 
   const values = loaded.config.values;
+  if (options.command === "run" && options.poolName !== undefined) {
+    const pool = values.targetPools?.[options.poolName];
+    if (pool === undefined) {
+      const failed = failureResult(
+        "run pool",
+        [
+          targetPoolProblem(
+            "TARGET_POOL_NOT_FOUND",
+            `Target pool ${options.poolName} was not found.`,
+            "Define the named pool under targets.pools in the project configuration.",
+          ),
+        ],
+        dependencies,
+      );
+      renderFailure(failed, options.format, io);
+      return ExitCode.InvalidInput;
+    }
+    if (pool.members.some((member) => member.kind === "firebase")) {
+      const failed = failureResult(
+        "run pool",
+        [
+          targetPoolProblem(
+            "TARGET_POOL_KIND_MISMATCH",
+            `Target pool ${options.poolName} contains a Firebase member.`,
+            "Local run pools accept adb, avd, and remote-adb members only. Use test firebase with a Firebase-only pool.",
+          ),
+        ],
+        dependencies,
+      );
+      renderFailure(failed, options.format, io);
+      return ExitCode.InvalidInput;
+    }
+    const execution = await runLocalTargetPool(argv, options, pool, io, dependencies, signal);
+    renderResult(execution.result, {
+      format: options.format,
+      capabilities: capabilities(options, values, io, "output", options.format),
+      sink: options.format === "human" ? io.error : io.output,
+      verbose: options.verbose,
+    });
+    return execution.exitCode;
+  }
   const errorCapabilities = capabilities(options, values, io, "error", options.format);
   const outputCapabilities = capabilities(options, values, io, "output", options.format);
   let lastTarget: RememberedTarget | undefined;
@@ -1368,6 +1651,7 @@ async function runCliInternal(
   };
   let androidCapabilities: AndroidCapabilities | undefined;
   let preparedAvd: PreparedAvd | undefined;
+  let avdResourceLease: TargetLeaseHandle | undefined;
   let autonomousEvidence: AutonomousRunEvidence | undefined;
   let autonomousAdb: string | undefined;
   const autonomousRun =
@@ -1395,6 +1679,8 @@ async function runCliInternal(
       }
       preparedAvd = undefined;
     }
+    await avdResourceLease?.release();
+    avdResourceLease = undefined;
     const failed: CommandExecution<DevData> = {
       result: { ...failureResult("run", problems, dependencies), data: null },
       exitCode,
@@ -1454,6 +1740,33 @@ async function runCliInternal(
     });
   }
   if (options.avdName !== undefined && !options.dryRun) {
+    if (dependencies.targetLease !== false) {
+      const acquired = await acquireTargetLease(
+        {
+          targetIdentity: `avd:${options.avdName}`,
+          projectRoot: io.cwd,
+          purpose: `run avd ${options.avdName}`,
+        },
+        { env: io.env, ...(dependencies.targetLease ?? {}) },
+      );
+      if (!acquired.ok) {
+        return await finishAutonomousFailure(
+          [
+            targetPoolProblem(
+              acquired.code,
+              acquired.message,
+              acquired.code === "TARGET_LEASE_CANCELLED"
+                ? "The queued AVD was not started or changed."
+                : "Wait for the owning workflow to finish or choose another AVD.",
+              "target-pool",
+              true,
+            ),
+          ],
+          acquired.code === "TARGET_LEASE_CANCELLED" ? ExitCode.Interrupted : ExitCode.Target,
+        );
+      }
+      avdResourceLease = acquired.lease;
+    }
     const emulator = capability(androidCapabilities as AndroidCapabilities, "emulator");
     if (emulator.status !== "supported" || emulator.invocation === undefined) {
       return await finishAutonomousFailure(
@@ -1500,16 +1813,27 @@ async function runCliInternal(
       );
     }
     const avd = preparation.avd;
-    preparedAvd = avd;
-    autonomousEvidence = {
-      avd: {
-        name: avd.name,
-        serial: avd.serial,
-        ownership: avd.ownership,
-        readiness: avd.readiness,
+    const releaseAvd = avd.release.bind(avd);
+    preparedAvd = {
+      ...avd,
+      release: async (releaseSignal) => {
+        try {
+          return await releaseAvd(releaseSignal);
+        } finally {
+          await avdResourceLease?.release();
+          avdResourceLease = undefined;
+        }
       },
     };
-    config.targetSelector = avd.serial;
+    autonomousEvidence = {
+      avd: {
+        name: preparedAvd.name,
+        serial: preparedAvd.serial,
+        ownership: preparedAvd.ownership,
+        readiness: preparedAvd.readiness,
+      },
+    };
+    config.targetSelector = preparedAvd.serial;
     delete config.targetTransportId;
     delete config.rememberedSerial;
     delete config.rememberedHardwareSerial;
@@ -1787,14 +2111,18 @@ async function runCliInternal(
             code:
               acquired.code === "TARGET_BUSY"
                 ? ProblemCode.TargetBusy
-                : ProblemCode.TargetLeaseUnavailable,
+                : acquired.code === "TARGET_LEASE_CANCELLED"
+                  ? ProblemCode.OperationInterrupted
+                  : ProblemCode.TargetLeaseUnavailable,
             category: "target.lease",
             severity: "error",
             summary: acquired.message,
             detail:
               acquired.code === "TARGET_BUSY"
                 ? "Wait for the owning workflow to finish, or select another Android target. Expired leases are recovered automatically."
-                : "Check the per-user state directory permissions, then retry.",
+                : acquired.code === "TARGET_LEASE_CANCELLED"
+                  ? "The queued target was not mutated. Re-run the pool when the target is available."
+                  : "Check the per-user state directory permissions, then retry.",
             retryable: true,
             evidence:
               acquired.owner === undefined
@@ -1818,13 +2146,15 @@ async function runCliInternal(
         ],
         dependencies,
       );
+      const leaseExitCode =
+        acquired.code === "TARGET_LEASE_CANCELLED" ? ExitCode.Interrupted : ExitCode.Target;
       if (autonomousRun) {
-        return await finishAutonomousFailure([...failure.problems], ExitCode.Target);
+        return await finishAutonomousFailure([...failure.problems], leaseExitCode);
       }
       await preparedAvd?.release(signal);
       preparedAvd = undefined;
       renderFailure(failure, options.format, io);
-      return ExitCode.Target;
+      return leaseExitCode;
     }
     targetLease = acquired.lease;
   }

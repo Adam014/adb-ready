@@ -198,6 +198,20 @@ Preview the complete project plan before a device is allocated:
 adb-ready run --preset expo --dry-run --json -- npm run test:e2e
 ```
 
+### Fan out over an explicit pool
+
+Named project pools repeat the same bounded verifier without weakening the
+single-target run contract:
+
+```bash
+adb-ready run --pool smoke --max-concurrency 2 -- npm run test:e2e
+```
+
+Each member keeps its own target lease, session, result envelope, evidence, and
+cleanup. Required failures fail the aggregate; optional failures remain
+visible. Queueing is bounded and host-local, never an inferred distributed
+lock. See [Target pools and fan-out](./target-pools.md).
+
 ### Start an existing AVD and deploy the intended build
 
 For a complete local or CI-owned emulator job, name one existing AVD and either

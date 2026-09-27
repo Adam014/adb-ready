@@ -145,6 +145,41 @@ describe("result renderer", () => {
     expect(catalog.value).toContain("1 more · use --json for the full catalog");
   });
 
+  test("renders target-pool status for humans and line-oriented automation", () => {
+    const pooled: ResultEnvelope<unknown> = {
+      ...result,
+      command: "run pool",
+      data: {
+        pool: "smoke",
+        maxConcurrency: 2,
+        failFast: false,
+        coordination: "host-local-filesystem",
+        members: [
+          { id: "phone", kind: "adb", required: true, status: "passed", exitCode: 0 },
+          { id: "avd", kind: "avd", required: true, status: "failed", exitCode: 40 },
+          {
+            id: "lab",
+            kind: "remote-adb",
+            required: false,
+            status: "skipped",
+            exitCode: 130,
+          },
+        ],
+        summary: { passed: 1, failed: 1, cancelled: 0, skipped: 1 },
+      },
+    };
+    const human = new MemorySink();
+    const plain = new MemorySink();
+    renderResult(pooled, { format: "human", capabilities, sink: human });
+    renderResult(pooled, { format: "plain", capabilities, sink: plain });
+
+    expect(human.value).toContain("Pool     smoke · concurrency 2 · run all");
+    expect(human.value).toContain("phone · adb · passed");
+    expect(human.value).toContain("lab · remote-adb · skipped · optional");
+    expect(plain.value).toContain("pool=smoke\n");
+    expect(plain.value).toContain("member_1=avd:avd:failed:40\n");
+  });
+
   test("surfaces autonomous deployment evidence without exposing artifact paths", () => {
     const autonomous: ResultEnvelope<unknown> = {
       ...result,

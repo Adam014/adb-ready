@@ -238,6 +238,89 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses explicit target pool fan-out and rejects competing selectors", () => {
+    expect(
+      parseArguments([
+        "run",
+        "--pool",
+        "smoke",
+        "--max-concurrency",
+        "3",
+        "--fail-fast",
+        "--lease-wait",
+        "45s",
+        "--",
+        "npm",
+        "test",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "run",
+        poolName: "smoke",
+        maxConcurrency: 3,
+        failFast: true,
+        leaseWaitMs: 45_000,
+      },
+    });
+    expect(
+      parseArguments(["run", "--pool", "smoke", "--device", "USB-1", "--", "true"]),
+    ).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["run", "--max-concurrency", "2", "--", "true"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(
+      parseArguments(["test", "firebase", "robo", "--pool", "cloud", "--app", "app.apk"]),
+    ).toMatchObject({ ok: true, options: { poolName: "cloud" } });
+    expect(
+      parseArguments(["run", "--pool", "smoke", "--no-fail-fast", "--", "true"]),
+    ).toMatchObject({ ok: true, options: { failFast: false } });
+    expect(parseArguments(["run", "--pool", "bad/name", "--", "true"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(
+      parseArguments(["run", "--pool", "smoke", "--max-concurrency", "33", "--", "true"]),
+    ).toMatchObject({ ok: false, code: "CLI_INVALID_VALUE" });
+    expect(
+      parseArguments(["run", "--pool", "smoke", "--lease-wait", "2h", "--", "true"]),
+    ).toMatchObject({ ok: false, code: "CLI_INVALID_VALUE" });
+    expect(parseArguments(["doctor", "--pool", "smoke"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(
+      parseArguments([
+        "test",
+        "firebase",
+        "robo",
+        "--pool",
+        "cloud",
+        "--test-device",
+        "model=akita,version=35",
+        "--app",
+        "app.apk",
+      ]),
+    ).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(
+      parseArguments([
+        "test",
+        "firebase",
+        "robo",
+        "--pool",
+        "cloud",
+        "--lease-wait",
+        "1s",
+        "--app",
+        "app.apk",
+      ]),
+    ).toMatchObject({ ok: false, code: "CLI_USAGE" });
+  });
+
   test("parses Gradle managed-device discovery, planning, and execution options", () => {
     expect(parseArguments(["test", "gradle"])).toMatchObject({
       ok: true,

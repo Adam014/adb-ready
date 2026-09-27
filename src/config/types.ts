@@ -25,6 +25,34 @@ export interface ConfigDevPort {
   host?: number;
 }
 
+export type ConfigTargetPoolMember =
+  | { id: string; kind: "adb"; serial: string; required?: boolean }
+  | { id: string; kind: "avd"; name: string; required?: boolean }
+  | {
+      id: string;
+      kind: "remote-adb";
+      host: string;
+      port: number;
+      serial: string;
+      required?: boolean;
+    }
+  | {
+      id: string;
+      kind: "firebase";
+      model: string;
+      version: string;
+      locale: string;
+      orientation: "landscape" | "portrait";
+      required?: boolean;
+    };
+
+export interface ConfigTargetPool {
+  members: ConfigTargetPoolMember[];
+  maxConcurrency: number;
+  failFast: boolean;
+  leaseWaitMs: number;
+}
+
 export type ConfigHookEvent =
   | "beforeDev"
   | "finally"
@@ -51,6 +79,7 @@ export interface ConfigValues {
   animation?: boolean;
   interactive?: boolean;
   targetAliases?: Record<string, string>;
+  targetPools?: Record<string, ConfigTargetPool>;
   appPackage?: string;
   devPreset?: ConfigDevPreset;
   packageManager?: ConfigPackageManager;

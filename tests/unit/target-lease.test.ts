@@ -80,6 +80,56 @@ describe("target leases", () => {
     }
   });
 
+  test("queues bounded acquisition and acquires immediately after the owner releases", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-lease-queue-"));
+    try {
+      const request = { targetIdentity: "phone-queue", projectRoot: "/project", purpose: "run" };
+      const owner = await acquireTargetLease(request, { directory, heartbeatIntervalMs: 0 });
+      expect(owner.ok).toBeTrue();
+      if (!owner.ok) return;
+      const queued = acquireTargetLease(request, {
+        directory,
+        heartbeatIntervalMs: 0,
+        waitTimeoutMs: 1_000,
+        waitPollIntervalMs: 10,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await owner.lease.release();
+      const acquired = await queued;
+      expect(acquired.ok).toBeTrue();
+      if (acquired.ok) await acquired.lease.release();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("cancels a queued acquisition without taking ownership", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-lease-cancel-"));
+    try {
+      const request = { targetIdentity: "phone-cancel", projectRoot: "/project", purpose: "run" };
+      const owner = await acquireTargetLease(request, { directory, heartbeatIntervalMs: 0 });
+      expect(owner.ok).toBeTrue();
+      if (!owner.ok) return;
+      const controller = new AbortController();
+      const queued = acquireTargetLease(request, {
+        directory,
+        heartbeatIntervalMs: 0,
+        waitTimeoutMs: 1_000,
+        waitPollIntervalMs: 10,
+        signal: controller.signal,
+      });
+      controller.abort();
+      expect(await queued).toEqual({
+        ok: false,
+        code: "TARGET_LEASE_CANCELLED",
+        message: "Target ownership wait was cancelled.",
+      });
+      await owner.lease.release();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("recovers an expired lease without touching another target", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-lease-"));
     try {

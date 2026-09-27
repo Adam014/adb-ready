@@ -29,6 +29,9 @@ claims move to the CI tier only after they have a reproducible test environment.
   capabilities rather than host-runtime guarantees.
 - USB and wireless visibility depend on what the selected ADB server can access.
   Remote servers are supported through `--adb-host` and `--adb-port`.
+- Target-pool leases coordinate processes sharing one host-local per-user state
+  directory. They are not a cross-runner distributed lock; multi-host labs need
+  explicit runner routing or an external coordination backend.
 - npm, pnpm, Yarn, and Bun consumers use the same package and the same
   `adb-ready`/`adbr` entrypoint.
 
@@ -54,3 +57,9 @@ covered by deterministic fixtures. The current Google Cloud CLI has also been
 used to verify the real unauthenticated failure boundary. A paid remote matrix
 has not yet been recorded for this release, so successful provider execution is
 not presented as observed acceptance evidence.
+
+Target-pool scheduling, bounded concurrency, fail-fast submission, queue
+cancellation, stale-owner recovery, and aggregate semantics are covered by
+deterministic fixtures. Cross-host contention and paid provider fan-out remain
+outside the observed acceptance boundary until suitable infrastructure is
+available.

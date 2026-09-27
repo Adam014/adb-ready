@@ -26,6 +26,10 @@ breaking changes.
   instrumentation and Robo matrices, stable provider outcome categories,
   bounded native artifact retention, local-observer timeouts that leave remote
   work running, and separately confirmed matrix cancellation.
+- Add explicit local, existing-AVD, remote-ADB, and Firebase target pools with
+  bounded fan-out, required/optional members, fail-fast submission policy,
+  owner-recorded lease queueing, deterministic cancellation and stale-owner
+  recovery, and aggregate results that preserve every isolated member run.
 
 ## [0.6.0] - 2026-09-27
 

@@ -1,0 +1,29 @@
+{
+  "$schema": "../../schema/config-v1.schema.json",
+  "version": 1,
+  "dev": {
+    "preset": "expo",
+    "reversePorts": [8081]
+  },
+  "targets": {
+    "pools": {
+      "smoke": {
+        "maxConcurrency": 2,
+        "failFast": false,
+        "leaseWaitMs": 30000,
+        "members": [
+          {
+            "id": "usb-phone",
+            "kind": "adb",
+            "serial": "REPLACE_WITH_EXACT_SERIAL"
+          },
+          {
+            "id": "api36-emulator",
+            "kind": "avd",
+            "name": "REPLACE_WITH_EXISTING_AVD"
+          }
+        ]
+      }
+    }
+  }
+}
