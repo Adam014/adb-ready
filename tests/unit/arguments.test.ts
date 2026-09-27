@@ -609,6 +609,25 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses UI acquisition profiles only for semantic UI workflows", () => {
+    expect(parseArguments(["inspect", "ui", "--acquisition", "strict"])).toMatchObject({
+      ok: true,
+      options: { command: "inspect", inspectKind: "ui", uiAcquisition: "strict" },
+    });
+    expect(parseArguments(["ui", "audit", "--acquisition", "fast"])).toMatchObject({
+      ok: true,
+      options: { command: "ui", uiAcquisition: "fast" },
+    });
+    expect(parseArguments(["doctor", "--acquisition", "balanced"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["inspect", "ui", "--acquisition", "instant"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+  });
+
   test("parses bounded UI actions and rejects ambiguous input", () => {
     expect(parseArguments(["ui", "audit"])).toMatchObject({
       ok: true,

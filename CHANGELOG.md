@@ -13,6 +13,10 @@ breaking changes.
 
 - Add the project-local `bun what` command browser for contributors who want
   to discover and launch repository tasks without scanning `package.json`.
+- Add balanced, fast, and strict semantic UI acquisition profiles with
+  observation timing, freshness, stability, filtering, truncation, and
+  framework-limitation metadata; reject empty and continuously unstable UI
+  hierarchies instead of returning a silent false success.
 
 ## [0.5.1] - 2026-09-25
 

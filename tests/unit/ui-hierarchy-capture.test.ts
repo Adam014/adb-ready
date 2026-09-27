@@ -8,7 +8,7 @@ import type {
   AdbObservation,
   AdbTargetSelector,
 } from "../../src/adb/client.js";
-import { captureUiHierarchy } from "../../src/evidence/ui-hierarchy-capture.js";
+import { acquireUiSnapshot, captureUiHierarchy } from "../../src/evidence/ui-hierarchy-capture.js";
 import type { ProcessResult } from "../../src/platform/process-runner.js";
 import { acquireTargetLease } from "../../src/state/target-lease.js";
 
@@ -191,6 +191,142 @@ describe("UI hierarchy capture coordination", () => {
       });
     } finally {
       await rm(blockedRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("requires matching observations for strict acquisition and records its evidence", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-ui-lock-"));
+    const outputs = [
+      '<hierarchy><node text="Loading" /></hierarchy>',
+      '<hierarchy><node text="Ready" /></hierarchy>',
+      '<hierarchy><node text="Ready" /></hierarchy>',
+    ];
+    let calls = 0;
+    try {
+      const acquired = await acquireUiSnapshot({
+        client: client(async () => outputs[calls++] ?? outputs.at(-1) ?? ""),
+        target: { serial: "emulator-5554" },
+        targetIdentity: "hardware:pixel-1",
+        commandId: "command-1",
+        operation: "inspect-ui",
+        message: "Reading hierarchy",
+        timeoutMs: 1_000,
+        maxBufferBytes: 1_024,
+        profile: "strict",
+        clock: () => new Date("2026-09-27T10:00:00.000Z"),
+        settle: async () => undefined,
+        lock: { lease: { directory, heartbeatIntervalMs: 0 }, pollIntervalMs: 5 },
+      });
+      expect(acquired).toMatchObject({
+        ok: true,
+        snapshot: {
+          nodes: [{ text: "Ready" }],
+          acquisition: {
+            profile: "strict",
+            source: "uiautomator",
+            idleStrategy: "platform-idle",
+            observedAt: "2026-09-27T10:00:00.000Z",
+            freshness: "fresh",
+            durationMs: 30,
+            attempts: 3,
+            stability: "verified",
+          },
+        },
+      });
+      expect(calls).toBe(3);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects empty and continuously unstable hierarchy observations", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-ui-lock-"));
+    let calls = 0;
+    try {
+      const empty = await acquireUiSnapshot({
+        client: client(async () => "<hierarchy />"),
+        target: { serial: "emulator-5554" },
+        targetIdentity: "hardware:pixel-1",
+        commandId: "command-1",
+        operation: "inspect-ui",
+        message: "Reading hierarchy",
+        timeoutMs: 1_000,
+        maxBufferBytes: 1_024,
+        lock: { lease: { directory, heartbeatIntervalMs: 0 }, pollIntervalMs: 5 },
+      });
+      expect(empty).toMatchObject({ ok: false, problem: { code: "UI_HIERARCHY_EMPTY" } });
+
+      const unstable = await acquireUiSnapshot({
+        client: client(async () => `<hierarchy><node text="${String(++calls)}" /></hierarchy>`),
+        target: { serial: "emulator-5554" },
+        targetIdentity: "hardware:pixel-1",
+        commandId: "command-2",
+        operation: "inspect-ui",
+        message: "Reading hierarchy",
+        timeoutMs: 1_000,
+        maxBufferBytes: 1_024,
+        profile: "strict",
+        settle: async () => undefined,
+        lock: { lease: { directory, heartbeatIntervalMs: 0 }, pollIntervalMs: 5 },
+      });
+      expect(unstable).toMatchObject({
+        ok: false,
+        problem: { code: "UI_HIERARCHY_UNSTABLE" },
+      });
+      expect(calls).toBe(3);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("classifies process cancellation and timeout during acquisition", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-ui-lock-"));
+    const acquisitionClient = (state: "aborted" | "timedOut"): AdbClient =>
+      ({
+        async targetCommand<T>(
+          _target: string | AdbTargetSelector,
+          _operation: string,
+          _message: string,
+          _args: readonly string[],
+          parse: (output: string) => T,
+        ): Promise<AdbObservation<T>> {
+          const output = '<hierarchy><node text="Ready" /></hierarchy>';
+          return {
+            operationId: "ui-dump",
+            process: {
+              ...processResult(output),
+              ...(state === "aborted"
+                ? { aborted: true, signal: "SIGTERM" }
+                : { timedOut: true, exitCode: null, signal: "SIGTERM" }),
+            },
+            value: parse(output),
+          };
+        },
+      }) as AdbClient;
+    const acquire = (state: "aborted" | "timedOut") =>
+      acquireUiSnapshot({
+        client: acquisitionClient(state),
+        target: { serial: "emulator-5554" },
+        targetIdentity: "hardware:pixel-1",
+        commandId: `command-${state}`,
+        operation: "inspect-ui",
+        message: "Reading hierarchy",
+        timeoutMs: 1_000,
+        maxBufferBytes: 1_024,
+        lock: { lease: { directory, heartbeatIntervalMs: 0 }, pollIntervalMs: 5 },
+      });
+
+    try {
+      expect(await acquire("aborted")).toMatchObject({
+        ok: false,
+        problem: { code: "UI_HIERARCHY_CANCELLED", category: "evidence.ui.cancelled" },
+      });
+      expect(await acquire("timedOut")).toMatchObject({
+        ok: false,
+        problem: { code: "UI_SNAPSHOT_TIMEOUT", category: "evidence.ui.timeout" },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });

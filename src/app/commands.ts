@@ -57,6 +57,7 @@ import {
   targetInventoryProblems,
   targetSelectionProblem,
 } from "../domain/problems.js";
+import type { UiAcquisitionProfile } from "../evidence/ui-hierarchy.js";
 import type { UiHierarchyLockOptions } from "../evidence/ui-hierarchy-capture.js";
 import { classifyLogRecord, type LogAttribution, type LogFinding } from "../logs/classifier.js";
 import { locateAdb, locateExecutable } from "../platform/executable.js";
@@ -89,6 +90,7 @@ export interface CommandConfig {
   adbPort?: number;
   timeoutMs?: number;
   uiTimeoutMs?: number;
+  uiAcquisitionProfile?: UiAcquisitionProfile;
   targetSelector?: string;
   targetTransportId?: string;
   targetAliases?: Readonly<Record<string, string>>;

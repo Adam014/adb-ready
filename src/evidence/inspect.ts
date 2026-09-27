@@ -2,11 +2,9 @@ import {
   type AppInfoData,
   context,
   finish,
-  operationProblem,
   problem,
   readyTarget,
   runApp,
-  succeeded,
 } from "../app/app-commands.js";
 import {
   type CommandConfig,
@@ -17,12 +15,11 @@ import {
 } from "../app/commands.js";
 import type { Problem } from "../domain/contracts.js";
 import {
-  classifyUiHierarchyFailure,
   DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
-  parseUiHierarchy,
+  type UiAcquisitionProfile,
   type UiHierarchySnapshot,
 } from "./ui-hierarchy.js";
-import { captureUiHierarchy } from "./ui-hierarchy-capture.js";
+import { acquireUiSnapshot } from "./ui-hierarchy-capture.js";
 
 export interface InspectAppRequest {
   cwd: string;
@@ -52,6 +49,7 @@ export interface InspectAppData {
 }
 
 export interface InspectUiRequest {
+  acquisition?: UiAcquisitionProfile;
   interactiveOnly?: boolean;
   maxDepth?: number;
 }
@@ -165,7 +163,7 @@ export async function runInspectUi(
   }
   const ready = await readyTarget(current, config, dependencies, problems, signal);
   if (ready === undefined) return finish<InspectUiData>(current, null, problems);
-  const captured = await captureUiHierarchy({
+  const captured = await acquireUiSnapshot({
     client: ready.client,
     target: ready.target,
     targetIdentity: ready.selected.target.id,
@@ -174,6 +172,11 @@ export async function runInspectUi(
     message: "Reading Android accessibility hierarchy",
     timeoutMs: config.uiTimeoutMs ?? config.timeoutMs ?? DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
     maxBufferBytes: 8 * 1024 * 1024,
+    ...(request.acquisition === undefined ? {} : { profile: request.acquisition }),
+    ...(request.interactiveOnly === undefined ? {} : { interactiveOnly: request.interactiveOnly }),
+    maxDepth,
+    maxNodes: 2_000,
+    ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
     ...(signal === undefined ? {} : { signal }),
     lock: {
       ...dependencies.uiHierarchyLock,
@@ -187,46 +190,9 @@ export async function runInspectUi(
     problems.push(captured.problem);
     return finish<InspectUiData>(current, null, problems);
   }
-  const hierarchy = {
-    ...captured.observation,
-    value: parseUiHierarchy(captured.observation.value, {
-      ...(request.interactiveOnly === undefined
-        ? {}
-        : { interactiveOnly: request.interactiveOnly }),
-      maxDepth,
-      maxNodes: 2_000,
-    }),
-  };
-  if (!succeeded(hierarchy.process)) {
-    problems.push(operationProblem("inspect-ui", hierarchy, current.commandId));
-    return finish<InspectUiData>(current, null, problems);
-  }
-  if (hierarchy.value === undefined) {
-    const reason = classifyUiHierarchyFailure(
-      `${hierarchy.process.stdout}\n${hierarchy.process.stderr}`,
-    );
-    problems.push(
-      reason === "not-idle"
-        ? problem(
-            "UI_NOT_IDLE",
-            "evidence.ui.busy",
-            "Android UI did not become idle for hierarchy capture.",
-            "Continuous accessibility events or animation prevented the platform UI Automator dumper from returning a hierarchy. Pause the changing UI or navigate to a stable screen, then retry.",
-            current.commandId,
-          )
-        : problem(
-            "UI_HIERARCHY_UNAVAILABLE",
-            "evidence.ui",
-            "Android returned no readable UI hierarchy.",
-            "The current window may be secure, inaccessible, or unsupported by UI Automator.",
-            current.commandId,
-          ),
-    );
-    return finish<InspectUiData>(current, null, problems);
-  }
   return finish(
     current,
-    { kind: "ui", selected: ready.selected, snapshot: hierarchy.value },
+    { kind: "ui", selected: ready.selected, snapshot: captured.snapshot },
     problems,
   );
 }

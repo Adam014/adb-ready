@@ -68,4 +68,25 @@ describe("UI hierarchy snapshots", () => {
     expect(parseUiHierarchy(XML, { maxNodes: 2 })?.digest).toBe(parseUiHierarchy(XML)?.digest);
     expect(parseUiHierarchy("secure window returned no hierarchy")).toBeUndefined();
   });
+
+  test("reports filtering and observed framework limitations without guessing completeness", () => {
+    const snapshot = parseUiHierarchy(
+      `
+      <hierarchy>
+        <node class="android.webkit.WebView" package="com.example" />
+        <node class="androidx.compose.ui.platform.ComposeView" package="com.example" />
+        <node class="io.flutter.embedding.android.FlutterView" package="com.example" />
+      </hierarchy>`,
+      { interactiveOnly: true, maxDepth: 12, maxNodes: 50 },
+    );
+    expect(snapshot).toMatchObject({
+      complete: true,
+      filtering: { interactiveOnly: true, maxDepth: 12, maxNodes: 50 },
+      limitations: [
+        { code: "WEBVIEW_CONTENT_MAY_BE_INCOMPLETE" },
+        { code: "COMPOSE_SEMANTICS_DEPENDENT" },
+        { code: "FLUTTER_SEMANTICS_DEPENDENT" },
+      ],
+    });
+  });
 });

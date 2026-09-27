@@ -313,11 +313,16 @@ Init options:
 `,
   inspect: `Usage:
   adb-ready inspect app [APP_ID] [options]
-  adb-ready inspect ui [--interactive-only] [--max-depth N] [options]
+  adb-ready inspect ui [--interactive-only] [--max-depth N] [--acquisition PROFILE] [options]
 
 Returns a bounded evidence snapshot for one deterministic target. UI text and
 hierarchy data are explicitly marked sensitive and are never added to AI
 context implicitly.
+
+UI acquisition profiles:
+  balanced              One bounded fresh platform-idle snapshot (default)
+  fast                  One snapshot with a maximum 3-second budget
+  strict                Require two matching snapshots within three attempts
 `,
   ui: `Usage:
   adb-ready ui tap REF|X Y [--dry-run]
@@ -344,7 +349,8 @@ contains and prefix matching with state qualifiers. Typed text uses a
 conservative shell-safe character set. fill and clear require Android's safe
 key-combination capability and verify the observable field value afterward.
 Scroll directions describe content navigation (down reveals content below);
-swipe directions describe the physical finger gesture.
+swipe directions describe the physical finger gesture. Add --acquisition
+balanced|fast|strict to control the semantic observation contract.
 `,
   devices: `Usage: adb-ready devices [options]
 
@@ -1204,6 +1210,7 @@ async function runCliInternal(
       : { rememberedHardwareSerial: lastTarget.hardwareSerial }),
     ...(options.remembered ? { rememberedOnly: true } : {}),
     ...(options.dryRun ? { dryRun: true } : {}),
+    ...(options.uiAcquisition === undefined ? {} : { uiAcquisitionProfile: options.uiAcquisition }),
   };
   let androidCapabilities: AndroidCapabilities | undefined;
   let preparedAvd: PreparedAvd | undefined;
@@ -1787,6 +1794,9 @@ async function runCliInternal(
         options.inspectKind === "ui"
           ? await runInspectUi(
               {
+                ...(options.uiAcquisition === undefined
+                  ? {}
+                  : { acquisition: options.uiAcquisition }),
                 ...(options.interactiveOnly === undefined
                   ? {}
                   : { interactiveOnly: options.interactiveOnly }),

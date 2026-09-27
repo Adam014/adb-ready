@@ -619,6 +619,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     "Return a bounded sensitive accessibility snapshot with digest-scoped references.",
     z.object({
       ...targetHandleShape,
+      acquisition: z.enum(["balanced", "fast", "strict"]).optional(),
       interactiveOnly: z.boolean().optional(),
       maxDepth: z.number().int().min(1).max(100).optional(),
     }),
@@ -628,9 +629,10 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       idempotentHint: true,
       targetBound: true,
     },
-    async ({ interactiveOnly, maxDepth }, signal, loaded) => {
+    async ({ acquisition, interactiveOnly, maxDepth }, signal, loaded) => {
       const execution = await runInspectUi(
         {
+          ...(acquisition === undefined ? {} : { acquisition }),
           ...(interactiveOnly === undefined ? {} : { interactiveOnly }),
           ...(maxDepth === undefined ? {} : { maxDepth }),
         },
