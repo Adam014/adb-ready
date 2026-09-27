@@ -702,6 +702,114 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       ),
   );
   register(
+    "inspect_keyboard",
+    "Read software-keyboard visibility only when Android InputMethodManager and WindowInsets agree.",
+    z.object({ ...targetHandleShape }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async (_input, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "keyboard", operation: "status" },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "dismiss_keyboard",
+    "Dismiss a software keyboard only after two Android visibility signals agree, then verify that both report hidden.",
+    z.object({ ...targetHandleShape, dryRun: z.boolean().optional() }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "keyboard",
+              operation: "dismiss",
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "inspect_permission_dialog",
+    "Inspect one standard Android runtime-permission dialog and return only its exact available decisions.",
+    z.object({ ...targetHandleShape }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async (_input, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            { action: "permission", operation: "inspect" },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
+    "respond_to_permission_dialog",
+    "Choose one exact action exposed by a standard Android runtime-permission dialog, then verify a fresh changed dialog state.",
+    z.object({
+      ...targetHandleShape,
+      decision: z.enum([
+        "allow",
+        "allow-always",
+        "allow-once",
+        "allow-while-using",
+        "deny",
+        "deny-and-dont-ask-again",
+      ]),
+      dryRun: z.boolean().optional(),
+    }),
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      targetBound: true,
+    },
+    async ({ decision, dryRun }, signal, loaded) =>
+      toolResult(
+        (
+          await runUiAction(
+            {
+              action: "permission",
+              operation: "respond",
+              decision,
+              ...(dryRun === undefined ? {} : { dryRun }),
+            },
+            commandConfig(loaded, bound),
+            dependencies,
+            signal,
+          )
+        ).result,
+      ),
+  );
+  register(
     "find_ui",
     "Find bounded UI nodes by semantic id, text, description, class, or package selectors without changing device state.",
     z.object({

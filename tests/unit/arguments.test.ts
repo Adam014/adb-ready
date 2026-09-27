@@ -761,6 +761,31 @@ describe("parseArguments", () => {
       ok: true,
       options: { uiRequest: { action: "press", key: "back" } },
     });
+    expect(parseArguments(["ui", "keyboard", "status"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "keyboard", operation: "status" } },
+    });
+    expect(parseArguments(["ui", "keyboard", "dismiss", "--dry-run"])).toMatchObject({
+      ok: true,
+      options: {
+        dryRun: true,
+        uiRequest: { action: "keyboard", operation: "dismiss" },
+      },
+    });
+    expect(parseArguments(["ui", "permission", "inspect"])).toMatchObject({
+      ok: true,
+      options: { uiRequest: { action: "permission", operation: "inspect" } },
+    });
+    expect(parseArguments(["ui", "permission", "respond", "allow-once"])).toMatchObject({
+      ok: true,
+      options: {
+        uiRequest: { action: "permission", operation: "respond", decision: "allow-once" },
+      },
+    });
+    expect(parseArguments(["ui", "permission", "respond", "yes"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
     expect(
       parseArguments([
         "ui",

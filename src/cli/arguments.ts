@@ -180,7 +180,9 @@ const UI_ACTIONS = new Set<UiAction>([
   "fill",
   "find",
   "get",
+  "keyboard",
   "long-press",
+  "permission",
   "press",
   "scroll",
   "swipe",
@@ -531,7 +533,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           if (!UI_ACTIONS.has(argument as UiAction)) {
             return failure(
               "CLI_INVALID_VALUE",
-              `Invalid UI action: ${argument}. Expected audit, find, get, assert, compare, tap, long-press, scroll, swipe, fill, clear, type, press, or wait.`,
+              `Invalid UI action: ${argument}. Expected audit, find, get, assert, compare, tap, long-press, scroll, swipe, fill, clear, type, press, keyboard, permission, or wait.`,
             );
           }
           uiAction = argument as UiAction;
@@ -1334,7 +1336,36 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       value !== undefined && /^(?:class|desc|id|package|text)=.{1,256}$/u.test(value)
         ? value
         : undefined;
-    if (uiAction === "audit") {
+    if (uiAction === "keyboard") {
+      const operation = uiOperands[0];
+      if (uiOperands.length !== 1 || (operation !== "status" && operation !== "dismiss")) {
+        return failure("CLI_USAGE", "ui keyboard requires status or dismiss.");
+      }
+      uiRequest = { action: "keyboard", operation };
+    } else if (uiAction === "permission") {
+      const operation = uiOperands[0];
+      if (uiOperands.length === 1 && operation === "inspect") {
+        uiRequest = { action: "permission", operation: "inspect" };
+      } else if (uiOperands.length === 2 && operation === "respond") {
+        const decision = uiOperands[1];
+        if (
+          decision !== "allow" &&
+          decision !== "allow-always" &&
+          decision !== "allow-once" &&
+          decision !== "allow-while-using" &&
+          decision !== "deny" &&
+          decision !== "deny-and-dont-ask-again"
+        ) {
+          return failure(
+            "CLI_INVALID_VALUE",
+            "ui permission respond requires allow, allow-always, allow-once, allow-while-using, deny, or deny-and-dont-ask-again.",
+          );
+        }
+        uiRequest = { action: "permission", operation: "respond", decision };
+      } else {
+        return failure("CLI_USAGE", "ui permission requires inspect or respond DECISION.");
+      }
+    } else if (uiAction === "audit") {
       if (uiOperands.length !== 0) return failure("CLI_USAGE", "ui audit accepts no operands.");
       uiRequest = { action: "audit" };
     } else if (uiAction === "tap" || uiAction === "long-press") {
@@ -1533,7 +1564,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       uiAction === "find" ||
       uiAction === "get" ||
       uiAction === "assert" ||
-      uiAction === "compare")
+      uiAction === "compare" ||
+      (uiAction === "keyboard" &&
+        uiRequest?.action === "keyboard" &&
+        uiRequest.operation === "status") ||
+      (uiAction === "permission" &&
+        uiRequest?.action === "permission" &&
+        uiRequest.operation === "inspect"))
   ) {
     return failure(
       "CLI_USAGE",

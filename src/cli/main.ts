@@ -81,6 +81,7 @@ import {
   runInspectUi,
 } from "../evidence/inspect.js";
 import { runUiAction, type UiActionData } from "../evidence/ui-actions.js";
+import type { UiSystemActionData } from "../evidence/ui-system-actions.js";
 import { locateAdb } from "../platform/executable.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import type { SessionStoreOptions } from "../state/session-store.js";
@@ -343,6 +344,10 @@ UI acquisition profiles:
   adb-ready ui type TEXT [--input-mode auto|ascii|unicode] [--typing-delay MS] [--submit] [--dry-run]
   printf '%s' "$SECRET" | adb-ready ui type --secret-stdin [--input-mode auto|ascii|unicode]
   adb-ready ui press back|home|enter|menu|volume-up|volume-down [--dry-run]
+  adb-ready ui keyboard status
+  adb-ready ui keyboard dismiss [--dry-run]
+  adb-ready ui permission inspect
+  adb-ready ui permission respond allow|allow-always|allow-once|allow-while-using|deny|deny-and-dont-ask-again [--dry-run]
   adb-ready ui wait SELECTOR [--state visible|gone] [--timeout 5s]
 
 Uses fresh UI evidence before every mutation. A ui:* reference is accepted only
@@ -356,7 +361,10 @@ of argv and retained results. fill and clear require Android's safe
 key-combination capability and verify the observable field value afterward.
 Scroll directions describe content navigation (down reveals content below);
 swipe directions describe the physical finger gesture. Add --acquisition
-balanced|fast|strict to control the semantic observation contract.
+balanced|fast|strict to control the semantic observation contract. Keyboard
+dismissal requires matching InputMethodManager and WindowInsets signals before
+and after Back. Permission responses use exact PermissionController resource
+IDs, never localized button text; unsupported OEM or system dialogs fail closed.
 `,
   devices: `Usage: adb-ready devices [options]
 
@@ -1700,6 +1708,7 @@ async function runCliInternal(
     | CommandExecution<InspectAppData>
     | CommandExecution<InspectUiData>
     | CommandExecution<UiActionData>
+    | CommandExecution<UiActionData | UiSystemActionData>
     | CommandExecution<AutomationRunData>
     | Awaited<ReturnType<typeof runConnect>>
     | Awaited<ReturnType<typeof runDev>>
@@ -2420,6 +2429,7 @@ async function runCliInternal(
         | InspectUiData
         | OpenData
         | UiActionData
+        | UiSystemActionData
         | null;
       if (data !== null && "selected" in data) {
         selectedTarget = {
