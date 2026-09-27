@@ -32,6 +32,12 @@ import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { acquireTargetLease, type TargetLeaseOptions } from "../state/target-lease.js";
 import { selectTarget } from "../target/selection.js";
 import { getAgentDevTask, startAgentDevTask, stopAgentDevTask } from "./dev-task.js";
+import {
+  type McpProfile,
+  metadataForTool,
+  profileCapabilityDocument,
+  profileIncludesTool,
+} from "./profiles.js";
 import { SerialTaskQueue } from "./serial-task-queue.js";
 
 interface BoundTarget {
@@ -58,6 +64,7 @@ export interface McpServerOptions {
   targetLease?: false | TargetLeaseOptions;
   version?: string;
   cliPath?: string;
+  profile?: McpProfile;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -169,6 +176,7 @@ async function projectFile(root: string, requested: string): Promise<string | un
 }
 
 export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
+  const profile = options.profile ?? "full";
   let bound: BoundTarget | undefined;
   const uiSnapshots = new Map<string, CachedUiSnapshot>();
   const toolQueue = new SerialTaskQueue();
@@ -215,6 +223,8 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       loaded: LoadedConfig,
     ) => Promise<CallToolResult>,
   ) => {
+    if (!profileIncludesTool(profile, name)) return;
+    const metadata = metadataForTool(name);
     server.registerTool(
       name,
       {
@@ -226,6 +236,21 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
           destructiveHint: annotations.destructiveHint,
           idempotentHint: annotations.idempotentHint,
           openWorldHint: false,
+        },
+        _meta: {
+          "dev.adbready/tool": {
+            category: metadata.category,
+            profiles: metadata.profiles,
+            safety: annotations.destructiveHint
+              ? "destructive"
+              : annotations.readOnlyHint
+                ? "read-only"
+                : "mutating",
+            sensitiveData: metadata.sensitiveData,
+            destructive: annotations.destructiveHint,
+            idempotent: annotations.idempotentHint,
+            targetBound: annotations.targetBound === true,
+          },
         },
       },
       async (input, context) =>
@@ -275,6 +300,35 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         }),
     );
   };
+
+  const capabilityMetadata = metadataForTool("get_capabilities");
+  server.registerTool(
+    "get_capabilities",
+    {
+      description:
+        "Describe the active MCP profile, discoverable tool profiles, and negotiated long-running task compatibility.",
+      inputSchema: z.object({}),
+      outputSchema: resultEnvelopeSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      _meta: {
+        "dev.adbready/tool": {
+          category: capabilityMetadata.category,
+          profiles: capabilityMetadata.profiles,
+          safety: "read-only",
+          sensitiveData: false,
+          destructive: false,
+          idempotent: true,
+          targetBound: false,
+        },
+      },
+    },
+    async () => successResult("mcp get_capabilities", profileCapabilityDocument(profile)),
+  );
 
   register(
     "doctor",
@@ -1453,6 +1507,20 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     async ({ sessionId, budget }) =>
       toolResult((await runContextCommand(sessionId, budget, sessionStore)).result),
+  );
+  server.registerResource(
+    "capabilities",
+    "adb-ready://capabilities",
+    { title: "ADB Ready MCP capabilities", mimeType: "application/json" },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(profileCapabilityDocument(profile)),
+        },
+      ],
+    }),
   );
   server.registerResource(
     "current-targets",

@@ -152,6 +152,7 @@ if (packed.exitCode !== 0) {
       "package.json",
       "schema/config-v1.schema.json",
       "schema/agent-tools-v1.json",
+      "skills/adb-ready/SKILL.md",
     ]) {
       requireCondition(files.includes(required), `packed artifact is missing ${required}`);
     }

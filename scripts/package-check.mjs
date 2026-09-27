@@ -54,6 +54,7 @@ for (const required of [
   "package.json",
   "schema/config-v1.schema.json",
   "schema/agent-tools-v1.json",
+  "skills/adb-ready/SKILL.md",
 ]) {
   if (!files.includes(required)) {
     throw new Error(`required package file is missing: ${required}`);

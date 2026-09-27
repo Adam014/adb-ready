@@ -87,6 +87,12 @@ const requests = (protocolVersion) => {
         ...envelope,
       },
     },
+    {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "get_capabilities", arguments: {}, ...envelope },
+    },
   ];
 };
 const requiredTools = [
@@ -101,6 +107,7 @@ const requiredTools = [
   "ensure_ready",
   "fill_ui",
   "find_ui",
+  "get_capabilities",
   "get_dev_session",
   "get_session_problems",
   "get_ui",
@@ -165,7 +172,7 @@ async function verifyRuntime(runtime, protocolVersion) {
   child.stdout.on("data", (chunk) => {
     stdout = collect(stdout, chunk);
     const completedResponses = stdout.split(/\r?\n/u).filter(Boolean).length;
-    if (!stdinEnded && completedResponses >= 8) {
+    if (!stdinEnded && completedResponses >= 9) {
       stdinEnded = true;
       child.stdin.end();
     }
@@ -200,8 +207,8 @@ async function verifyRuntime(runtime, protocolVersion) {
   }
 
   const lines = stdout.trim().split(/\r?\n/u);
-  if (lines.length !== 8) {
-    throw new Error(`${runtime.name} MCP returned ${String(lines.length)} responses, expected 8`);
+  if (lines.length !== 9) {
+    throw new Error(`${runtime.name} MCP returned ${String(lines.length)} responses, expected 9`);
   }
   const responses = lines.map((line) => JSON.parse(line));
   const opening = responses.find(({ id }) => id === 1)?.result;
@@ -212,6 +219,7 @@ async function verifyRuntime(runtime, protocolVersion) {
   const targetResource = responses.find(({ id }) => id === 6)?.result?.contents?.[0];
   const screenshot = responses.find(({ id }) => id === 7)?.result;
   const staleHandle = responses.find(({ id }) => id === 8)?.result;
+  const capabilities = responses.find(({ id }) => id === 9)?.result;
   const modern = protocolVersion === "2026-07-28";
   const serverInfo = modern
     ? opening?._meta?.["io.modelcontextprotocol/serverInfo"]
@@ -272,8 +280,28 @@ async function verifyRuntime(runtime, protocolVersion) {
   ) {
     throw new Error(`${runtime.name} MCP tools are missing schemas or safety annotations`);
   }
+  if (
+    tools.some(
+      ({ _meta }) =>
+        typeof _meta?.["dev.adbready/tool"]?.safety !== "string" ||
+        !Array.isArray(_meta?.["dev.adbready/tool"]?.profiles),
+    )
+  ) {
+    throw new Error(`${runtime.name} MCP tools are missing ADB Ready capability metadata`);
+  }
   if (!resources.some(({ uri }) => uri === "adb-ready://sessions")) {
     throw new Error(`${runtime.name} MCP saved-session resource is missing`);
+  }
+  if (!resources.some(({ uri }) => uri === "adb-ready://capabilities")) {
+    throw new Error(`${runtime.name} MCP capability resource is missing`);
+  }
+  if (
+    capabilities?.isError === true ||
+    capabilities?.structuredContent?.data?.activeProfile !== "full" ||
+    capabilities?.structuredContent?.data?.tasks?.advertised !== false ||
+    JSON.stringify(opening).includes('"tasks"')
+  ) {
+    throw new Error(`${runtime.name} MCP capability or unnegotiated Tasks contract is invalid`);
   }
   if (
     readiness?.isError === true ||

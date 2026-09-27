@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { detectProject } from "../dev/project.js";
 import type { Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ExitCode, SCHEMA_VERSION } from "../domain/contracts.js";
+import type { McpProfile } from "./profiles.js";
 
 export type AgentClient = "claude-code" | "codex" | "cursor" | "generic" | "vscode" | "windsurf";
 
@@ -11,6 +13,12 @@ export interface AgentSetupOptions {
   client: AgentClient;
   cwd: string;
   dryRun?: boolean;
+  mcpProfile?: McpProfile;
+}
+
+export interface AgentSkillSetupData {
+  path: string;
+  status: "created" | "planned" | "unchanged" | "updated";
 }
 
 export interface AgentSetupData {
@@ -21,12 +29,15 @@ export interface AgentSetupData {
   scope: "project" | "user-defined" | "user";
   content: string;
   next: string;
+  profile: McpProfile;
+  skill?: AgentSkillSetupData;
 }
 
 export interface AgentSetupDependencies {
   clock?: () => Date;
   detectProject?: typeof detectProject;
   idFactory?: () => string;
+  loadSkill?: () => Promise<string>;
 }
 
 interface SetupPlan {
@@ -77,21 +88,35 @@ function setupProblem(code: string, summary: string, detail: string): Problem {
   };
 }
 
-function serverEntry(entrypoint: string, environment?: Record<string, string>) {
+function mcpArgs(entrypoint: string, profile: McpProfile): string[] {
+  return [entrypoint, "mcp", ...(profile === "full" ? [] : ["--mcp-profile", profile])];
+}
+
+function serverEntry(
+  entrypoint: string,
+  profile: McpProfile,
+  environment?: Record<string, string>,
+) {
   return {
     command: "node",
-    args: [entrypoint, "mcp"],
+    args: mcpArgs(entrypoint, profile),
     ...(environment === undefined ? {} : { env: environment }),
   };
 }
 
-function jsonContent(root: "mcpServers" | "servers", entrypoint: string): string {
+function jsonContent(
+  root: "mcpServers" | "servers",
+  entrypoint: string,
+  profile: McpProfile,
+): string {
   const entry =
-    root === "servers" ? { type: "stdio", ...serverEntry(entrypoint) } : serverEntry(entrypoint);
+    root === "servers"
+      ? { type: "stdio", ...serverEntry(entrypoint, profile) }
+      : serverEntry(entrypoint, profile);
   return `${JSON.stringify({ [root]: { "adb-ready": entry } }, null, 2)}\n`;
 }
 
-function planFor(client: AgentClient, root: string): SetupPlan {
+function planFor(client: AgentClient, root: string, profile: McpProfile): SetupPlan {
   const relativeEntrypoint = "./node_modules/adb-ready/dist/cli.js";
   if (client === "codex") {
     return {
@@ -100,9 +125,13 @@ function planFor(client: AgentClient, root: string): SetupPlan {
       format: "toml",
       scope: "project",
       manual: false,
-      content:
-        '[mcp_servers.adb_ready]\ncommand = "node"\nargs = ["./node_modules/adb-ready/dist/cli.js", "mcp"]\ndefault_tools_approval_mode = "writes"\n',
-      next: "Restart the Codex client, then inspect its MCP server list.",
+      content: `[mcp_servers.adb_ready]\ncommand = "node"\nargs = [${mcpArgs(
+        relativeEntrypoint,
+        profile,
+      )
+        .map((value) => JSON.stringify(value))
+        .join(", ")}]\ndefault_tools_approval_mode = "writes"\n`,
+      next: "Trust this project in Codex, restart the client, then inspect its MCP server list.",
     };
   }
   if (client === "claude-code") {
@@ -113,7 +142,7 @@ function planFor(client: AgentClient, root: string): SetupPlan {
       scope: "project",
       manual: false,
       jsonRoot: "mcpServers",
-      content: jsonContent("mcpServers", relativeEntrypoint),
+      content: jsonContent("mcpServers", relativeEntrypoint, profile),
       next: "Start Claude Code in this project and approve the project MCP server.",
     };
   }
@@ -125,7 +154,7 @@ function planFor(client: AgentClient, root: string): SetupPlan {
       scope: "project",
       manual: false,
       jsonRoot: "mcpServers",
-      content: jsonContent("mcpServers", relativeEntrypoint),
+      content: jsonContent("mcpServers", relativeEntrypoint, profile),
       next: "Reload Cursor and enable adb-ready in MCP settings.",
     };
   }
@@ -137,7 +166,11 @@ function planFor(client: AgentClient, root: string): SetupPlan {
       scope: "project",
       manual: false,
       jsonRoot: "servers",
-      content: jsonContent("servers", "$" + "{workspaceFolder}/node_modules/adb-ready/dist/cli.js"),
+      content: jsonContent(
+        "servers",
+        "$" + "{workspaceFolder}/node_modules/adb-ready/dist/cli.js",
+        profile,
+      ),
       next: "Run MCP: List Servers in VS Code and start adb-ready.",
     };
   }
@@ -146,7 +179,9 @@ function planFor(client: AgentClient, root: string): SetupPlan {
     const content = `${JSON.stringify(
       {
         mcpServers: {
-          "adb-ready": serverEntry(entrypoint, { ADB_READY_MCP_PROJECT_ROOT: root }),
+          "adb-ready": serverEntry(entrypoint, profile, {
+            ADB_READY_MCP_PROJECT_ROOT: root,
+          }),
         },
       },
       null,
@@ -166,7 +201,7 @@ function planFor(client: AgentClient, root: string): SetupPlan {
     format: "json",
     scope: "user-defined",
     manual: true,
-    content: jsonContent("mcpServers", relativeEntrypoint),
+    content: jsonContent("mcpServers", relativeEntrypoint, profile),
     next: "Add the entry as a local stdio server started from this project root.",
   };
 }
@@ -213,27 +248,83 @@ function mergeToml(existing: string, plan: SetupPlan): { content?: string; uncha
   return { content: `${existing}${separator}${plan.content}`, unchanged: false };
 }
 
-async function atomicWrite(destination: string, content: string, exists: boolean): Promise<void> {
-  await mkdir(path.dirname(destination), { recursive: true });
-  const temporary = path.join(path.dirname(destination), `.adb-ready-agent-${randomUUID()}.tmp`);
-  const backup = path.join(path.dirname(destination), `.adb-ready-agent-${randomUUID()}.backup`);
-  let movedExisting = false;
+interface PlannedWrite {
+  destination: string;
+  content: string;
+  exists: boolean;
+}
+
+async function atomicWriteSet(writes: PlannedWrite[]): Promise<void> {
+  const staged = writes.map((write) => ({
+    ...write,
+    temporary: path.join(path.dirname(write.destination), `.adb-ready-agent-${randomUUID()}.tmp`),
+    backup: path.join(path.dirname(write.destination), `.adb-ready-agent-${randomUUID()}.backup`),
+    movedExisting: false,
+    installed: false,
+  }));
   try {
-    await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o644 });
-    if (exists) {
-      await rename(destination, backup);
-      movedExisting = true;
+    for (const item of staged) {
+      await mkdir(path.dirname(item.destination), { recursive: true });
+      await writeFile(item.temporary, item.content, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o644,
+      });
     }
-    await rename(temporary, destination);
-    if (movedExisting) await rm(backup, { force: true });
+    for (const item of staged) {
+      if (item.exists) {
+        await rename(item.destination, item.backup);
+        item.movedExisting = true;
+      }
+      await rename(item.temporary, item.destination);
+      item.installed = true;
+    }
+    await Promise.all(staged.map(async ({ backup }) => await rm(backup, { force: true })));
   } catch (error) {
-    await rm(temporary, { force: true }).catch(() => undefined);
-    if (movedExisting) {
-      await rm(destination, { force: true }).catch(() => undefined);
-      await rename(backup, destination).catch(() => undefined);
+    for (const item of [...staged].reverse()) {
+      await rm(item.temporary, { force: true }).catch(() => undefined);
+      if (item.installed) await rm(item.destination, { force: true }).catch(() => undefined);
+      if (item.movedExisting) {
+        await rename(item.backup, item.destination).catch(() => undefined);
+      }
     }
     throw error;
   }
+}
+
+async function loadPackagedSkill(): Promise<string> {
+  const directory = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(directory, "../skills/adb-ready/SKILL.md"),
+    path.resolve(directory, "../../skills/adb-ready/SKILL.md"),
+  ];
+  for (const candidate of candidates) {
+    const content = await readFile(candidate, "utf8").catch(() => undefined);
+    if (content !== undefined) return content;
+  }
+  throw new Error("packaged-skill-not-found");
+}
+
+function skillPath(client: AgentClient, root: string): { path: string; displayPath: string } {
+  const relative =
+    client === "claude-code"
+      ? path.join(".claude", "skills", "adb-ready", "SKILL.md")
+      : path.join(".agents", "skills", "adb-ready", "SKILL.md");
+  return { path: path.join(root, relative), displayPath: relative.split(path.sep).join("/") };
+}
+
+async function unsafeAncestor(root: string, destination: string): Promise<boolean> {
+  const relativeParent = path.relative(root, path.dirname(destination));
+  if (relativeParent === "" || relativeParent === ".") return false;
+  if (relativeParent === ".." || relativeParent.startsWith(`..${path.sep}`)) return true;
+  let current = root;
+  for (const segment of relativeParent.split(path.sep)) {
+    current = path.join(current, segment);
+    const entry = await lstat(current).catch(() => undefined);
+    if (entry === undefined) return false;
+    if (entry.isSymbolicLink() || !entry.isDirectory()) return true;
+  }
+  return false;
 }
 
 export async function runAgentSetup(
@@ -241,7 +332,8 @@ export async function runAgentSetup(
   dependencies: AgentSetupDependencies = {},
 ): Promise<{ result: ResultEnvelope<AgentSetupData>; exitCode: number }> {
   const project = await (dependencies.detectProject ?? detectProject)({ cwd: options.cwd });
-  const plan = planFor(options.client, project.root);
+  const profile = options.mcpProfile ?? "full";
+  const plan = planFor(options.client, project.root, profile);
   if (plan.manual || plan.path === undefined) {
     return execute(
       {
@@ -252,6 +344,7 @@ export async function runAgentSetup(
         scope: plan.scope,
         content: plan.content,
         next: plan.next,
+        profile,
       },
       [],
       dependencies,
@@ -259,6 +352,19 @@ export async function runAgentSetup(
   }
 
   const destination = plan.path;
+  if (await unsafeAncestor(project.root, destination)) {
+    return execute(
+      null,
+      [
+        setupProblem(
+          "AGENT_CONFIG_UNSAFE_PARENT",
+          "The agent configuration parent path is not a safe project directory.",
+          `Review ${plan.displayPath}; ADB Ready will not write through linked or non-directory parents.`,
+        ),
+      ],
+      dependencies,
+    );
+  }
   const entry = await lstat(destination).catch(() => undefined);
   if (entry?.isSymbolicLink()) {
     return execute(
@@ -324,9 +430,92 @@ export async function runAgentSetup(
     }
   }
 
-  if (!unchanged && !options.dryRun) {
+  const plannedSkill = skillPath(options.client, project.root);
+  if (await unsafeAncestor(project.root, plannedSkill.path)) {
+    return execute(
+      null,
+      [
+        setupProblem(
+          "AGENT_SKILL_UNSAFE_PARENT",
+          "The agent skill parent path is not a safe project directory.",
+          `Review ${plannedSkill.displayPath}; ADB Ready will not write through linked or non-directory parents.`,
+        ),
+      ],
+      dependencies,
+    );
+  }
+  const skillEntry = await lstat(plannedSkill.path).catch(() => undefined);
+  if (skillEntry?.isSymbolicLink()) {
+    return execute(
+      null,
+      [
+        setupProblem(
+          "AGENT_SKILL_SYMLINK",
+          "The agent skill path is a symbolic link.",
+          "Review the linked skill manually; ADB Ready will not replace or follow it.",
+        ),
+      ],
+      dependencies,
+    );
+  }
+  if (skillEntry !== undefined && !skillEntry.isFile()) {
+    return execute(
+      null,
+      [
+        setupProblem(
+          "AGENT_SKILL_INVALID_PATH",
+          "The agent skill path is not a regular file.",
+          `Move the existing ${plannedSkill.displayPath} entry and retry.`,
+        ),
+      ],
+      dependencies,
+    );
+  }
+  let skillContent: string;
+  try {
+    skillContent = await (dependencies.loadSkill ?? loadPackagedSkill)();
+  } catch {
+    return execute(
+      null,
+      [
+        setupProblem(
+          "AGENT_SKILL_UNAVAILABLE",
+          "The packaged ADB Ready Agent Skill is unavailable.",
+          "Reinstall adb-ready and retry the project setup.",
+        ),
+      ],
+      dependencies,
+    );
+  }
+  const skillExists = skillEntry?.isFile() === true;
+  const existingSkill = skillExists ? await readFile(plannedSkill.path, "utf8") : undefined;
+  if (
+    existingSkill !== undefined &&
+    existingSkill !== skillContent &&
+    !existingSkill.includes("<!-- Generated by adb-ready ")
+  ) {
+    return execute(
+      null,
+      [
+        setupProblem(
+          "AGENT_SKILL_CONFLICT",
+          "A custom adb-ready Agent Skill already exists.",
+          `Review ${plannedSkill.displayPath}; ADB Ready will not overwrite a custom skill.`,
+        ),
+      ],
+      dependencies,
+    );
+  }
+  const skillUnchanged = existingSkill === skillContent;
+
+  if ((!unchanged || !skillUnchanged) && !options.dryRun) {
     try {
-      await atomicWrite(destination, content, exists);
+      await atomicWriteSet([
+        ...(!unchanged ? [{ destination, content, exists }] : []),
+        ...(!skillUnchanged
+          ? [{ destination: plannedSkill.path, content: skillContent, exists: skillExists }]
+          : []),
+      ]);
       if (plan.format === "json") JSON.parse(await readFile(destination, "utf8"));
     } catch {
       return execute(
@@ -346,12 +535,30 @@ export async function runAgentSetup(
   return execute(
     {
       client: options.client,
-      status: unchanged ? "unchanged" : options.dryRun ? "planned" : exists ? "updated" : "created",
+      status:
+        unchanged && skillUnchanged
+          ? "unchanged"
+          : options.dryRun
+            ? "planned"
+            : exists
+              ? "updated"
+              : "created",
       path: plan.displayPath,
       format: plan.format,
       scope: plan.scope,
       content,
       next: plan.next,
+      profile,
+      skill: {
+        path: plannedSkill.displayPath,
+        status: skillUnchanged
+          ? "unchanged"
+          : options.dryRun
+            ? "planned"
+            : skillExists
+              ? "updated"
+              : "created",
+      },
     },
     [],
     dependencies,

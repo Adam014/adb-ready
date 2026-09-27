@@ -39,6 +39,12 @@ selection fails. An MCP connection binds one target and refuses a silent
 switch. UI references include the current hierarchy digest and are revalidated
 immediately before mutation.
 
+MCP profiles narrow discovery for a workflow and reduce accidental tool
+selection, but they are not an authorization boundary. Every exposed operation
+still applies its own target, path, input, ownership, and destructive-action
+checks. Tool annotations and namespaced sensitivity metadata help clients choose
+approval policy; they are hints, not security enforcement.
+
 ### Unsafe file mutation
 
 Capture and setup paths are constrained to the project, checked for unsafe

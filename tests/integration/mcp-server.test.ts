@@ -8,6 +8,7 @@ import {
   type JSONRPCResponse,
 } from "@modelcontextprotocol/server";
 import { createAdbReadyMcpServer } from "../../src/agent/mcp-server.js";
+import { MCP_PROFILE_TOOLS, type McpProfile } from "../../src/agent/profiles.js";
 import type { CommandDependencies } from "../../src/app/commands.js";
 import { encodePng } from "../../src/evidence/png.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
@@ -238,11 +239,12 @@ describe("MCP server protocol", () => {
       expect(initialized).toMatchObject({
         serverInfo: { name: "adb-ready", version: "0.3.3-test" },
       });
+      expect((initialized.capabilities as Record<string, unknown>).tasks).toBeUndefined();
       await peer.notify("notifications/initialized");
 
       const listed = resultBody(await peer.request("tools/list"));
-      expect(listed.tools).toBeArrayOfSize(36);
-      expect(resultBody(await peer.request("resources/list")).resources).toBeArrayOfSize(2);
+      expect(listed.tools).toBeArrayOfSize(37);
+      expect(resultBody(await peer.request("resources/list")).resources).toBeArrayOfSize(3);
       expect(
         resultBody(await peer.request("resources/templates/list")).resourceTemplates,
       ).toBeArrayOfSize(3);
@@ -440,6 +442,7 @@ describe("MCP server protocol", () => {
       }
 
       for (const uri of [
+        "adb-ready://capabilities",
         "adb-ready://targets",
         "adb-ready://sessions",
         "adb-ready://sessions/missing",
@@ -451,6 +454,53 @@ describe("MCP server protocol", () => {
     } finally {
       await server.close();
       await peer.close();
+    }
+  });
+
+  test("exposes only the selected profile with capability and safety metadata", async () => {
+    for (const profile of ["debug", "session", "ui"] as McpProfile[]) {
+      const root = await mkdtemp(path.join(tmpdir(), `adb-ready-mcp-${profile}-`));
+      roots.push(root);
+      const server = createAdbReadyMcpServer({
+        cwd: root,
+        env: { ...process.env, XDG_CONFIG_HOME: path.join(root, "config") },
+        dependencies: dependencies(),
+        targetLease: false,
+        profile,
+      });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const peer = new McpPeer(clientTransport);
+      await peer.start();
+      await server.connect(serverTransport);
+      try {
+        await peer.request("initialize", {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: `adb-ready-${profile}-tests`, version: "1" },
+        });
+        await peer.notify("notifications/initialized");
+        const listed = resultBody(await peer.request("tools/list")) as {
+          tools: Array<Record<string, unknown>>;
+        };
+        expect(listed.tools.map(({ name }) => name).sort()).toEqual(
+          [...MCP_PROFILE_TOOLS[profile]].sort(),
+        );
+        for (const tool of listed.tools) {
+          expect(tool).toHaveProperty("annotations.openWorldHint", false);
+          expect(tool).toMatchObject({
+            _meta: { "dev.adbready/tool": { profiles: expect.arrayContaining([profile]) } },
+          });
+        }
+        expect(await callTool(peer, "get_capabilities")).toMatchObject({
+          structuredContent: {
+            ok: true,
+            data: { activeProfile: profile, tasks: { advertised: false } },
+          },
+        });
+      } finally {
+        await server.close();
+        await peer.close();
+      }
     }
   });
 
@@ -529,6 +579,9 @@ describe("MCP server protocol", () => {
         clientInfo: { name: "adb-ready-tests", version: "1" },
       });
       await peer.notify("notifications/initialized");
+      expect(await callTool(peer, "get_capabilities")).toMatchObject({
+        structuredContent: { ok: true, data: { activeProfile: "full" } },
+      });
       expect(await callTool(peer, "doctor")).toMatchObject({
         structuredContent: { ok: false, problems: [{ code: "MCP_CONFIG_INVALID" }] },
       });
