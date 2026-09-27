@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import path from "node:path";
 import { AdbClient, type AdbTargetSelector } from "../adb/client.js";
@@ -10,6 +10,12 @@ import {
   parseAdbNetworkEndpoint,
   parseLogcatThreadtimeLine,
 } from "../adb/parsers.js";
+import {
+  classifyExternalVerifier,
+  type ExternalVerifierAdapter,
+  type ExternalVerifierOutcome,
+  prepareExternalVerifier,
+} from "../automation/external-verifier.js";
 import {
   createAdbReadinessProbe,
   type ReadinessAssertion,
@@ -124,6 +130,7 @@ export interface CommandDependencies {
   resolveExpoLaunch?: typeof resolveExpoLaunch;
   sendExpoControl?: typeof sendExpoControl;
   uiHierarchyLock?: UiHierarchyLockOptions;
+  prepareVerifierDirectory?: (directory: string) => Promise<void>;
 }
 
 export interface CommandExecution<T> {
@@ -2252,6 +2259,13 @@ export interface DevData {
   readiness?: ReadinessResult;
   verification?: {
     command: DevData["command"];
+    /** Present when a verifier adapter was resolved by ADB Ready 0.6 or newer. */
+    adapter?: ExternalVerifierAdapter;
+    /** Present when a verifier result was classified by ADB Ready 0.6 or newer. */
+    outcome?: ExternalVerifierOutcome;
+    targetArgument?: string | null;
+    artifactReferences?: string[];
+    nativeArtifactsOmitted?: number;
     passed: boolean;
     exitCode: number | null;
     signal: NodeJS.Signals | null;
@@ -4445,22 +4459,38 @@ export async function runDev(
   if (signal?.aborted === true || !readyHooksSucceeded) verificationController.abort();
   const abortVerification = () => verificationController.abort();
   signal?.addEventListener("abort", abortVerification, { once: true });
-  const verificationCommand =
+  const requestedVerificationCommand =
     options.verification === undefined
       ? undefined
       : bindTargetSerial(options.verification.command, selected.transport.serial);
+  const preparedVerifier =
+    requestedVerificationCommand === undefined
+      ? undefined
+      : prepareExternalVerifier(requestedVerificationCommand, {
+          cwd: project.root,
+          serial: selected.transport.serial,
+          sessionId,
+        });
+  const verificationCommand = preparedVerifier?.command;
   const verificationCommandData =
-    verificationCommand === undefined
+    verificationCommand === undefined || preparedVerifier === undefined
       ? undefined
       : {
           executable: redactedPath(verificationCommand.executable),
-          args: verificationCommand.args.map((argument) => redactText(argument).value),
+          args: verificationCommand.args.map(
+            (argument) =>
+              redactText(argument.replaceAll(preparedVerifier.artifactDirectory, "{evidence.dir}"))
+                .value,
+          ),
           cwd: redactedPath(path.resolve(project.root, verificationCommand.cwd ?? ".")),
-          envKeys: ["ADB_READY_TARGET_SERIAL", "ANDROID_SERIAL"],
+          envKeys: ["ADB_READY_TARGET_SERIAL", "ADB_READY_VERIFIER_OUTPUT_DIR", "ANDROID_SERIAL"],
         };
   const verificationLines = (stream: "stderr" | "stdout") =>
     new TextLineBuffer((line) => {
-      const safe = redactText(line).value;
+      const safe = redactText(line, {
+        additionalLiterals:
+          preparedVerifier === undefined ? [] : [preparedVerifier.artifactDirectory],
+      }).value;
       bus.emit({
         type: `verification.${stream}`,
         source: `verification.${stream}`,
@@ -4474,7 +4504,7 @@ export async function runDev(
   const verificationStdout = verificationLines("stdout");
   const verificationStderr = verificationLines("stderr");
   const verificationPromise =
-    verificationCommand === undefined || !readyHooksSucceeded
+    verificationCommand === undefined || preparedVerifier === undefined || !readyHooksSucceeded
       ? undefined
       : (() => {
           bus.emit({
@@ -4485,24 +4515,84 @@ export async function runDev(
             correlation: targetCorrelation,
             data: verificationCommandData ?? {},
           });
-          return runner({
-            executable: verificationCommand.executable,
-            args: verificationCommand.args,
-            cwd: path.resolve(project.root, verificationCommand.cwd ?? "."),
-            env: {
-              ...verificationCommand.env,
-              ADB_READY_TARGET_SERIAL: selected.transport.serial,
-              ANDROID_SERIAL: selected.transport.serial,
-            },
-            signal: verificationController.signal,
-            stdin: "ignore",
-            ...(options.verification?.timeoutMs === undefined
-              ? {}
-              : { timeoutMs: options.verification.timeoutMs }),
-            maxBufferBytes: 4 * 1024 * 1024,
-            onStdoutChunk: (chunk) => verificationStdout.push(chunk),
-            onStderrChunk: (chunk) => verificationStderr.push(chunk),
-          });
+          if (preparedVerifier.targetMismatch !== undefined) {
+            const now = new Date().toISOString();
+            return Promise.resolve({
+              executable: verificationCommand.executable,
+              args: verificationCommand.args,
+              startedAt: now,
+              finishedAt: now,
+              durationMs: 0,
+              exitCode: 2,
+              signal: null,
+              stdout: "",
+              stderr: `Verifier target ${preparedVerifier.targetMismatch} does not match the selected target.`,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+              timedOut: false,
+              aborted: false,
+              stoppedAfterIdle: false,
+              killEscalated: false,
+              spawnError: {
+                code: "ADB_READY_TARGET_MISMATCH",
+                message: "The verifier requested a different Android target.",
+              },
+            } satisfies ProcessResult);
+          }
+          return (
+            dependencies.prepareVerifierDirectory ??
+            (async (directory: string) => await mkdir(directory, { mode: 0o700 }))
+          )(preparedVerifier.artifactDirectory)
+            .then(
+              async () =>
+                await runner({
+                  executable: verificationCommand.executable,
+                  args: verificationCommand.args,
+                  cwd: path.resolve(project.root, verificationCommand.cwd ?? "."),
+                  env: {
+                    ...verificationCommand.env,
+                    ADB_READY_TARGET_SERIAL: selected.transport.serial,
+                    ANDROID_SERIAL: selected.transport.serial,
+                    ADB_READY_VERIFIER_OUTPUT_DIR: preparedVerifier.artifactDirectory,
+                  },
+                  signal: verificationController.signal,
+                  stdin: "ignore",
+                  ...(options.verification?.timeoutMs === undefined
+                    ? {}
+                    : { timeoutMs: options.verification.timeoutMs }),
+                  maxBufferBytes: 4 * 1024 * 1024,
+                  onStdoutChunk: (chunk) => verificationStdout.push(chunk),
+                  onStderrChunk: (chunk) => verificationStderr.push(chunk),
+                }),
+            )
+            .catch((error: unknown) => {
+              const now = new Date().toISOString();
+              const caught = error instanceof Error ? error : new Error(String(error));
+              return {
+                executable: verificationCommand.executable,
+                args: verificationCommand.args,
+                startedAt: now,
+                finishedAt: now,
+                durationMs: 0,
+                exitCode: null,
+                signal: null,
+                stdout: "",
+                stderr: caught.message,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                timedOut: false,
+                aborted: false,
+                stoppedAfterIdle: false,
+                killEscalated: false,
+                spawnError: {
+                  code:
+                    "code" in caught && typeof caught.code === "string"
+                      ? caught.code
+                      : "ADB_READY_VERIFIER_PREPARATION_FAILED",
+                  message: caught.message,
+                },
+              } satisfies ProcessResult;
+            });
         })();
   let resolveSessionAbort: (() => void) | undefined;
   const sessionAbortPromise = new Promise<"signal">((resolve) => {
@@ -4554,14 +4644,34 @@ export async function runDev(
       : {
           command: verificationCommandData,
           passed: processSucceeded(verificationProcess),
+          adapter: preparedVerifier?.adapter ?? "generic",
+          outcome: classifyExternalVerifier({
+            adapter: preparedVerifier?.adapter ?? "generic",
+            passed: processSucceeded(verificationProcess),
+            timedOut: verificationProcess.timedOut,
+            aborted: verificationProcess.aborted,
+            unavailable: verificationProcess.spawnError?.code === "ENOENT",
+            targetFailed: recoverySummary.failed,
+            preparationFailed:
+              verificationProcess.spawnError !== undefined &&
+              verificationProcess.spawnError.code !== "ENOENT",
+          }),
+          targetArgument: preparedVerifier?.targetArgument ?? null,
+          artifactReferences: preparedVerifier?.artifactReferences ?? [],
           exitCode: verificationProcess.exitCode,
           signal: verificationProcess.signal,
           durationMs: verificationProcess.durationMs,
           timedOut: verificationProcess.timedOut,
           stdoutTruncated: verificationProcess.stdoutTruncated,
           stderrTruncated: verificationProcess.stderrTruncated,
-          stdout: redactText(verificationProcess.stdout).value,
-          stderr: redactText(verificationProcess.stderr).value,
+          stdout: redactText(verificationProcess.stdout, {
+            additionalLiterals:
+              preparedVerifier === undefined ? [] : [preparedVerifier.artifactDirectory],
+          }).value,
+          stderr: redactText(verificationProcess.stderr, {
+            additionalLiterals:
+              preparedVerifier === undefined ? [] : [preparedVerifier.artifactDirectory],
+          }).value,
         };
   if (verification !== undefined) {
     bus.emit({
@@ -4695,10 +4805,22 @@ export async function runDev(
     problems.push(childProcessFailureProblem(child, context.commandId, !reachedReady));
   }
   if (verification !== undefined && !verification.passed && signal?.aborted !== true) {
+    const category =
+      verification.outcome === "assertion-failed"
+        ? "verification.assertion"
+        : verification.outcome === "timed-out"
+          ? "verification.timeout"
+          : verification.outcome === "unavailable"
+            ? "verification.unavailable"
+            : verification.outcome === "target-failed"
+              ? "verification.target"
+              : verification.outcome === "cancelled"
+                ? "verification.cancelled"
+                : "verification.tool";
     problems.push(
       commandProblem(
         ProblemCode.VerificationFailed,
-        "verification.exit",
+        category,
         verification.timedOut
           ? "The verification command exceeded its timeout."
           : "The verification command failed.",

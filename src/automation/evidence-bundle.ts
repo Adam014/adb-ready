@@ -5,6 +5,7 @@ import type { CommandExecution, DevData } from "../app/commands.js";
 import { redactText } from "../core/redaction.js";
 import type { AdbReadyEvent, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
+import { collectNativeVerifierArtifacts, verifierArtifactDirectory } from "./external-verifier.js";
 
 export type RunOutcome =
   | "cancelled"
@@ -224,6 +225,36 @@ export async function writeEvidenceBundle(
     session?.selected?.target.hardwareSerial,
     session?.selected?.target.id,
   ].filter((value): value is string => value !== undefined && value !== "");
+  const verifierDirectory =
+    session === null
+      ? undefined
+      : verifierArtifactDirectory(session.project.root, session.sessionId);
+  const native =
+    verifierDirectory === undefined
+      ? { artifacts: [], omitted: 0 }
+      : await collectNativeVerifierArtifacts(verifierDirectory);
+  const nativeNames = native.artifacts.map(({ relativePath }, index) => {
+    const basename = path
+      .basename(relativePath)
+      .replace(/[^A-Za-z0-9._-]+/gu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(0, 100);
+    return path.posix.join(
+      "verifier-native",
+      `${String(index + 1).padStart(3, "0")}-${basename === "" ? "artifact" : basename}`,
+    );
+  });
+  const normalizedSession =
+    session?.verification === undefined
+      ? session
+      : {
+          ...session,
+          verification: {
+            ...session.verification,
+            artifactReferences: nativeNames,
+            ...(native.omitted === 0 ? {} : { nativeArtifactsOmitted: native.omitted }),
+          },
+        };
   const initialBundle: EvidenceBundle = {
     schemaVersion: 1,
     runId,
@@ -237,7 +268,7 @@ export async function writeEvidenceBundle(
       ...execution.result,
       data: {
         outcome: runOutcome,
-        session,
+        session: normalizedSession,
         evidence: initialBundle,
         ...(options.automation === undefined ? {} : { automation: options.automation }),
       },
@@ -245,7 +276,7 @@ export async function writeEvidenceBundle(
     literals,
   );
   const events = finalResult.data?.session?.journal.events ?? [];
-  const files = new Map<string, { content: string; sensitive: boolean }>([
+  const files = new Map<string, { content: string | Uint8Array; sensitive: boolean }>([
     [
       "events.ndjson",
       {
@@ -293,16 +324,35 @@ export async function writeEvidenceBundle(
     ["junit.xml", { content: junit(finalResult, runOutcome), sensitive: true }],
     ["github-summary.md", { content: githubSummary(finalResult), sensitive: true }],
   ]);
+  const textExtensions = new Set([".html", ".json", ".log", ".txt", ".xml"]);
+  for (const [index, artifact] of native.artifacts.entries()) {
+    const name = nativeNames[index];
+    if (name === undefined) continue;
+    const content = textExtensions.has(path.extname(artifact.relativePath).toLowerCase())
+      ? redactText(new TextDecoder().decode(artifact.content), { additionalLiterals: literals })
+          .value
+      : artifact.content;
+    files.set(name, { content, sensitive: true });
+  }
 
   await mkdir(parent, { recursive: true, mode: 0o700 });
   await mkdir(temporary, { mode: 0o700 });
   try {
     const manifestFiles: EvidenceFile[] = [];
     for (const [name, file] of files) {
-      await writeFile(path.join(temporary, name), file.content, { encoding: "utf8", mode: 0o600 });
+      const destination = path.join(temporary, name);
+      await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+      await writeFile(destination, file.content, {
+        ...(typeof file.content === "string" ? { encoding: "utf8" as const } : {}),
+        mode: 0o600,
+      });
+      const bytes =
+        typeof file.content === "string"
+          ? Buffer.byteLength(file.content, "utf8")
+          : file.content.byteLength;
       manifestFiles.push({
         path: name,
-        bytes: Buffer.byteLength(file.content, "utf8"),
+        bytes,
         sha256: createHash("sha256").update(file.content).digest("hex"),
         sensitive: file.sensitive,
       });
@@ -343,6 +393,9 @@ export async function writeEvidenceBundle(
       },
     );
     await rename(temporary, artifactPath);
+    if (verifierDirectory !== undefined) {
+      await rm(verifierDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
     if (options.githubStepSummaryPath !== undefined) {
       await appendFile(options.githubStepSummaryPath, `\n${githubSummary(result)}\n`, {
         encoding: "utf8",
@@ -354,6 +407,9 @@ export async function writeEvidenceBundle(
     };
   } catch (error) {
     await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
+    if (verifierDirectory !== undefined) {
+      await rm(verifierDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
     throw error;
   }
 }

@@ -439,7 +439,14 @@ describe("result renderer", () => {
           },
         ],
       },
-      verification: { passed: true, timedOut: false, exitCode: 0 },
+      verification: {
+        passed: true,
+        timedOut: false,
+        exitCode: 0,
+        adapter: "maestro",
+        outcome: "passed",
+        artifactReferences: ["verifier-native/001-report.xml"],
+      },
       journal: { events: [], dropped: 0 },
       recovery: { failed: false, recoveries: 0 },
     };
@@ -821,6 +828,12 @@ describe("result renderer", () => {
       renderResult(envelope, { format: "plain", capabilities, sink: plain });
       expect(human.value).toContain(item.expected);
       expect(plain.value).toContain(`command=${item.command}`);
+      if (item.command === "run") {
+        expect(human.value).toContain("maestro · passed");
+        expect(plain.value).toContain("verification_adapter=maestro");
+        expect(plain.value).toContain("verification_outcome=passed");
+        expect(plain.value).toContain("verification_artifacts=verifier-native/001-report.xml");
+      }
       if (item.command === "ui tap") {
         expect(human.value).toContain("Matched      Apps · ui:aaaaaaaaaaaa:2");
         expect(plain.value).toContain("matched_ref=ui:aaaaaaaaaaaa:2");

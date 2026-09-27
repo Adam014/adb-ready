@@ -158,7 +158,7 @@ leaving a development server open:
 
 ```bash
 adb-ready run --preset expo --run-timeout 10m -- \
-  maestro '--device={target.serial}' test .maestro/smoke.yaml
+  maestro test .maestro/smoke.yaml
 ```
 
 ADB Ready selects and exclusively leases one target, prepares the configured
@@ -168,9 +168,23 @@ retries a failed product assertion as if it were an infrastructure failure.
 
 The literal `{target.serial}` inside a verification argument is replaced only
 after ADB Ready selects and leases the target. The child also receives the
-same value as `ANDROID_SERIAL` and `ADB_READY_TARGET_SERIAL`. This keeps tools
-such as Maestro pinned explicitly without invoking a shell; tools that already
-honor `ANDROID_SERIAL`, including common Gradle/ADB workflows, need no placeholder.
+same value as `ANDROID_SERIAL` and `ADB_READY_TARGET_SERIAL`, plus a private
+`ADB_READY_VERIFIER_OUTPUT_DIR` for native artifacts. Tools that already honor
+`ANDROID_SERIAL`, including common Gradle/ADB workflows, need no placeholder.
+
+For a direct `maestro test` command, ADB Ready uses Maestro's supported global
+`--device` option to bind the leased serial. Unless the command already names
+them, it also requests Maestro JUnit, test-output, and debug-output files. An
+explicit Maestro device that differs from the leased target fails before
+Maestro starts; ADB Ready never silently retargets it.
+
+Android CLI does not expose a single `journey run` command or a stable Journey
+report format. Journeys are evaluated by an agent using the installed Android
+CLI skill. ADB Ready therefore does not invent such a command. It keeps the
+agent workflow target-bound through MCP, and when a finite verifier invokes
+the official `android layout` or `android screen capture` primitives directly,
+ADB Ready supplies their supported `--device` and `--output` options. The
+Journey XML remains owned by Android CLI and the agent.
 
 Every executed run prints the path to a project-local evidence directory under
 `.adb-ready/artifacts/`. Its manifest references the structured result,
@@ -196,7 +210,7 @@ adb-ready run \
   --artifact android/app/build/outputs/apk/debug/app-debug.apk \
   --package com.example.app \
   --run-timeout 10m \
-  -- maestro '--device={target.serial}' test .maestro/smoke.yaml
+  -- maestro test .maestro/smoke.yaml
 
 adb-ready run --avd Pixel_9_API_36 --deploy --variant debug -- \
   ./gradlew connectedDebugAndroidTest
@@ -225,8 +239,18 @@ line-oriented `artifact_*`, `deployment_*`, and `emulator_*` fields; `--json`
 and `--ndjson` retain the complete structured automation data.
 
 The evidence manifest also includes the verifier's bounded, redacted native
-stdout and stderr. Preparation failures still publish the same result,
-problems, JUnit, and evidence contract after owned-resource cleanup.
+stdout and stderr. Supported native JUnit, screenshots, videos, logs, JSON,
+and HTML reports are copied under `verifier-native/`, checksummed, marked
+sensitive, and bounded to 100 files, 20 MiB per file, and 50 MiB total.
+Symlinks and unsupported file types are never followed. Text artifacts are
+redacted; binary screenshots and video remain local sensitive evidence.
+Preparation failures still publish the same result, problems, JUnit, and
+evidence contract after owned-resource cleanup.
+
+Structured results classify the verifier independently as `passed`,
+`assertion-failed`, `tool-failed`, `target-failed`, `timed-out`, `cancelled`,
+or `unavailable`. This classification uses process and session state, not
+fragile parsing of human log messages.
 
 ## CI example
 
