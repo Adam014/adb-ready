@@ -105,6 +105,7 @@ const requiredTools = [
   "get_session_problems",
   "get_ui",
   "inspect_app",
+  "inspect_failures",
   "inspect_keyboard",
   "inspect_permission_dialog",
   "inspect_ui",

@@ -105,6 +105,7 @@ export interface CliOptions {
   logTail?: number;
   logDump?: boolean;
   logMaxRecords?: number;
+  failureSinceMs?: number;
   contextBudget?: number;
   contextSinceMs?: number;
   contextOnly?: ContextFilter[];
@@ -127,7 +128,7 @@ export interface CliOptions {
   screenshotCrop?: { x: number; y: number; width: number; height: number };
   screenshotMaxWidth?: number;
   screenshotMaxHeight?: number;
-  inspectKind?: "app" | "ui";
+  inspectKind?: "app" | "failures" | "ui";
   interactiveOnly?: boolean;
   maxDepth?: number;
   uiAcquisition?: UiAcquisitionProfile;
@@ -368,6 +369,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let logTail: number | undefined;
   let logDump = false;
   let logMaxRecords: number | undefined;
+  let failureSinceMs: number | undefined;
   let contextBudget: number | undefined;
   let contextSinceMs: number | undefined;
   const contextOnly: ContextFilter[] = [];
@@ -522,12 +524,16 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       if (
         command === "inspect" &&
         inspectKind === undefined &&
-        (argument === "app" || argument === "ui")
+        (argument === "app" || argument === "failures" || argument === "ui")
       ) {
         inspectKind = argument;
         continue;
       }
-      if (command === "inspect" && inspectKind === "app" && appId === undefined) {
+      if (
+        command === "inspect" &&
+        (inspectKind === "app" || inspectKind === "failures") &&
+        appId === undefined
+      ) {
         if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/u.test(argument)) {
           return failure("CLI_INVALID_VALUE", `Invalid Android application ID: ${argument}.`);
         }
@@ -802,7 +808,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     } else if (option === "--since") {
       const value = readValue();
       if (typeof value !== "string") return value;
-      if (command === "context" || command === "sessions") {
+      if (command === "context" || command === "sessions" || command === "inspect") {
         const parsed = parseDuration(value);
         if (parsed === undefined) {
           return failure(
@@ -812,7 +818,8 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           );
         }
         if (command === "context") contextSinceMs = parsed;
-        else sessionSinceMs = parsed;
+        else if (command === "sessions") sessionSinceMs = parsed;
+        else failureSinceMs = parsed;
       } else if (!/^[0-9][0-9 .:-]{0,63}$/u.test(value)) {
         return failure(
           "CLI_INVALID_VALUE",
@@ -1241,13 +1248,13 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       command === "dev" ||
       command === "open" ||
       command === "run" ||
-      (command === "inspect" && inspectKind === "app")
+      (command === "inspect" && (inspectKind === "app" || inspectKind === "failures"))
     )
       appId = packageOption;
     else
       return failure(
         "CLI_USAGE",
-        "--package can only be used with app, dev, inspect app, logs, open, or run deployment.",
+        "--package can only be used with app, dev, inspect app/failures, logs, open, or run deployment.",
       );
   }
   if (command === "apps") packageScope ??= "user";
@@ -1361,7 +1368,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     return failure("CLI_USAGE", "capture requires screenshot or screen-record.");
   }
   if (command === "inspect" && inspectKind === undefined) {
-    return failure("CLI_USAGE", "inspect requires app or ui.");
+    return failure("CLI_USAGE", "inspect requires app, failures, or ui.");
   }
   let uiRequest: UiActionRequest | undefined;
   if (command === "ui") {
@@ -1730,9 +1737,20 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       logSince !== undefined ||
       logTail !== undefined ||
       logDump ||
-      logMaxRecords !== undefined)
+      (logMaxRecords !== undefined && !(command === "inspect" && inspectKind === "failures")))
   ) {
     return failure("CLI_USAGE", "Log filtering options can only be used with the logs command.");
+  }
+  if (failureSinceMs !== undefined && (command !== "inspect" || inspectKind !== "failures")) {
+    return failure("CLI_USAGE", "--since duration can only be used with inspect failures.");
+  }
+  if (
+    command === "inspect" &&
+    inspectKind === "failures" &&
+    logMaxRecords !== undefined &&
+    logMaxRecords > 100
+  ) {
+    return failure("CLI_INVALID_VALUE", "inspect failures --max-records must be from 1 to 100.");
   }
   if (logPackage !== undefined && logPid !== undefined) {
     return failure("CLI_USAGE", "--package and --pid cannot be combined.");
@@ -1827,6 +1845,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(logTail === undefined ? {} : { logTail }),
       ...(logDump ? { logDump: true } : {}),
       ...(logMaxRecords === undefined ? {} : { logMaxRecords }),
+      ...(failureSinceMs === undefined ? {} : { failureSinceMs }),
       ...(contextBudget === undefined ? {} : { contextBudget }),
       ...(contextSinceMs === undefined ? {} : { contextSinceMs }),
       ...(contextOnly.length === 0 ? {} : { contextOnly: [...new Set(contextOnly)] }),

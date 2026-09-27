@@ -62,6 +62,40 @@ and never promoted to application problems. A configured `app.android.package`
 or `dev --package APP_ID` scopes the stream directly; Expo sessions retarget it
 to the package that Android resolves for the verified launch URL.
 
+## Correlated crash, ANR, and native evidence
+
+Inspect one installed application across Android's available failure sources:
+
+```bash
+adb-ready inspect failures com.example.app
+adb-ready inspect failures --package com.example.app --since 30m --max-records 25 --json
+```
+
+This read-only workflow verifies the selected package and target, records the
+UID and current PID when Android exposes them, uses the target's own clock and
+UTC offset, then correlates a bounded recent window from:
+
+- package-scoped `ApplicationExitInfo` exposed by ActivityManager;
+- UID-scoped `main`, `system`, and `crash` logcat buffers;
+- exact package/process matches in supported app crash, native crash, and ANR
+  DropBox tags.
+
+Java/Kotlin exceptions, native crashes, React Native fatal errors, and ANRs are
+classified separately. Stable numeric `ApplicationExitInfo` reason codes drive
+classification; its human description remains evidence rather than a parsing
+contract. Old exits outside `--since` and DropBox blocks for other packages are
+excluded. Matching evidence from different Android sources is returned as one
+incident with `corroboratedBy`, rather than inflating one crash into multiple
+findings. The default window is 15 minutes and default result limit is 20;
+accepted bounds are one second to seven days and 1 to 100 incidents.
+
+Android versions and OEM builds do not expose every source equally. The result
+contains an availability, record count, truncation state, and limitation for
+each source. Missing history or a DropBox permission denial does not become a
+false application failure, and unrelated system/process failures are never
+promoted into the selected app's findings. Returned evidence is sensitive and
+redacted before retention or rendering.
+
 ## Session history
 
 Development sessions incrementally persist redacted NDJSON and an atomic

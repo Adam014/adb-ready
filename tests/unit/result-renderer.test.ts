@@ -590,6 +590,48 @@ describe("result renderer", () => {
         expected: "Privacy",
       },
       {
+        command: "inspect failures",
+        data: {
+          kind: "failures",
+          selected,
+          applicationId: "com.example",
+          identity: { uid: 10123, currentPid: 321 },
+          window: {
+            since: "2026-09-10T09:45:00.000Z",
+            until: "2026-09-10T10:00:00.000Z",
+            durationMs: 900_000,
+            deviceUtcOffset: "+0000",
+          },
+          summary: { "java-crash": 1, "native-crash": 0, anr: 0, "react-native": 0 },
+          incidents: [
+            {
+              kind: "java-crash",
+              source: "application-exit-info",
+              summary: "The selected app crashed.",
+              evidence: ["reason=4"],
+            },
+          ],
+          sources: [
+            {
+              name: "application-exit-info",
+              available: true,
+              records: 1,
+              truncated: false,
+            },
+            {
+              name: "dropbox",
+              available: false,
+              records: 0,
+              truncated: false,
+              limitation: "Permission denied.",
+            },
+          ],
+          truncated: false,
+          sensitive: true,
+        },
+        expected: "Java 1 · native 0 · ANR 0 · RN 0",
+      },
+      {
         command: "inspect ui",
         data: {
           kind: "ui",

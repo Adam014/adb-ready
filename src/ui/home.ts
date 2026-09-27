@@ -18,6 +18,7 @@ export type HomeAction =
   | "help"
   | "init"
   | "inspect-app"
+  | "inspect-failures"
   | "inspect-ui"
   | "ui-audit"
   | "logs"
@@ -263,6 +264,11 @@ export async function showHomeScreen(options: HomeScreenOptions): Promise<HomeRe
         value: "inspect-app",
         label: "Inspect project app",
         description: "Collect app state and a small classified log window.",
+      },
+      {
+        value: "inspect-failures",
+        label: "Inspect app failures",
+        description: "Correlate recent crashes, native failures, and ANRs.",
       },
       {
         value: "inspect-ui",

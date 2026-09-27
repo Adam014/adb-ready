@@ -92,8 +92,26 @@ function dependencies(
         request.onStdoutChunk?.(PNG);
         return result(request);
       }
+      if (args.includes("date") && args.includes("+%s%3N")) {
+        return result(request, `${String(Date.parse("2026-09-11T10:00:00.000Z"))}\n`);
+      }
+      if (args.includes("date") && args.includes("+%z")) return result(request, "+0000\n");
+      if (args.includes("exit-info")) {
+        return result(
+          request,
+          "ACTIVITY MANAGER PROCESS EXIT INFO (dumpsys activity exit-info)\n  package: com.example.app\n",
+        );
+      }
+      if (args.includes("dropbox")) {
+        return result(request, "Drop box contents: 0 entries\n(No entries found.)\n");
+      }
       if (args.includes("list") && args.includes("packages")) {
-        return result(request, "package:/data/app/com.example.app/base.apk=com.example.app\n");
+        return result(
+          request,
+          args.includes("-U")
+            ? "package:com.example.app uid:10123\n"
+            : "package:/data/app/com.example.app/base.apk=com.example.app\n",
+        );
       }
       if (args.includes("resolve-activity"))
         return result(request, "com.example.app/.MainActivity\n");
@@ -223,7 +241,7 @@ describe("MCP server protocol", () => {
       await peer.notify("notifications/initialized");
 
       const listed = resultBody(await peer.request("tools/list"));
-      expect(listed.tools).toBeArrayOfSize(35);
+      expect(listed.tools).toBeArrayOfSize(36);
       expect(resultBody(await peer.request("resources/list")).resources).toBeArrayOfSize(2);
       expect(
         resultBody(await peer.request("resources/templates/list")).resourceTemplates,
@@ -295,6 +313,7 @@ describe("MCP server protocol", () => {
         ["install_app", { ...target, path: "app.apk", applicationId: "com.example.app" }],
         ["open_url", { ...target, url: "https://example.com", applicationId: "com.example.app" }],
         ["inspect_app", { ...target, applicationId: "com.example.app" }],
+        ["inspect_failures", { ...target, applicationId: "com.example.app", sinceMs: 60_000 }],
         ["inspect_ui", target],
         ["audit_ui", target],
         ["inspect_keyboard", target],
