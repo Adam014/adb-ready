@@ -122,6 +122,42 @@ describe("problem classification", () => {
     expect(generic.code).toBe(ProblemCode.AdbCommandFailed);
   });
 
+  test("classifies remote routing, protocol, and endpoint preflight failures", () => {
+    const correlation = { commandId: "command-1" };
+    const unreachable = adbProcessProblem("devices", failedProcess(), correlation, {
+      ok: false,
+      kind: "unreachable",
+      message: "unreachable",
+      networkCode: "ECONNREFUSED",
+    });
+    const mismatch = adbProcessProblem("devices", failedProcess(), correlation, {
+      ok: false,
+      kind: "protocol-mismatch",
+      message: "mismatch",
+      expectedProtocolVersion: 41,
+      actualProtocolVersion: 40,
+    });
+    const invalid = adbProcessProblem("devices", failedProcess(), correlation, {
+      ok: false,
+      kind: "invalid-response",
+      message: "invalid",
+    });
+
+    expect(unreachable).toMatchObject({
+      code: ProblemCode.AdbRemoteServerUnreachable,
+      category: "network.route",
+      evidence: [{ field: "networkCode", value: "ECONNREFUSED" }],
+    });
+    expect(mismatch).toMatchObject({
+      code: ProblemCode.AdbRemoteServerProtocolMismatch,
+      actions: [{ risk: "shared-global", automatic: false }],
+    });
+    expect(invalid.code).toBe(ProblemCode.AdbRemoteServerInvalidResponse);
+    expect([...unreachable.actions, ...mismatch.actions, ...invalid.actions]).not.toContainEqual(
+      expect.objectContaining({ automatic: true }),
+    );
+  });
+
   test("classifies a command missing from an older ADB build", () => {
     const problem = adbProcessProblem(
       "pair",

@@ -30,6 +30,10 @@ breaking changes.
   bounded fan-out, required/optional members, fail-fast submission policy,
   owner-recorded lease queueing, deterministic cancellation and stale-owner
   recovery, and aggregate results that preserve every isolated member run.
+- Add a bounded read-only protocol preflight for every explicit ADB server
+  command, with distinct route, invalid-endpoint, timeout, cancellation, and
+  version-mismatch failures that stop before upstream ADB can terminate a
+  mismatched shared server.
 
 ## [0.6.0] - 2026-09-27
 

@@ -10,6 +10,7 @@ import {
   parseAdbNetworkEndpoint,
   parseLogcatThreadtimeLine,
 } from "../adb/parsers.js";
+import type { RemoteAdbServerProbe } from "../adb/remote-server-probe.js";
 import {
   classifyExternalVerifier,
   type ExternalVerifierAdapter,
@@ -114,6 +115,7 @@ export interface CommandDependencies {
   idFactory?: () => string;
   locateAdb?: typeof locateAdb;
   runner?: ProcessRunner;
+  remoteServerProbe?: RemoteAdbServerProbe | false;
   runtime?: () => RuntimeInfo;
   detectProject?: typeof detectProject;
   locateExecutable?: typeof locateExecutable;
@@ -416,19 +418,31 @@ function createClient(
     ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+    ...(dependencies.remoteServerProbe === undefined
+      ? {}
+      : { remoteServerProbe: dependencies.remoteServerProbe }),
     ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
   });
 }
 
 function operationProblem(
   operation: string,
-  observation: { operationId: string; process: ProcessResult },
+  observation: {
+    operationId: string;
+    process: ProcessResult;
+    clientFailure?: import("../adb/client.js").AdbClientFailure;
+  },
   commandId: string,
 ): Problem {
-  return adbProcessProblem(operation, observation.process, {
-    commandId,
-    operationId: observation.operationId,
-  });
+  return adbProcessProblem(
+    operation,
+    observation.process,
+    {
+      commandId,
+      operationId: observation.operationId,
+    },
+    observation.clientFailure,
+  );
 }
 
 interface TargetInspection {
@@ -712,7 +726,10 @@ export async function runDoctor(
   const hostFeatures = await client.hostFeatures(signal);
   if (!processSucceeded(hostFeatures.process)) {
     const problem = operationProblem("host-features", hostFeatures, context.commandId);
-    if (problem.code === ProblemCode.OperationInterrupted) {
+    if (
+      problem.code === ProblemCode.OperationInterrupted ||
+      hostFeatures.clientFailure !== undefined
+    ) {
       problems.push(problem);
       return finish<DoctorData>(context, null, problems);
     }
@@ -734,7 +751,7 @@ export async function runDoctor(
       );
     } else {
       const problem = operationProblem("server-status", status, context.commandId);
-      if (problem.code === ProblemCode.OperationInterrupted) {
+      if (problem.code === ProblemCode.OperationInterrupted || status.clientFailure !== undefined) {
         problems.push(problem);
         return finish<DoctorData>(context, null, problems);
       }
@@ -1854,6 +1871,9 @@ export async function runLogs(
     ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+    ...(dependencies.remoteServerProbe === undefined
+      ? {}
+      : { remoteServerProbe: dependencies.remoteServerProbe }),
     ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
   });
   let resolvedPid = options.pid;
@@ -3125,6 +3145,9 @@ export async function runDev(
     ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+    ...(dependencies.remoteServerProbe === undefined
+      ? {}
+      : { remoteServerProbe: dependencies.remoteServerProbe }),
     idFactory,
   });
   const devices = await discoveryClient.devices(signal);
@@ -3230,6 +3253,9 @@ export async function runDev(
     ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+    ...(dependencies.remoteServerProbe === undefined
+      ? {}
+      : { remoteServerProbe: dependencies.remoteServerProbe }),
     idFactory,
   };
   const client = new AdbClient(clientOptions);

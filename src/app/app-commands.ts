@@ -250,13 +250,22 @@ export function succeeded(result: ProcessResult, accepted: readonly number[] = [
 
 export function operationProblem(
   name: string,
-  observation: { operationId: string; process: ProcessResult },
+  observation: {
+    operationId: string;
+    process: ProcessResult;
+    clientFailure?: import("../adb/client.js").AdbClientFailure;
+  },
   commandId: string,
 ): Problem {
-  return adbProcessProblem(name, observation.process, {
-    commandId,
-    operationId: observation.operationId,
-  });
+  return adbProcessProblem(
+    name,
+    observation.process,
+    {
+      commandId,
+      operationId: observation.operationId,
+    },
+    observation.clientFailure,
+  );
 }
 
 export async function readyTarget(
@@ -320,6 +329,9 @@ export async function readyTarget(
       ...(config.adbPort === undefined ? {} : { port: config.adbPort }),
       ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
       ...(dependencies.runner === undefined ? {} : { runner: dependencies.runner }),
+      ...(dependencies.remoteServerProbe === undefined
+        ? {}
+        : { remoteServerProbe: dependencies.remoteServerProbe }),
       ...(dependencies.idFactory === undefined ? {} : { idFactory: dependencies.idFactory }),
     }),
   };

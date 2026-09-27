@@ -26,6 +26,16 @@ import {
   parseKeyValueLines,
   parseSingleLine,
 } from "./parsers.js";
+import {
+  adbProtocolVersion,
+  probeRemoteAdbServer,
+  type RemoteAdbServerProbe,
+  type RemoteAdbServerProbeResult,
+} from "./remote-server-probe.js";
+
+export type AdbClientFailure =
+  | Exclude<RemoteAdbServerProbeResult, { ok: true }>
+  | { ok: false; kind: "client-version-unavailable"; message: string };
 
 export interface AdbClientOptions {
   executable: string;
@@ -38,12 +48,14 @@ export interface AdbClientOptions {
   runner?: ProcessRunner;
   idFactory?: () => string;
   presentation?: "foreground" | "background";
+  remoteServerProbe?: RemoteAdbServerProbe | false;
 }
 
 export interface AdbObservation<T> {
   operationId: string;
   process: ProcessResult;
   value: T;
+  clientFailure?: AdbClientFailure;
 }
 
 export interface AdbTargetSelector {
@@ -94,15 +106,19 @@ export class AdbClient {
   readonly #options: AdbClientOptions;
   readonly #runner: ProcessRunner;
   readonly #idFactory: () => string;
+  readonly #remoteServerProbe: RemoteAdbServerProbe | false;
+  #expectedProtocolVersion?: Promise<number | undefined>;
 
   constructor(options: AdbClientOptions) {
     this.#options = options;
     this.#runner = options.runner ?? runProcess;
     this.#idFactory = options.idFactory ?? randomUUID;
+    this.#remoteServerProbe =
+      options.remoteServerProbe ?? (options.runner === undefined ? probeRemoteAdbServer : false);
   }
 
   async version(signal?: AbortSignal): Promise<AdbObservation<AdbVersion>> {
-    return await this.#observe(
+    const observation = await this.#observe(
       "version",
       "Checking ADB version",
       ["version"],
@@ -110,6 +126,11 @@ export class AdbClient {
       signal,
       { useServerArguments: false },
     );
+    const protocolVersion = adbProtocolVersion(observation.value.protocolVersion);
+    if (protocolVersion !== undefined) {
+      this.#expectedProtocolVersion = Promise.resolve(protocolVersion);
+    }
+    return observation;
   }
 
   async hostFeatures(signal?: AbortSignal): Promise<AdbObservation<string[]>> {
@@ -304,6 +325,57 @@ export class AdbClient {
     ];
   }
 
+  async #localProtocolVersion(signal?: AbortSignal): Promise<number | undefined> {
+    if (this.#expectedProtocolVersion !== undefined) return await this.#expectedProtocolVersion;
+    this.#expectedProtocolVersion = (async () => {
+      const result = await this.#runner({
+        executable: this.#options.executable,
+        args: ["version"],
+        timeoutMs: Math.min(this.#options.timeoutMs ?? 3_000, 3_000),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (
+        result.spawnError !== undefined ||
+        result.streamError !== undefined ||
+        result.exitCode !== 0 ||
+        result.timedOut ||
+        result.aborted
+      ) {
+        return undefined;
+      }
+      return adbProtocolVersion(parseAdbVersion(result.stdout).protocolVersion);
+    })();
+    return await this.#expectedProtocolVersion;
+  }
+
+  async #remoteSafetyPreflight(signal?: AbortSignal): Promise<AdbClientFailure | undefined> {
+    if (
+      (this.#options.host === undefined && this.#options.port === undefined) ||
+      this.#remoteServerProbe === false
+    ) {
+      return undefined;
+    }
+    const expectedProtocolVersion = await this.#localProtocolVersion(signal);
+    if (signal?.aborted === true) {
+      return { ok: false, kind: "cancelled", message: "Remote ADB preflight was cancelled." };
+    }
+    if (expectedProtocolVersion === undefined) {
+      return {
+        ok: false,
+        kind: "client-version-unavailable",
+        message: "The local ADB protocol version could not be verified safely.",
+      };
+    }
+    const result = await this.#remoteServerProbe({
+      host: this.#options.host ?? "localhost",
+      port: this.#options.port ?? 5037,
+      expectedProtocolVersion,
+      timeoutMs: Math.min(this.#options.timeoutMs ?? 3_000, 3_000),
+      ...(signal === undefined ? {} : { signal }),
+    });
+    return result.ok ? undefined : result;
+  }
+
   async #observe<T>(
     operation: string,
     message: string,
@@ -342,6 +414,46 @@ export class AdbClient {
         ...(background ? { presentation: "background", retention: "transient" } : {}),
       },
     });
+
+    const clientFailure =
+      options.useServerArguments === false ? undefined : await this.#remoteSafetyPreflight(signal);
+    if (clientFailure !== undefined) {
+      const now = new Date().toISOString();
+      const result: ProcessResult = {
+        executable: this.#options.executable,
+        args: finalArgs,
+        startedAt: now,
+        finishedAt: now,
+        durationMs: 0,
+        exitCode: clientFailure.kind === "cancelled" ? null : 1,
+        signal: null,
+        stdout: "",
+        stderr: clientFailure.message,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        timedOut: clientFailure.kind === "timeout",
+        aborted: clientFailure.kind === "cancelled",
+        stoppedAfterIdle: false,
+        killEscalated: false,
+      };
+      this.#options.bus.emit({
+        type: "operation.failed",
+        source: `adb.${operation}`,
+        severity: clientFailure.kind === "cancelled" && background ? "debug" : "error",
+        message:
+          clientFailure.kind === "cancelled" && background
+            ? `${message} cancelled`
+            : `${message} failed`,
+        correlation,
+        data: {
+          ...processMetadata(result),
+          preflight: "remote-server",
+          failure: clientFailure.kind,
+          ...(background ? { presentation: "background" } : {}),
+        },
+      });
+      return { operationId, process: result, value: parse(""), clientFailure };
+    }
 
     const request: ProcessRequest = {
       executable: this.#options.executable,

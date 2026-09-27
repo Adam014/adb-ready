@@ -189,6 +189,83 @@ describe("AdbClient", () => {
     expect(observation.value.platformToolsVersion).toBe("37.0.0");
   });
 
+  test("blocks a mismatched remote server before the ADB client can mutate it", async () => {
+    const requests: ProcessRequest[] = [];
+    let probes = 0;
+    const client = new AdbClient({
+      executable: "adb",
+      host: "lab.internal",
+      port: 5038,
+      bus: new EventBus(),
+      correlation: { commandId: "command-1" },
+      runner: async (request) => {
+        requests.push(request);
+        return processResult({
+          args: [...(request.args ?? [])],
+          stdout: "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n",
+        });
+      },
+      remoteServerProbe: async () => {
+        probes += 1;
+        return {
+          ok: false,
+          kind: "protocol-mismatch",
+          message: "protocol mismatch",
+          expectedProtocolVersion: 41,
+          actualProtocolVersion: 40,
+        };
+      },
+    });
+
+    const observation = await client.devices();
+
+    expect(probes).toBe(1);
+    expect(requests.map(({ args }) => args)).toEqual([["version"]]);
+    expect(observation.clientFailure).toMatchObject({ kind: "protocol-mismatch" });
+    expect(observation.process.exitCode).toBe(1);
+  });
+
+  test("rechecks a remote server before every command and detects replacement", async () => {
+    const requests: ProcessRequest[] = [];
+    let probes = 0;
+    const client = new AdbClient({
+      executable: "adb",
+      host: "lab.internal",
+      port: 5038,
+      bus: new EventBus(),
+      correlation: { commandId: "command-1" },
+      runner: async (request) => {
+        requests.push(request);
+        return processResult({
+          args: [...(request.args ?? [])],
+          stdout: request.args?.includes("version")
+            ? "Android Debug Bridge version 1.0.41\nVersion 37.0.0\n"
+            : "List of devices attached\n",
+        });
+      },
+      remoteServerProbe: async () => {
+        probes += 1;
+        return probes === 1
+          ? { ok: true, protocolVersion: 41 }
+          : {
+              ok: false,
+              kind: "protocol-mismatch",
+              message: "server replaced",
+              expectedProtocolVersion: 41,
+              actualProtocolVersion: 42,
+            };
+      },
+    });
+
+    const first = await client.devices();
+    const second = await client.devices();
+
+    expect(first.clientFailure).toBeUndefined();
+    expect(second.clientFailure).toMatchObject({ kind: "protocol-mismatch" });
+    expect(probes).toBe(2);
+    expect(requests.filter(({ args }) => args?.includes("devices"))).toHaveLength(1);
+  });
+
   test("emits a failed event and retains raw process evidence", async () => {
     const runner: ProcessRunner = async () =>
       processResult({ exitCode: 1, stderr: "cannot connect to daemon" });

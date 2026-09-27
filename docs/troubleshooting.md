@@ -21,6 +21,9 @@ adb-ready context --since 5m --only problems,recovery,logs
 | `ADB_NOT_FOUND` | No usable ADB executable was resolved | Install Platform-Tools or pass `--adb PATH` |
 | `ADB_SERVER_UNAVAILABLE` | The selected local or remote server could not be queried | Check the configured host/port and run `adb start-server` explicitly if appropriate |
 | `ADB_VERSION_MISMATCH` | Client and server report incompatible versions | Align Platform-Tools versions; review before restarting the shared server |
+| `ADB_REMOTE_SERVER_UNREACHABLE` | The explicit server socket has no usable route | Check WSL/container/VM/VPN/firewall/tunnel routing; do not expose port 5037 publicly |
+| `ADB_REMOTE_SERVER_PROTOCOL_MISMATCH` | Remote and local ADB protocols differ | Align Platform-Tools deliberately; ADB Ready will not let upstream ADB kill the shared server |
+| `ADB_REMOTE_SERVER_INVALID_RESPONSE` | The endpoint or local client could not complete the read-only protocol preflight | Verify the host, port, tunnel destination, and local Platform-Tools installation |
 | `TARGET_UNAUTHORIZED` | Android has not authorized this host | Unlock the device and accept its RSA debugging prompt |
 | `TARGET_NO_PERMISSIONS` | The host cannot access the USB device | Fix host USB permissions or rules, then reconnect |
 | `TARGET_OFFLINE` | ADB knows the transport but it is not ready | Check cable/network state and retry `devices` |
