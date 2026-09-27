@@ -204,6 +204,8 @@ adb-ready sessions list --status failed --since 24h --limit 5
 Need a hosted target first? Start from the maintained
 [GitHub Actions emulator workflow](./examples/ci-emulator/), which runs one
 bounded target-locked job and preserves evidence even when verification fails.
+For a dedicated real device, use the manual-only
+[self-hosted physical-device recipe](./examples/ci-physical/).
 
 ## One target. One verified loop.
 

@@ -17,6 +17,8 @@ adb-ready dev --dry-run
 - [`custom/adb-ready.config.json`](./custom/adb-ready.config.json)
 - [`ci-emulator/`](./ci-emulator/) — maintained GitHub-hosted emulator
   acceptance with a finite run and retained failure evidence
+- [`ci-physical/`](./ci-physical/) — manual self-hosted physical-device job
+  with explicit serial selection, host-local leasing, and bounded evidence
 - [`automation/README.md`](./automation/README.md) — one finite AVD, deployment,
   verifier, evidence, and cleanup job
 
