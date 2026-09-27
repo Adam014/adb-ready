@@ -176,7 +176,9 @@ MCP resources keep larger read-only context outside tool calls:
 Every tool advertises an output schema and returns the same versioned result
 envelope used by CLI JSON output. Screenshot capture additionally returns MCP
 `image` content so a vision-capable agent can inspect the pixels directly; the
-verified project-local PNG remains the evidence source of record.
+verified project-local PNG remains the evidence source of record. Agent
+screenshots default to a 1024×1024 maximum and 4 MiB base64 content budget, with
+explicit crop/dimension controls and a deliberate `fullResolution` opt-in.
 
 The npm package also ships `schema/agent-tools-v1.json`, generated from the
 server's real `tools/list` response during every build. Integrations can inspect

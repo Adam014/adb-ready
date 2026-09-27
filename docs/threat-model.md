@@ -52,6 +52,13 @@ redacted. Pairing codes use protected input or stdin and never enter process
 arguments. Screenshots and UI hierarchies require explicit calls and never join
 AI context automatically.
 
+Screenshot capture rejects malformed PNG structure, invalid checksums,
+unsupported encodings, and excessive source dimensions before publishing a
+file. MCP image results are cropped or proportionally bounded by default and
+must fit an encoded payload budget; full-resolution delivery is an explicit
+client choice. These controls bound transport and context size, not the visual
+sensitivity of the selected pixels.
+
 ### Unbounded or misleading automation
 
 Process output, recordings, UI trees, session storage, context, retries, and

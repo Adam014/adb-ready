@@ -33,6 +33,10 @@ breaking changes.
   inspection and responses with fresh post-action verification across CLI and
   MCP. Unknown or ambiguous system UI now fails closed instead of pressing or
   tapping speculatively.
+- Add decoded and checksum-verified PNG evidence with source-pixel crops,
+  proportional dimension limits, capture provenance, and truncation metadata;
+  MCP image results now default to a context-safe 1024×1024 and 4 MiB base64 budget
+  with an explicit full-resolution opt-in.
 
 ## [0.5.1] - 2026-09-25
 

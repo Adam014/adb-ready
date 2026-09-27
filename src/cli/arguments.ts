@@ -124,6 +124,9 @@ export interface CliOptions {
   captureKind?: "screen-record" | "screenshot";
   outputPath?: string;
   durationSeconds?: number;
+  screenshotCrop?: { x: number; y: number; width: number; height: number };
+  screenshotMaxWidth?: number;
+  screenshotMaxHeight?: number;
   inspectKind?: "app" | "ui";
   interactiveOnly?: boolean;
   maxDepth?: number;
@@ -385,6 +388,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let captureKind: CliOptions["captureKind"];
   let outputPath: string | undefined;
   let durationSeconds: number | undefined;
+  let screenshotCrop: CliOptions["screenshotCrop"];
+  let screenshotMaxWidth: number | undefined;
+  let screenshotMaxHeight: number | undefined;
   let inspectKind: CliOptions["inspectKind"];
   let interactiveOnly = false;
   let maxDepth: number | undefined;
@@ -913,6 +919,39 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         );
       }
       durationSeconds = milliseconds / 1_000;
+    } else if (option === "--crop") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parts = value.split(",");
+      if (parts.length !== 4 || parts.some((part) => !/^\d+$/u.test(part))) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid screenshot crop: ${value}. Expected X,Y,WIDTH,HEIGHT.`,
+          option,
+        );
+      }
+      const [x, y, width, height] = parts.map(Number) as [number, number, number, number];
+      if (width < 1 || height < 1 || x + width > 16_384 || y + height > 16_384) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid screenshot crop: ${value}. Use bounded positive dimensions.`,
+          option,
+        );
+      }
+      screenshotCrop = { x, y, width, height };
+    } else if (option === "--max-width" || option === "--max-height") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 16_384) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `${option} must be a whole pixel count from 1 to 16384.`,
+          option,
+        );
+      }
+      if (option === "--max-width") screenshotMaxWidth = parsed;
+      else screenshotMaxHeight = parsed;
     } else if (option === "--interactive-only") {
       interactiveOnly = true;
     } else if (option === "--acquisition") {
@@ -1583,6 +1622,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (durationSeconds !== undefined && (command !== "capture" || captureKind !== "screen-record")) {
     return failure("CLI_USAGE", "--duration can only be used with capture screen-record.");
   }
+  if (
+    (screenshotCrop !== undefined ||
+      screenshotMaxWidth !== undefined ||
+      screenshotMaxHeight !== undefined) &&
+    (command !== "capture" || captureKind !== "screenshot")
+  ) {
+    return failure(
+      "CLI_USAGE",
+      "--crop, --max-width, and --max-height can only be used with capture screenshot.",
+    );
+  }
   if (packageScope !== undefined && command !== "apps") {
     return failure("CLI_USAGE", "--user, --system, and --all can only be used with apps list.");
   }
@@ -1795,6 +1845,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(captureKind === undefined ? {} : { captureKind }),
       ...(outputPath === undefined ? {} : { outputPath }),
       ...(durationSeconds === undefined ? {} : { durationSeconds }),
+      ...(screenshotCrop === undefined ? {} : { screenshotCrop }),
+      ...(screenshotMaxWidth === undefined ? {} : { screenshotMaxWidth }),
+      ...(screenshotMaxHeight === undefined ? {} : { screenshotMaxHeight }),
       ...(inspectKind === undefined ? {} : { inspectKind }),
       ...(interactiveOnly ? { interactiveOnly: true } : {}),
       ...(maxDepth === undefined ? {} : { maxDepth }),

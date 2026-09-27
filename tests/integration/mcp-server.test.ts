@@ -9,10 +9,11 @@ import {
 } from "@modelcontextprotocol/server";
 import { createAdbReadyMcpServer } from "../../src/agent/mcp-server.js";
 import type { CommandDependencies } from "../../src/app/commands.js";
+import { encodePng } from "../../src/evidence/png.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
 
 const UI = `<?xml version="1.0"?><hierarchy><node bounds="[0,0][1080,2400]"><node text="Open" resource-id="com.example:id/open" class="android.widget.Button" clickable="true" long-clickable="true" enabled="true" bounds="[20,100][220,200]" /><node text="old" resource-id="com.example:id/email" class="android.widget.EditText" focusable="true" enabled="true" bounds="[100,300][900,420]" /><node resource-id="com.example:id/list" scrollable="true" enabled="true" bounds="[100,400][900,2000]" /></node></hierarchy>`;
-const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+const PNG = encodePng(2, 2, new Uint8Array(16).fill(127));
 const roots: string[] = [];
 
 afterEach(async () => {

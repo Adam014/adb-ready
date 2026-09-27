@@ -11,6 +11,7 @@ import {
 } from "../../src/cli/main.js";
 import { EventBus } from "../../src/core/event-bus.js";
 import { ExitCode } from "../../src/domain/contracts.js";
+import { encodePng } from "../../src/evidence/png.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
 import { SessionRecorder } from "../../src/state/session-store.js";
 import { acquireTargetLease } from "../../src/state/target-lease.js";
@@ -1986,7 +1987,7 @@ describe("runCli", () => {
     const fixture = dependencies(
       "List of devices attached\nUSB-1 device model:Pixel_9 transport_id:1\n",
     );
-    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const png = encodePng(2, 2, new Uint8Array(16).fill(64));
     fixture.runner = async (request) => {
       const args = request.args ?? [];
       if (args.includes("devices")) {
@@ -2016,7 +2017,9 @@ describe("runCli", () => {
         command: "capture screenshot",
         data: { evidence: { path: "artifacts/screen.png", mediaType: "image/png" } },
       });
-      expect(new Uint8Array(await readFile(path.join(root, "artifacts/screen.png")))).toEqual(png);
+      expect([...new Uint8Array(await readFile(path.join(root, "artifacts/screen.png")))]).toEqual([
+        ...png,
+      ]);
       expect(streams.error.value).toBe("");
     } finally {
       await rm(root, { recursive: true, force: true });

@@ -543,10 +543,38 @@ describe("parseArguments", () => {
       option: "--duration",
     });
     expect(
-      parseArguments(["capture", "screenshot", "--out", "screen.png", "--json"]),
+      parseArguments([
+        "capture",
+        "screenshot",
+        "--out",
+        "screen.png",
+        "--crop",
+        "10,20,300,400",
+        "--max-width",
+        "200",
+        "--max-height",
+        "250",
+        "--json",
+      ]),
     ).toMatchObject({
       ok: true,
-      options: { command: "capture", captureKind: "screenshot", outputPath: "screen.png" },
+      options: {
+        command: "capture",
+        captureKind: "screenshot",
+        outputPath: "screen.png",
+        screenshotCrop: { x: 10, y: 20, width: 300, height: 400 },
+        screenshotMaxWidth: 200,
+        screenshotMaxHeight: 250,
+      },
+    });
+    expect(parseArguments(["capture", "screen-record", "--max-width", "100"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["capture", "screenshot", "--crop", "1,2,0,4"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+      option: "--crop",
     });
   });
 
