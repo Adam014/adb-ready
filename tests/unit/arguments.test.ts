@@ -238,6 +238,46 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses explicit target pool fan-out and rejects competing selectors", () => {
+    expect(
+      parseArguments([
+        "run",
+        "--pool",
+        "smoke",
+        "--max-concurrency",
+        "3",
+        "--fail-fast",
+        "--lease-wait",
+        "45s",
+        "--",
+        "npm",
+        "test",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "run",
+        poolName: "smoke",
+        maxConcurrency: 3,
+        failFast: true,
+        leaseWaitMs: 45_000,
+      },
+    });
+    expect(
+      parseArguments(["run", "--pool", "smoke", "--device", "USB-1", "--", "true"]),
+    ).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["run", "--max-concurrency", "2", "--", "true"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(
+      parseArguments(["test", "firebase", "robo", "--pool", "cloud", "--app", "app.apk"]),
+    ).toMatchObject({ ok: true, options: { poolName: "cloud" } });
+  });
+
   test("parses Gradle managed-device discovery, planning, and execution options", () => {
     expect(parseArguments(["test", "gradle"])).toMatchObject({
       ok: true,

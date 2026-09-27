@@ -105,6 +105,127 @@ describe("loadConfig", () => {
     }
   });
 
+  test("loads explicit target pools and normalizes safe execution defaults", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "pools.json");
+    await writeJson(projectFile, {
+      version: 1,
+      targets: {
+        pools: {
+          local: {
+            maxConcurrency: 2,
+            members: [
+              { id: "usb", kind: "adb", serial: "USB-1" },
+              { id: "avd", kind: "avd", name: "Pixel_API_36", required: false },
+              { id: "lab", kind: "remote-adb", host: "lab.internal", serial: "REMOTE-1" },
+            ],
+          },
+          cloud: {
+            maxConcurrency: 1,
+            failFast: true,
+            leaseWaitMs: 5_000,
+            members: [{ id: "pixel", kind: "firebase", model: "akita", version: "36" }],
+          },
+        },
+      },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      config: {
+        values: {
+          targetPools: {
+            local: {
+              maxConcurrency: 2,
+              failFast: false,
+              leaseWaitMs: 30_000,
+              members: [
+                { id: "usb", kind: "adb", serial: "USB-1" },
+                { id: "avd", kind: "avd", name: "Pixel_API_36", required: false },
+                {
+                  id: "lab",
+                  kind: "remote-adb",
+                  host: "lab.internal",
+                  port: 5037,
+                  serial: "REMOTE-1",
+                },
+              ],
+            },
+            cloud: {
+              maxConcurrency: 1,
+              failFast: true,
+              leaseWaitMs: 5_000,
+              members: [
+                {
+                  id: "pixel",
+                  kind: "firebase",
+                  model: "akita",
+                  version: "36",
+                  locale: "en",
+                  orientation: "portrait",
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+  });
+
+  test("rejects ambiguous, duplicate, and over-specified target pool members", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "invalid-pools.json");
+    await writeJson(projectFile, {
+      version: 1,
+      targets: {
+        pools: {
+          invalid: {
+            maxConcurrency: 0,
+            members: [
+              { id: "same", kind: "adb", serial: "USB-1", host: "unexpected" },
+              { id: "same", kind: "remote-adb", host: "", serial: "" },
+              { id: "duplicate-resource", kind: "adb", serial: "USB-1" },
+            ],
+          },
+        },
+      },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(result.ok).toBeFalse();
+    if (!result.ok) {
+      expect(result.errors.map(({ path: errorPath }) => errorPath)).toContain(
+        "targets.pools.invalid.maxConcurrency",
+      );
+      expect(result.errors.map(({ path: errorPath }) => errorPath)).toContain(
+        "targets.pools.invalid.members.0.host",
+      );
+      expect(result.errors.map(({ path: errorPath }) => errorPath)).toContain(
+        "targets.pools.invalid.members.1.id",
+      );
+      expect(result.errors.map(({ path: errorPath }) => errorPath)).toContain(
+        "targets.pools.invalid.members.2",
+      );
+    }
+  });
+
   test("loads project app identity with provenance and rejects invalid package names", async () => {
     const directory = await temporaryDirectory();
     const validFile = path.join(directory, "app-valid.json");

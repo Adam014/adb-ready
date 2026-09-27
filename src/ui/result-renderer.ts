@@ -21,6 +21,7 @@ import type { AutomationRunData, AutonomousRunEvidence } from "../automation/evi
 import type { FirebaseTestLabData } from "../automation/firebase-test-lab.js";
 import type { GradleManagedTestData } from "../automation/gradle-managed-devices.js";
 import type { ReadinessAssertion } from "../automation/readiness.js";
+import type { TargetPoolData } from "../automation/target-pool.js";
 import type { OutputFormat } from "../cli/arguments.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
@@ -230,6 +231,26 @@ function isFirebaseTestLabData(value: unknown): value is FirebaseTestLabData {
       value.action === "devices" ||
       value.action === "instrumentation" ||
       value.action === "robo")
+  );
+}
+
+function isTargetPoolData(value: unknown): value is TargetPoolData {
+  if (!isRecord(value) || typeof value.pool !== "string" || !Array.isArray(value.members)) {
+    return false;
+  }
+  return (
+    typeof value.maxConcurrency === "number" &&
+    typeof value.failFast === "boolean" &&
+    isRecord(value.summary) &&
+    value.members.every(
+      (member) =>
+        isRecord(member) &&
+        typeof member.id === "string" &&
+        typeof member.kind === "string" &&
+        typeof member.required === "boolean" &&
+        typeof member.status === "string" &&
+        typeof member.exitCode === "number",
+    )
   );
 }
 
@@ -635,6 +656,33 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
         `${style.accent(glyphs.active, capabilities)} Evidence ${clean(data.evidence.path)} · ${String(data.evidence.providerFiles)} provider files · ${clean(data.evidence.collection)}`,
       );
     }
+  }
+  if (
+    (result.command === "run pool" || result.command === "test firebase pool") &&
+    isTargetPoolData(result.data)
+  ) {
+    const data = result.data;
+    lines.push(
+      `${style.accent(glyphs.active, capabilities)} Pool     ${clean(data.pool)} · concurrency ${String(data.maxConcurrency)} · ${data.failFast ? "fail fast" : "run all"}`,
+      `${style.success(glyphs.success, capabilities)} Summary  ${String(data.summary.passed)} passed · ${String(data.summary.failed)} failed · ${String(data.summary.cancelled)} cancelled · ${String(data.summary.skipped)} skipped`,
+      `${style.dim(glyphs.branch, capabilities)} Coordination ${clean(data.coordination)}`,
+      "",
+      style.strong(`Members (${String(data.members.length)})`, capabilities),
+    );
+    data.members.forEach((member, index) => {
+      const branch = index === data.members.length - 1 ? glyphs.end : glyphs.branch;
+      const marker =
+        member.status === "passed"
+          ? style.success(glyphs.success, capabilities)
+          : member.status === "failed"
+            ? style.failure(glyphs.failure, capabilities)
+            : member.status === "cancelled"
+              ? style.warning(glyphs.warning, capabilities)
+              : style.dim(glyphs.skipped, capabilities);
+      lines.push(
+        `${style.dim(branch, capabilities)} ${marker} ${clean(member.id)} · ${clean(member.kind)} · ${clean(member.status)}${member.required ? "" : " · optional"}`,
+      );
+    });
   }
 
   if (result.command === "logs" && isLogsData(result.data)) {
@@ -1114,6 +1162,20 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     sink.write(`adb_version=${clean(data.adb.version.platformToolsVersion ?? "unknown")}\n`);
   }
   if (isVersionData(result.data)) sink.write(`version=${clean(result.data.version)}\n`);
+  if (isTargetPoolData(result.data)) {
+    sink.write(`pool=${clean(result.data.pool)}\n`);
+    sink.write(`max_concurrency=${String(result.data.maxConcurrency)}\n`);
+    sink.write(`fail_fast=${String(result.data.failFast)}\n`);
+    sink.write(`passed=${String(result.data.summary.passed)}\n`);
+    sink.write(`failed=${String(result.data.summary.failed)}\n`);
+    sink.write(`cancelled=${String(result.data.summary.cancelled)}\n`);
+    sink.write(`skipped=${String(result.data.summary.skipped)}\n`);
+    result.data.members.forEach((member, index) => {
+      sink.write(
+        `member_${String(index)}=${clean(member.id)}:${clean(member.kind)}:${clean(member.status)}:${String(member.exitCode)}\n`,
+      );
+    });
+  }
   if (isConnectData(result.data)) {
     sink.write(`endpoint=${clean(result.data.endpoint)}\n`);
     sink.write(`serial=${clean(result.data.serial)}\n`);

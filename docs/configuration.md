@@ -58,6 +58,7 @@ existing file unless `--force` is explicit. Use `--dry-run` first.
 | `timeoutMs` | Default bounded operation timeout |
 | `output` | Interactive, animation, color, and Unicode preferences |
 | `targets.aliases` | Friendly name to exact ADB serial mapping |
+| `targets.pools` | Named explicit target sets with bounded concurrency and queue policy |
 | `dev` | Development-session configuration |
 | `profiles` | Named, optionally inherited overrides |
 
@@ -80,6 +81,11 @@ existing file unless `--force` is explicit. Use `--dry-run` first.
 
 Unknown keys and invalid nested values fail validation rather than being
 silently ignored.
+
+Target pools accept typed `adb`, `avd`, `remote-adb`, or `firebase` members.
+Every pool requires an explicit `maxConcurrency`; member IDs and resource
+identities must be unique. See [Target pools and fan-out](./target-pools.md) for
+the complete schema, execution semantics, and trust boundaries.
 
 `init` detects and writes `packageManager` only for Expo, React Native, and
 Capacitor presets, where it selects the project CLI. Flutter and native Gradle

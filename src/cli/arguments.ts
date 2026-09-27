@@ -78,6 +78,10 @@ export interface CliOptions {
   pairingCodeStdin: boolean;
   remembered: boolean;
   dryRun: boolean;
+  poolName?: string;
+  maxConcurrency?: number;
+  failFast?: boolean;
+  leaseWaitMs?: number;
   allProjects: boolean;
   portDirection?: PortDirection;
   portAction?: PortAction;
@@ -279,6 +283,8 @@ const BOOLEAN_OPTIONS = new Set([
   "--allow-deprecated",
   "--allow-reduced-stability",
   "--allow-low-capacity",
+  "--fail-fast",
+  "--no-fail-fast",
   "--submit",
   "--secret-stdin",
 ]);
@@ -366,6 +372,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let pairingCodeStdin = false;
   let remembered = false;
   let dryRun = false;
+  let poolName: string | undefined;
+  let maxConcurrency: number | undefined;
+  let failFast: boolean | undefined;
+  let leaseWaitMs: number | undefined;
   let allProjects = false;
   let portDirection: PortDirection | undefined;
   let portAction: PortAction | undefined;
@@ -786,6 +796,40 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       remembered = true;
     } else if (option === "--dry-run") {
       dryRun = true;
+    } else if (option === "--pool") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", `Invalid target pool name: ${value}.`, option);
+      }
+      poolName = value;
+    } else if (option === "--max-concurrency") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = Number(value);
+      if (!/^\d+$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 32) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--max-concurrency must be an integer from 1 to 32.",
+          option,
+        );
+      }
+      maxConcurrency = parsed;
+    } else if (option === "--fail-fast") {
+      failFast = true;
+    } else if (option === "--no-fail-fast") {
+      failFast = false;
+    } else if (option === "--lease-wait") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      leaseWaitMs = parseDuration(value);
+      if (leaseWaitMs === undefined || leaseWaitMs > 3_600_000) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--lease-wait must be a positive duration up to 1h.",
+          option,
+        );
+      }
     } else if (option === "--deploy") {
       deployArtifact = true;
     } else if (option === "--all-projects") {
@@ -1403,6 +1447,9 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         "--adb-port",
         "--config",
         "--profile",
+        "--pool",
+        "--max-concurrency",
+        "--lease-wait",
         "--mcp-profile",
         "--device",
         "--serial",
@@ -1914,6 +1961,47 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (command === "run" && runCommand === undefined) {
     return failure("CLI_USAGE", "run requires a bounded command after --.");
   }
+  const poolCommand =
+    command === "run" ||
+    (command === "test" &&
+      testKind === "firebase" &&
+      (firebaseAction === "instrumentation" || firebaseAction === "robo"));
+  if (poolName !== undefined && !poolCommand) {
+    return failure(
+      "CLI_USAGE",
+      "--pool can only be used with run or a Firebase instrumentation/Robo workflow.",
+      "--pool",
+    );
+  }
+  if (
+    poolName !== undefined &&
+    (select ||
+      remembered ||
+      device !== undefined ||
+      transportId !== undefined ||
+      avdName !== undefined)
+  ) {
+    return failure(
+      "CLI_USAGE",
+      "--pool cannot be combined with another target selector.",
+      "--pool",
+    );
+  }
+  if (poolName !== undefined && firebaseDevices.length > 0) {
+    return failure("CLI_USAGE", "--pool cannot be combined with --test-device.", "--pool");
+  }
+  if (
+    (maxConcurrency !== undefined || failFast !== undefined || leaseWaitMs !== undefined) &&
+    poolName === undefined
+  ) {
+    return failure(
+      "CLI_USAGE",
+      "--max-concurrency, --fail-fast, --no-fail-fast, and --lease-wait require --pool.",
+    );
+  }
+  if (leaseWaitMs !== undefined && command !== "run") {
+    return failure("CLI_USAGE", "--lease-wait only applies to local run pools.", "--lease-wait");
+  }
   if (runTimeoutMs !== undefined && command !== "run") {
     if (command !== "test") {
       return failure(
@@ -1970,7 +2058,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     }
     if (
       (firebaseAction === "instrumentation" || firebaseAction === "robo") &&
-      (firebaseApp === undefined || firebaseDevices.length === 0)
+      (firebaseApp === undefined || (firebaseDevices.length === 0 && poolName === undefined))
     ) {
       return failure(
         "CLI_USAGE",
@@ -2141,6 +2229,10 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       pairingCodeStdin,
       remembered,
       dryRun,
+      ...(poolName === undefined ? {} : { poolName }),
+      ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
+      ...(failFast === undefined ? {} : { failFast }),
+      ...(leaseWaitMs === undefined ? {} : { leaseWaitMs }),
       allProjects,
       ...(portDirection === undefined ? {} : { portDirection }),
       ...(portAction === undefined ? {} : { portAction }),

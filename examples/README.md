@@ -21,6 +21,8 @@ adb-ready dev --dry-run
   with explicit serial selection, host-local leasing, and bounded evidence
 - [`automation/README.md`](./automation/README.md) — one finite AVD, deployment,
   verifier, evidence, and cleanup job
+- [`target-pools/`](./target-pools/) — bounded fan-out across explicit local,
+  AVD, remote-ADB, or Firebase members
 
 Prefer `adb-ready init` when starting from an existing detected project. Add
 only the ports, hooks, and retention rules that the project genuinely needs.

@@ -98,6 +98,9 @@ to reveal an action.
 - [**Run cloud device matrices**](./docs/firebase-test-lab.md) — validate live
   Firebase dimensions, run instrumentation or Robo tests, and retain normalized
   provider evidence without storing cloud credentials.
+- [**Fan out across explicit targets**](./docs/target-pools.md) — run the same
+  bounded check on named local, AVD, remote-ADB, or Firebase pools while each
+  target keeps an isolated lease, session, result, and cleanup boundary.
 
 ## Choose how you work
 
@@ -289,6 +292,7 @@ Android transport backend.
 | [Automation](./docs/automation.md) | Use readiness, exit codes, JSON, NDJSON, JUnit, and CI artifacts. |
 | [Gradle Managed Devices](./docs/gradle-managed-devices.md) | Run build-owned virtual-device and group tests with normalized evidence. |
 | [Firebase Test Lab](./docs/firebase-test-lab.md) | Run explicit remote instrumentation or Robo matrices with bounded evidence. |
+| [Target pools and fan-out](./docs/target-pools.md) | Bound parallel verification across an explicit target set. |
 | [Configuration](./docs/configuration.md) | Share project presets, hooks, aliases, and policies. |
 | [Troubleshooting](./docs/troubleshooting.md) | Resolve a known setup, target, UI, or session problem. |
 | [Compatibility](./COMPATIBILITY.md) | Check hosts, runtimes, package managers, and support tiers. |

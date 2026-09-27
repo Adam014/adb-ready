@@ -14,6 +14,7 @@ const cases = [
   ["custom", "custom"],
   ["ci-emulator", "custom"],
   ["ci-physical", "custom"],
+  ["target-pools", "expo"],
 ] as const;
 
 describe("public configuration examples", () => {

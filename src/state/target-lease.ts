@@ -28,6 +28,10 @@ export interface TargetLeaseOptions {
   pid?: number;
   hostname?: string;
   processAlive?: (pid: number) => boolean;
+  waitTimeoutMs?: number;
+  waitPollIntervalMs?: number;
+  signal?: AbortSignal;
+  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface TargetLeaseRequest {
@@ -45,7 +49,7 @@ export type TargetLeaseResult =
   | { ok: true; lease: TargetLeaseHandle }
   | {
       ok: false;
-      code: "TARGET_BUSY" | "TARGET_LEASE_UNAVAILABLE";
+      code: "TARGET_BUSY" | "TARGET_LEASE_CANCELLED" | "TARGET_LEASE_UNAVAILABLE";
       message: string;
       owner?: TargetLeaseOwner;
     };
@@ -163,7 +167,7 @@ async function staleLease(
   );
 }
 
-export async function acquireTargetLease(
+async function tryAcquireTargetLease(
   request: TargetLeaseRequest,
   options: TargetLeaseOptions = {},
 ): Promise<TargetLeaseResult> {
@@ -291,4 +295,54 @@ export async function acquireTargetLease(
     code: "TARGET_LEASE_UNAVAILABLE",
     message: "ADB Ready could not safely recover the stale target lease.",
   };
+}
+
+function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
+    const finish = (): void => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, milliseconds);
+    const abort = (): void => {
+      clearTimeout(timer);
+      finish();
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+export async function acquireTargetLease(
+  request: TargetLeaseRequest,
+  options: TargetLeaseOptions = {},
+): Promise<TargetLeaseResult> {
+  const waitTimeoutMs = options.waitTimeoutMs ?? 0;
+  const pollIntervalMs = options.waitPollIntervalMs ?? 250;
+  if (!Number.isSafeInteger(waitTimeoutMs) || waitTimeoutMs < 0 || waitTimeoutMs > 3_600_000) {
+    throw new RangeError("target lease waitTimeoutMs must be from 0 to 3600000");
+  }
+  if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10 || pollIntervalMs > 10_000) {
+    throw new RangeError("target lease waitPollIntervalMs must be from 10 to 10000");
+  }
+  const clock = options.clock ?? (() => new Date());
+  const deadline = clock().getTime() + waitTimeoutMs;
+  while (true) {
+    if (options.signal?.aborted === true) {
+      return {
+        ok: false,
+        code: "TARGET_LEASE_CANCELLED",
+        message: "Target ownership wait was cancelled.",
+      };
+    }
+    const acquired = await tryAcquireTargetLease(request, options);
+    if (acquired.ok || acquired.code !== "TARGET_BUSY" || clock().getTime() >= deadline) {
+      return acquired;
+    }
+    const remaining = Math.max(0, deadline - clock().getTime());
+    await (options.sleep ?? wait)(Math.min(pollIntervalMs, remaining), options.signal);
+  }
 }

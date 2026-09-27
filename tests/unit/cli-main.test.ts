@@ -247,6 +247,176 @@ describe("runCli", () => {
     }
   });
 
+  test("fans one run out into isolated target-pool result envelopes", async () => {
+    const terminal = io();
+    const fixture = dependencies();
+    const load = fixture.loadConfig;
+    fixture.loadConfig = async (options) => {
+      const loaded = await load?.(options);
+      if (loaded === undefined || !loaded.ok) throw new Error("fixture config failed");
+      return {
+        ...loaded,
+        config: {
+          ...loaded.config,
+          values: {
+            ...loaded.config.values,
+            devPreset: "custom" as const,
+            devCommand: { executable: "dev-service", args: [] },
+            targetPools: {
+              smoke: {
+                maxConcurrency: 2,
+                failFast: false,
+                leaseWaitMs: 1_000,
+                members: [
+                  { id: "usb", kind: "adb" as const, serial: "USB-1" },
+                  { id: "second", kind: "adb" as const, serial: "USB-2" },
+                ],
+              },
+            },
+          },
+        },
+      };
+    };
+
+    const exitCode = await runCli(
+      ["run", "--pool", "smoke", "--dry-run", "--json", "--", "node", "verify.mjs"],
+      terminal,
+      fixture,
+    );
+    const payload = JSON.parse(terminal.output.value);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload).toMatchObject({
+      command: "run pool",
+      ok: true,
+      data: {
+        pool: "smoke",
+        maxConcurrency: 2,
+        members: [
+          { id: "usb", kind: "adb", status: "passed" },
+          { id: "second", kind: "adb", status: "passed" },
+        ],
+        summary: { passed: 2, failed: 0, cancelled: 0, skipped: 0 },
+      },
+    });
+    expect(
+      payload.data.members.every(
+        (member: { result?: { command?: string } }) => member.result?.command === "run",
+      ),
+    ).toBeTrue();
+
+    const humanTerminal = io();
+    const humanExitCode = await runCli(
+      ["run", "--pool", "smoke", "--dry-run", "--no-color", "--", "node", "verify.mjs"],
+      humanTerminal,
+      fixture,
+    );
+    expect(humanExitCode).toBe(ExitCode.Success);
+    expect(humanTerminal.error.value).toContain("pool usb  running");
+    expect(humanTerminal.error.value).toContain("pool second  passed · exit 0");
+    expect(humanTerminal.error.value).toContain("2 passed · 0 failed");
+  });
+
+  test("fans a Firebase pool into one provider matrix plan per dimension", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-ftl-pool-"));
+    await writeFile(path.join(root, "app.apk"), "app");
+    const terminal = io();
+    terminal.cwd = root;
+    try {
+      const fixture = dependencies();
+      const load = fixture.loadConfig;
+      fixture.loadConfig = async (options) => {
+        const loaded = await load?.(options);
+        if (loaded === undefined || !loaded.ok) throw new Error("fixture config failed");
+        return {
+          ...loaded,
+          config: {
+            ...loaded.config,
+            values: {
+              ...loaded.config.values,
+              targetPools: {
+                cloud: {
+                  maxConcurrency: 2,
+                  failFast: false,
+                  leaseWaitMs: 0,
+                  members: [
+                    {
+                      id: "api35",
+                      kind: "firebase" as const,
+                      model: "Pixel2.arm",
+                      version: "35",
+                      locale: "en",
+                      orientation: "portrait" as const,
+                    },
+                    {
+                      id: "api34",
+                      kind: "firebase" as const,
+                      model: "Pixel2.arm",
+                      version: "34",
+                      locale: "en",
+                      orientation: "portrait" as const,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        };
+      };
+      fixture.runner = async (request) =>
+        request.args?.includes("models")
+          ? result(
+              request,
+              JSON.stringify([
+                {
+                  id: "Pixel2.arm",
+                  name: "Pixel 2",
+                  form: "VIRTUAL",
+                  supportedVersionIds: ["34", "35"],
+                  perVersionInfo: [
+                    { versionId: "34", deviceCapacity: "DEVICE_CAPACITY_HIGH" },
+                    { versionId: "35", deviceCapacity: "DEVICE_CAPACITY_HIGH" },
+                  ],
+                },
+              ]),
+            )
+          : result(request, JSON.stringify([{ id: "34" }, { id: "35" }]));
+
+      const exitCode = await runCli(
+        [
+          "test",
+          "firebase",
+          "robo",
+          "--pool",
+          "cloud",
+          "--project",
+          "demo-project",
+          "--app",
+          "app.apk",
+          "--dry-run",
+          "--json",
+        ],
+        terminal,
+        fixture,
+      );
+      const payload = JSON.parse(terminal.output.value);
+      expect(exitCode).toBe(ExitCode.Success);
+      expect(payload).toMatchObject({
+        command: "test firebase pool",
+        data: {
+          coordination: "provider-managed",
+          summary: { passed: 2 },
+          members: [
+            { id: "api35", status: "passed", result: { command: "test firebase" } },
+            { id: "api34", status: "passed", result: { command: "test firebase" } },
+          ],
+        },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("routes the complete non-interactive public command surface", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-surface-"));
     const ui =
@@ -1072,6 +1242,9 @@ describe("runCli", () => {
     const fixture = dependencies(
       "List of devices attached\nemulator-5554 device model:Pixel_9 transport_id:7\n",
     );
+    const leaseDirectory = path.join(root, "leases");
+    fixture.targetLease = { directory: leaseDirectory, heartbeatIntervalMs: 0 };
+    let avdLeaseObserved = false;
     const preparationEvents: string[] = [];
     const bus = new EventBus(() => new Date("2026-09-09T10:00:00.000Z"));
     bus.subscribe((event) => {
@@ -1119,28 +1292,39 @@ describe("runCli", () => {
       ],
     });
     const stages: string[] = [];
-    fixture.prepareAvd = async () => ({
-      ok: true,
-      avd: {
-        name: "Pixel_9_API_36",
-        serial: "emulator-5554",
-        port: 5554,
-        ownership: "owned",
-        pid: 123,
-        readiness: {
-          adb: true,
-          boot: true,
-          packageManager: true,
-          unlocked: true,
-          attempts: 2,
-          durationMs: 500,
+    fixture.prepareAvd = async () => {
+      const contender = await acquireTargetLease(
+        {
+          targetIdentity: "avd:Pixel_9_API_36",
+          projectRoot: root,
+          purpose: "contender",
         },
-        release: async () => {
-          stages.push("cleanup");
-          return { attempted: true, stopped: true, forced: false, detail: "stopped" };
+        { directory: leaseDirectory, heartbeatIntervalMs: 0 },
+      );
+      avdLeaseObserved = !contender.ok && contender.code === "TARGET_BUSY";
+      return {
+        ok: true,
+        avd: {
+          name: "Pixel_9_API_36",
+          serial: "emulator-5554",
+          port: 5554,
+          ownership: "owned",
+          pid: 123,
+          readiness: {
+            adb: true,
+            boot: true,
+            packageManager: true,
+            unlocked: true,
+            attempts: 2,
+            durationMs: 500,
+          },
+          release: async () => {
+            stages.push("cleanup");
+            return { attempted: true, stopped: true, forced: false, detail: "stopped" };
+          },
         },
-      },
-    });
+      };
+    };
     fixture.inspectAndroidTargetProfile = async () => {
       stages.push("profile");
       return {
@@ -1247,6 +1431,7 @@ describe("runCli", () => {
       const payload = JSON.parse(streams.output.value);
 
       expect(exitCode).toBe(ExitCode.Success);
+      expect(avdLeaseObserved).toBeTrue();
       expect(stages).toEqual(["profile", "resolve", "deploy", "project", "verifier", "cleanup"]);
       expect(preparationEvents).toEqual([
         "operation.started:run.target-profile:Inspecting Android target for deployment",
