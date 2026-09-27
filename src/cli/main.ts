@@ -298,7 +298,9 @@ Run options:
   -- EXECUTABLE ARG...    Verification command, passed directly without a shell
 
 The literal placeholder {target.serial} is resolved inside arguments after target selection.
-Verification processes also receive ANDROID_SERIAL and ADB_READY_TARGET_SERIAL.
+Verification processes also receive ANDROID_SERIAL, ADB_READY_TARGET_SERIAL, and a bounded
+ADB_READY_VERIFIER_OUTPUT_DIR. Direct Maestro test and Android CLI layout/screen-capture commands
+are pinned to the selected target and their native reports are retained automatically.
 AVDs must already exist. ADB Ready never creates or upgrades an SDK or AVD implicitly.
 `,
   doctor: `Usage: adb-ready doctor [options]

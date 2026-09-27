@@ -10,6 +10,7 @@
 - Machine output: `adb-ready COMMAND --json --non-interactive`
 - MCP stdio server: `node ./node_modules/adb-ready/dist/cli.js mcp [--mcp-profile PROFILE]`
 - Agent setup plus version-matched Agent Skill: `adb-ready agent setup CLIENT --dry-run`
+- Finite verifier with normalized evidence: `adb-ready run -- maestro test FLOW`
 - MCP resources: `adb-ready://capabilities`, `adb-ready://targets`, and `adb-ready://sessions`
 
 ## Agent contract
@@ -30,6 +31,8 @@
    session problems or context.
 9. Never substitute a raw shell or ADB call for a missing typed tool.
 10. MCP Tasks are not advertised; use the durable start/get/stop session tools.
+11. For a finite verification job, use `run`; consume its structured verifier
+    outcome and retained `verifier-native/` references instead of parsing prose.
 
 ## Documentation
 

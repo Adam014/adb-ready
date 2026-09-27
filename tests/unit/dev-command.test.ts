@@ -38,6 +38,7 @@ function dependencies(runner: ProcessRunner): CommandDependencies {
   let id = 0;
   return {
     runner,
+    prepareVerifierDirectory: async () => undefined,
     locateAdb: async () => "/sdk/adb",
     detectProject: async () => ({
       root: "/workspace/app",
@@ -1663,7 +1664,11 @@ describe("runDev", () => {
     });
     expect(verificationRequest).toMatchObject({
       args: ["--device=USB-1", "--ci"],
-      env: { ADB_READY_TARGET_SERIAL: "USB-1", ANDROID_SERIAL: "USB-1" },
+      env: {
+        ADB_READY_TARGET_SERIAL: "USB-1",
+        ADB_READY_VERIFIER_OUTPUT_DIR: expect.stringContaining("adb-ready-verifier-id-1"),
+        ANDROID_SERIAL: "USB-1",
+      },
     });
     expect(verificationLines).toEqual(["stdout:assertion passed", "stderr:diagnostic warning"]);
   });
@@ -1702,6 +1707,105 @@ describe("runDev", () => {
     expect(execution.result.data?.verification).toMatchObject({ passed: false, exitCode: 9 });
     expect(execution.result.problems).toContainEqual(
       expect.objectContaining({ code: ProblemCode.VerificationFailed }),
+    );
+  });
+
+  test("adapts Maestro evidence to the leased target and classifies assertion failures", async () => {
+    let verificationRequest: ProcessRequest | undefined;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: [] },
+        verification: {
+          command: { executable: "maestro", args: ["test", ".maestro/smoke.yaml"] },
+        },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.executable === "dev-service") {
+          return await new Promise<ProcessResult>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+              { once: true },
+            );
+          });
+        }
+        if (request.executable === "maestro") {
+          verificationRequest = request;
+          return result(request, { exitCode: 1 });
+        }
+        return result(request);
+      }),
+    );
+
+    expect(verificationRequest?.args).toEqual([
+      "--device=USB-1",
+      "test",
+      ".maestro/smoke.yaml",
+      "--format=junit",
+      expect.stringContaining("--output="),
+      expect.stringContaining("--test-output-dir="),
+      expect.stringContaining("--debug-output="),
+    ]);
+    expect(execution.result.data?.verification).toMatchObject({
+      adapter: "maestro",
+      outcome: "assertion-failed",
+      targetArgument: "USB-1",
+    });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ category: "verification.assertion" }),
+    );
+  });
+
+  test("fails closed before a verifier can use a different explicit target", async () => {
+    let maestroStarted = false;
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: [] },
+        verification: {
+          command: { executable: "maestro", args: ["--device=OTHER", "test", "flow.yaml"] },
+        },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+      },
+      {},
+      dependencies(async (request) => {
+        const probe = targetProbe(request);
+        if (probe !== undefined) return probe;
+        if (request.executable === "dev-service") {
+          return await new Promise<ProcessResult>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+              { once: true },
+            );
+          });
+        }
+        if (request.executable === "maestro") maestroStarted = true;
+        return result(request);
+      }),
+    );
+
+    expect(maestroStarted).toBeFalse();
+    expect(execution.result.data?.verification).toMatchObject({
+      adapter: "maestro",
+      outcome: "tool-failed",
+      targetArgument: "OTHER",
+    });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ category: "verification.tool" }),
     );
   });
 

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CommandExecution, DevData } from "../../src/app/commands.js";
 import { writeEvidenceBundle } from "../../src/automation/evidence-bundle.js";
+import { verifierArtifactDirectory } from "../../src/automation/external-verifier.js";
 
 function execution(): CommandExecution<DevData> {
   return {
@@ -233,6 +234,54 @@ describe("writeEvidenceBundle", () => {
         }),
       ).rejects.toThrow();
       expect(await readFile(path.join(collision, "owned.txt"), "utf8")).toBe("existing artifact");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("imports bounded native verifier artifacts, redacts text, and cleans staging", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-native-evidence-"));
+    const current = execution();
+    if (current.result.data === null) throw new Error("Missing session fixture");
+    current.result.data.project.root = root;
+    current.result.data.sessionId = "native-session";
+    const verification = current.result.data.verification;
+    if (verification === undefined) throw new Error("Missing verification fixture");
+    current.result.data.verification = {
+      ...verification,
+      adapter: "maestro",
+      outcome: "assertion-failed",
+      targetArgument: "serial-secret",
+      artifactReferences: ["report.xml", "artifacts/"],
+    };
+    const staging = verifierArtifactDirectory(root, "native-session");
+    try {
+      await rm(staging, { recursive: true, force: true });
+      await mkdir(path.join(staging, "artifacts"), { recursive: true });
+      await writeFile(path.join(staging, "report.xml"), '<failure device="serial-secret" />');
+      await writeFile(
+        path.join(staging, "artifacts", "failure.png"),
+        new Uint8Array([137, 80, 78, 71]),
+      );
+
+      const written = await writeEvidenceBundle(current, {
+        cwd: root,
+        idFactory: () => "native-run",
+      });
+      const result = JSON.parse(
+        await readFile(path.join(written.artifactPath, "result.json"), "utf8"),
+      );
+      expect(result.data.session.verification).toMatchObject({
+        adapter: "maestro",
+        artifactReferences: ["verifier-native/001-failure.png", "verifier-native/002-report.xml"],
+      });
+      expect(
+        await readFile(path.join(written.artifactPath, "verifier-native/002-report.xml"), "utf8"),
+      ).toContain("[REDACTED]");
+      expect(
+        await readFile(path.join(written.artifactPath, "verifier-native/001-failure.png")),
+      ).toEqual(Buffer.from([137, 80, 78, 71]));
+      expect(await readFile(path.join(staging, "report.xml")).catch(() => null)).toBeNull();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

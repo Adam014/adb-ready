@@ -183,12 +183,13 @@ Or make the target and deployment part of the same bounded job:
 
 ```bash
 npx adb-ready run --avd Pixel_9_API_36 --deploy --variant debug -- \
-  maestro '--device={target.serial}' test .maestro/smoke.yaml
+  maestro test .maestro/smoke.yaml
 ```
 
 Each executed run retains a redacted evidence bundle with its result,
-timeline, problems, focused logcat, native verifier output, AI context, JUnit
-XML, and GitHub step summary. Existing matching emulators are reused; only an
+timeline, problems, focused logcat, native verifier output and artifacts, AI
+context, JUnit XML, and GitHub step summary. Maestro and Android CLI primitives
+are pinned to the leased target automatically. Existing matching emulators are reused; only an
 emulator started by that run is stopped. Scripts also get deterministic JSON
 and NDJSON contracts:
 

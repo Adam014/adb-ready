@@ -51,6 +51,9 @@ breaking changes.
 - Document durable start/get/stop development handles as the cross-client
   compatibility path while keeping the MCP Tasks extension unadvertised until
   negotiated interoperability is proven in two supported clients.
+- Add target-locked Maestro and Android CLI verifier adapters, bounded native
+  report/screenshot/video/log retention, and structured verifier outcome
+  categories without translating either tool's test or Journey format.
 
 ## [0.5.1] - 2026-09-25
 

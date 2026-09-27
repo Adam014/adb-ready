@@ -511,8 +511,11 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       }
     }
     if (data.verification !== undefined) {
+      const verifierDetail = [data.verification.adapter, data.verification.outcome]
+        .filter((value) => value !== undefined)
+        .join(" · ");
       lines.push(
-        `${data.verification.passed ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Verify   ${data.verification.passed ? "passed" : data.verification.timedOut ? "timed out" : `exit ${String(data.verification.exitCode)}`}`,
+        `${data.verification.passed ? style.success(glyphs.success, capabilities) : style.failure(glyphs.failure, capabilities)} Verify   ${data.verification.passed ? "passed" : data.verification.timedOut ? "timed out" : `exit ${String(data.verification.exitCode)}`}${verifierDetail === "" ? "" : ` · ${clean(verifierDetail)}`}`,
       );
     }
     lines.push(
@@ -1058,6 +1061,17 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
     if (developmentData.verification !== undefined) {
       sink.write(`verification_passed=${String(developmentData.verification.passed)}\n`);
       sink.write(`verification_exit_code=${String(developmentData.verification.exitCode)}\n`);
+      if (developmentData.verification.adapter !== undefined) {
+        sink.write(`verification_adapter=${clean(developmentData.verification.adapter)}\n`);
+      }
+      if (developmentData.verification.outcome !== undefined) {
+        sink.write(`verification_outcome=${clean(developmentData.verification.outcome)}\n`);
+      }
+      if (developmentData.verification.artifactReferences !== undefined) {
+        sink.write(
+          `verification_artifacts=${developmentData.verification.artifactReferences.map(clean).join(",")}\n`,
+        );
+      }
     }
   }
   if (isAutomationRunData(result.data)) renderAutomationPlain(result.data, sink);
