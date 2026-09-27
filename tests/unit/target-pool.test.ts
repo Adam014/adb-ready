@@ -130,6 +130,36 @@ describe("target pool fan-out", () => {
     ).toBeTrue();
   });
 
+  test("cancels every member before allocation when the parent is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("workflow cancelled"));
+    let runnerCalls = 0;
+    const finished: string[] = [];
+
+    const execution = await runTargetPool(
+      {
+        name: "cancelled",
+        pool: pool(),
+        signal: controller.signal,
+        onMemberFinish: ({ id, status }) => finished.push(`${id}:${status}`),
+      },
+      async (member) => {
+        runnerCalls += 1;
+        return { exitCode: ExitCode.Success, result: envelope(member.id, true) };
+      },
+    );
+
+    expect(runnerCalls).toBe(0);
+    expect(execution.exitCode).toBe(ExitCode.Interrupted);
+    expect(execution.result.data?.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      cancelled: 3,
+      skipped: 0,
+    });
+    expect(finished).toEqual(["usb:cancelled", "emulator:cancelled", "lab:cancelled"]);
+  });
+
   test("builds isolated child argv without leaking pool or competing selectors", () => {
     expect(
       targetPoolMemberArguments(
