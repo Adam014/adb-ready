@@ -191,7 +191,7 @@ describe("SessionRecorder", () => {
           command: "dev",
           startedAt: "2026-09-13T10:00:00.000Z",
         },
-        { directory },
+        { directory, clock: () => new Date("2026-09-13T10:01:00.000Z") },
       );
       bus.emit({
         type: "adb.operation.started",
