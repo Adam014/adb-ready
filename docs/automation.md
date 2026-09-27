@@ -265,3 +265,21 @@ fragile parsing of human log messages.
 USB passthrough, emulators, remote ADB servers, and device labs remain the CI
 environment's responsibility. ADB Ready reports the observed boundary instead
 of simulating a connected device.
+
+### GitHub-hosted emulator
+
+The repository continuously runs a complete finite ADB Ready job on a real
+headless Linux emulator. The runner layer creates and owns the AVD; ADB Ready
+binds to its exact serial, verifies boot and unlock state, executes the bounded
+check, writes normalized NDJSON and evidence, and leaves emulator teardown to
+the owning layer.
+
+Use the maintained, commit-pinned workflow and fixture as the starting point:
+
+- [Android emulator workflow](../.github/workflows/android-emulator.yml)
+- [CI emulator fixture](../examples/ci-emulator/)
+
+The evidence upload uses `if: always()` so a product assertion or verifier
+failure retains the same manifest, result, JUnit, native files, and GitHub step
+summary as a successful run. A failure before ADB Ready starts cannot produce
+an ADB Ready bundle and is reported by the provisioning step instead.

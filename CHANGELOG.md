@@ -9,6 +9,12 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add a maintained, commit-pinned GitHub Actions emulator workflow and public
+  fixture that exercise one target-locked finite run and retain normalized
+  results, JUnit, screenshot, and diagnostic evidence on success or failure.
+
 ## [0.6.0] - 2026-09-27
 
 ### Added

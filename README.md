@@ -201,6 +201,10 @@ adb-ready sessions list --status failed --since 24h --limit 5
 
 [Build a readiness-gated device job →](./docs/automation.md)
 
+Need a hosted target first? Start from the maintained
+[GitHub Actions emulator workflow](./examples/ci-emulator/), which runs one
+bounded target-locked job and preserves evidence even when verification fails.
+
 ## One target. One verified loop.
 
 ```text

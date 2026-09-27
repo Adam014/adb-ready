@@ -1,0 +1,20 @@
+{
+  "$schema": "../../schema/config-v1.schema.json",
+  "version": 1,
+  "dev": {
+    "preset": "custom",
+    "command": {
+      "executable": "node",
+      "args": ["examples/ci-emulator/dev-service.mjs"]
+    },
+    "reversePorts": [],
+    "logs": false,
+    "cleanupPorts": true,
+    "watch": true,
+    "ready": {
+      "timeoutMs": 60000,
+      "pollIntervalMs": 1000,
+      "all": [{ "kind": "boot" }, { "kind": "unlocked" }]
+    }
+  }
+}
