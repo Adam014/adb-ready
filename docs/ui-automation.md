@@ -30,6 +30,32 @@ parallel, and selector processing or input does not hold the capture lock. If
 another process does not finish within the configured UI timeout, the command
 returns `UI_HIERARCHY_BUSY` instead of misreporting an inaccessible screen.
 
+Choose an acquisition profile when the default one-shot observation is not the
+right tradeoff:
+
+```bash
+adb-ready inspect ui --acquisition balanced
+adb-ready inspect ui --acquisition fast --interactive-only
+adb-ready inspect ui --acquisition strict
+```
+
+- `balanced` takes one fresh platform-idle snapshot within the normal bounded
+  UI timeout and is the default.
+- `fast` keeps the same safe target-scoped platform backend but limits the
+  attempt to three seconds. It reports a timeout or non-idle screen instead of
+  pretending that an empty result is a valid screen.
+- `strict` requires two consecutive matching hierarchy digests within at most
+  three captures. A continuously changing screen returns
+  `UI_HIERARCHY_UNSTABLE`.
+
+Every successful structured snapshot reports its observation time, duration,
+attempt count, stability status, source and idle strategy, requested filters,
+node limits, truncation, and detected semantic limitations. An empty hierarchy
+is an explicit `UI_HIERARCHY_EMPTY` failure. WebView, Compose, and Flutter
+markers are reported only when their corresponding platform view is actually
+observed; they describe framework accessibility boundaries rather than guessing
+why an otherwise unreadable window failed.
+
 ## Audit one screen for people and agents
 
 ```bash

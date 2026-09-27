@@ -10,13 +10,12 @@ import type { CommandConfig, CommandDependencies, CommandExecution } from "../ap
 import { type OperationPlan, type Problem, SCHEMA_VERSION } from "../domain/contracts.js";
 import type { SelectedTarget } from "../target/selection.js";
 import {
-  classifyUiHierarchyFailure,
   DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
-  parseUiHierarchy,
+  type UiAcquisitionMetadata,
   type UiHierarchySnapshot,
   type UiNode,
 } from "./ui-hierarchy.js";
-import { captureUiHierarchy } from "./ui-hierarchy-capture.js";
+import { acquireUiSnapshot } from "./ui-hierarchy-capture.js";
 
 export type UiAction =
   | "assert"
@@ -85,6 +84,8 @@ export interface UiSnapshotSummary {
   totalNodes: number;
   truncated: boolean;
   acquisitionDurationMs?: number;
+  acquisition?: UiAcquisitionMetadata;
+  limitations: UiHierarchySnapshot["limitations"];
 }
 
 export interface UiActionData {
@@ -154,21 +155,24 @@ const KEYCODES: Record<UiKey, number> = {
 };
 
 type Ready = NonNullable<Awaited<ReturnType<typeof readyTarget>>>;
-type MeasuredUiSnapshot = UiHierarchySnapshot & { acquisitionDurationMs: number };
 
 function uiTimeout(config: CommandConfig): number {
   return config.uiTimeoutMs ?? config.timeoutMs ?? DEFAULT_UI_SNAPSHOT_TIMEOUT_MS;
 }
 
-function summary(snapshot: UiHierarchySnapshot | MeasuredUiSnapshot): UiSnapshotSummary {
+function summary(snapshot: UiHierarchySnapshot): UiSnapshotSummary {
   return {
     digest: snapshot.digest,
     complete: snapshot.complete,
     totalNodes: snapshot.totalNodes,
     truncated: snapshot.truncated,
-    ...("acquisitionDurationMs" in snapshot
-      ? { acquisitionDurationMs: snapshot.acquisitionDurationMs }
-      : {}),
+    limitations: snapshot.limitations,
+    ...(snapshot.acquisition === undefined
+      ? {}
+      : {
+          acquisition: snapshot.acquisition,
+          acquisitionDurationMs: snapshot.acquisition.durationMs,
+        }),
   };
 }
 
@@ -183,8 +187,9 @@ async function hierarchy(
   dependencies: CommandDependencies,
   signal?: AbortSignal,
   timeoutMs = DEFAULT_UI_SNAPSHOT_TIMEOUT_MS,
-): Promise<MeasuredUiSnapshot | undefined> {
-  const captured = await captureUiHierarchy({
+  config: CommandConfig = {},
+): Promise<UiHierarchySnapshot | undefined> {
+  const captured = await acquireUiSnapshot({
     client: ready.client,
     target: ready.target,
     targetIdentity: ready.selected.target.id,
@@ -193,6 +198,10 @@ async function hierarchy(
     message: "Reading Android UI state",
     timeoutMs,
     maxBufferBytes: 8 * 1024 * 1024,
+    ...(config.uiAcquisitionProfile === undefined ? {} : { profile: config.uiAcquisitionProfile }),
+    maxDepth: 100,
+    maxNodes: 2_000,
+    ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
     ...(signal === undefined ? {} : { signal }),
     lock: {
       ...dependencies.uiHierarchyLock,
@@ -206,39 +215,7 @@ async function hierarchy(
     problems.push(captured.problem);
     return undefined;
   }
-  const observation = {
-    ...captured.observation,
-    value: parseUiHierarchy(captured.observation.value, { maxDepth: 100, maxNodes: 2_000 }),
-  };
-  if (!succeeded(observation.process)) {
-    problems.push(operationProblem("ui-snapshot", observation, commandId));
-    return undefined;
-  }
-  if (observation.value === undefined) {
-    const reason = classifyUiHierarchyFailure(
-      `${observation.process.stdout}\n${observation.process.stderr}`,
-    );
-    problems.push(
-      reason === "not-idle"
-        ? problem(
-            "UI_NOT_IDLE",
-            "evidence.ui.busy",
-            "Android UI did not become idle for hierarchy capture.",
-            "Continuous accessibility events or animation prevented the platform UI Automator dumper from returning a hierarchy. Pause the changing UI or navigate to a stable screen, then retry.",
-            commandId,
-          )
-        : problem(
-            "UI_HIERARCHY_UNAVAILABLE",
-            "evidence.ui",
-            "Android returned no readable UI hierarchy.",
-            "The current window may be secure, inaccessible, or unsupported by UI Automator.",
-            commandId,
-          ),
-    );
-  }
-  return observation.value === undefined
-    ? undefined
-    : { ...observation.value, acquisitionDurationMs: observation.process.durationMs };
+  return captured.snapshot;
 }
 
 function parseScreenSize(output: string): { width: number; height: number } | undefined {
@@ -841,6 +818,7 @@ export async function runUiAction(
       dependencies,
       signal,
       uiTimeout(config),
+      config,
     );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     return finish(
@@ -868,6 +846,7 @@ export async function runUiAction(
       dependencies,
       signal,
       uiTimeout(config),
+      config,
     );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     const node = selectUniqueNode(
@@ -907,6 +886,7 @@ export async function runUiAction(
       dependencies,
       signal,
       uiTimeout(config),
+      config,
     );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     const matches = snapshot.nodes.filter((node) => selectorMatch(request.selector, node));
@@ -979,6 +959,7 @@ export async function runUiAction(
       dependencies,
       signal,
       uiTimeout(config),
+      config,
     );
     if (snapshot === undefined) return finish<UiActionData>(current, null, problems);
     const changed = snapshot.digest !== request.digest;
@@ -1019,7 +1000,15 @@ export async function runUiAction(
     const maxAttempts = Math.ceil(timeoutMs / 250) + 1;
     while (attempts < maxAttempts) {
       attempts += 1;
-      last = await hierarchy(ready, current.commandId, problems, dependencies, signal, timeoutMs);
+      last = await hierarchy(
+        ready,
+        current.commandId,
+        problems,
+        dependencies,
+        signal,
+        timeoutMs,
+        config,
+      );
       if (last === undefined) return finish<UiActionData>(current, null, problems);
       const matched = last.nodes.find((node) => selectorMatch(request.selector, node));
       if (
@@ -1077,6 +1066,7 @@ export async function runUiAction(
     dependencies,
     signal,
     uiTimeout(config),
+    config,
   );
   if (before === undefined) return finish<UiActionData>(current, null, problems);
   let args: string[];
@@ -1383,6 +1373,7 @@ export async function runUiAction(
     dependencies,
     signal,
     uiTimeout(config),
+    config,
   );
   if (after === undefined) return finish<UiActionData>(current, null, problems);
   const changed = before.digest !== after.digest;

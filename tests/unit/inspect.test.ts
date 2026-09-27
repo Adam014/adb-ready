@@ -104,7 +104,7 @@ describe("inspect evidence", () => {
   test("returns a bounded sensitive UI snapshot from one explicit target", async () => {
     const requests: string[][] = [];
     const execution = await runInspectUi(
-      { interactiveOnly: true, maxDepth: 10 },
+      { acquisition: "fast", interactiveOnly: true, maxDepth: 10 },
       {},
       fixture(requests),
     );
@@ -117,6 +117,12 @@ describe("inspect evidence", () => {
           sensitive: true,
           complete: true,
           returnedNodes: 1,
+          filtering: { interactiveOnly: true, maxDepth: 10, maxNodes: 2_000 },
+          acquisition: {
+            profile: "fast",
+            source: "uiautomator",
+            stability: "not-assessed",
+          },
           nodes: [{ resourceId: "com.example.app:id/open", clickable: true }],
         },
       },

@@ -9,6 +9,7 @@ import type {
   UiKey,
   UiWaitState,
 } from "../evidence/ui-actions.js";
+import type { UiAcquisitionProfile } from "../evidence/ui-hierarchy.js";
 import type { PortDirection } from "../ports/model.js";
 
 export type CommandName =
@@ -125,6 +126,7 @@ export interface CliOptions {
   inspectKind?: "app" | "ui";
   interactiveOnly?: boolean;
   maxDepth?: number;
+  uiAcquisition?: UiAcquisitionProfile;
   agentClient?: AgentClient;
   uiRequest?: UiActionRequest;
 }
@@ -381,6 +383,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let inspectKind: CliOptions["inspectKind"];
   let interactiveOnly = false;
   let maxDepth: number | undefined;
+  let uiAcquisition: UiAcquisitionProfile | undefined;
   let agentSetupSeen = false;
   let agentClient: AgentClient | undefined;
   let uiAction: UiAction | undefined;
@@ -904,6 +907,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       durationSeconds = milliseconds / 1_000;
     } else if (option === "--interactive-only") {
       interactiveOnly = true;
+    } else if (option === "--acquisition") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value !== "balanced" && value !== "fast" && value !== "strict") {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid UI acquisition profile: ${value}. Expected balanced, fast, or strict.`,
+          option,
+        );
+      }
+      uiAcquisition = value;
     } else if (option === "--submit") {
       uiSubmit = true;
     } else if (option === "--state") {
@@ -1111,6 +1125,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         "--level",
         "--out",
         "--duration",
+        "--acquisition",
         "--state",
         "--max-depth",
         "--activity",
@@ -1435,6 +1450,12 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (maxDepth !== undefined && (command !== "inspect" || inspectKind !== "ui")) {
     return failure("CLI_USAGE", "--max-depth can only be used with inspect ui.");
   }
+  if (
+    uiAcquisition !== undefined &&
+    !((command === "inspect" && inspectKind === "ui") || command === "ui")
+  ) {
+    return failure("CLI_USAGE", "--acquisition can only be used with inspect ui or ui commands.");
+  }
   if (uiSubmit && (command !== "ui" || (uiAction !== "type" && uiAction !== "fill"))) {
     return failure("CLI_USAGE", "--submit can only be used with ui type or ui fill.");
   }
@@ -1680,6 +1701,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(inspectKind === undefined ? {} : { inspectKind }),
       ...(interactiveOnly ? { interactiveOnly: true } : {}),
       ...(maxDepth === undefined ? {} : { maxDepth }),
+      ...(uiAcquisition === undefined ? {} : { uiAcquisition }),
       ...(agentClient === undefined ? {} : { agentClient }),
       ...(uiRequest === undefined
         ? {}

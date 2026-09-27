@@ -1,6 +1,28 @@
 import { createHash } from "node:crypto";
 
 export const DEFAULT_UI_SNAPSHOT_TIMEOUT_MS = 15_000;
+export const FAST_UI_SNAPSHOT_TIMEOUT_MS = 3_000;
+
+export type UiAcquisitionProfile = "balanced" | "fast" | "strict";
+
+export interface UiAcquisitionMetadata {
+  profile: UiAcquisitionProfile;
+  source: "uiautomator";
+  idleStrategy: "platform-idle";
+  observedAt: string;
+  freshness: "fresh";
+  durationMs: number;
+  attempts: number;
+  stability: "not-assessed" | "verified";
+}
+
+export interface UiHierarchyLimitation {
+  code:
+    | "COMPOSE_SEMANTICS_DEPENDENT"
+    | "FLUTTER_SEMANTICS_DEPENDENT"
+    | "WEBVIEW_CONTENT_MAY_BE_INCOMPLETE";
+  summary: string;
+}
 
 export type UiHierarchyFailureReason = "not-idle" | "unavailable";
 
@@ -44,7 +66,38 @@ export interface UiHierarchySnapshot {
   totalNodes: number;
   returnedNodes: number;
   truncated: boolean;
+  filtering: {
+    interactiveOnly: boolean;
+    maxDepth: number;
+    maxNodes: number;
+  };
+  limitations: UiHierarchyLimitation[];
+  acquisition?: UiAcquisitionMetadata;
   nodes: UiNode[];
+}
+
+function hierarchyLimitations(nodes: readonly Omit<UiNode, "ref">[]): UiHierarchyLimitation[] {
+  const classes = nodes.map(({ className }) => className ?? "");
+  const limitations: UiHierarchyLimitation[] = [];
+  if (classes.some((name) => /(?:^|\.)WebView$/u.test(name))) {
+    limitations.push({
+      code: "WEBVIEW_CONTENT_MAY_BE_INCOMPLETE",
+      summary: "WebView content is not guaranteed to be exposed through Android accessibility.",
+    });
+  }
+  if (classes.some((name) => /(?:^|\.)ComposeView$/u.test(name))) {
+    limitations.push({
+      code: "COMPOSE_SEMANTICS_DEPENDENT",
+      summary: "Compose detail depends on the semantics exported by the application.",
+    });
+  }
+  if (classes.some((name) => /(?:^|\.)FlutterView$/u.test(name))) {
+    limitations.push({
+      code: "FLUTTER_SEMANTICS_DEPENDENT",
+      summary: "Flutter detail depends on the semantics exported by the application.",
+    });
+  }
+  return limitations;
 }
 
 function decodeXml(value: string): string {
@@ -108,8 +161,20 @@ export function parseUiHierarchy(
   const hierarchyStart = output.indexOf("<hierarchy");
   const xmlStart = start === -1 ? hierarchyStart : start;
   const xmlEnd = output.lastIndexOf("</hierarchy>");
-  if (xmlStart === -1 || xmlEnd === -1 || xmlEnd < xmlStart) return undefined;
-  const xml = output.slice(xmlStart, xmlEnd + "</hierarchy>".length);
+  const selfClosingHierarchy = output
+    .slice(Math.max(0, hierarchyStart))
+    .match(/^<hierarchy\b[^>]*\/\s*>/u);
+  if (
+    xmlStart === -1 ||
+    (xmlEnd === -1 && selfClosingHierarchy === null) ||
+    (xmlEnd < xmlStart && selfClosingHierarchy === null)
+  ) {
+    return undefined;
+  }
+  const xml =
+    xmlEnd === -1
+      ? output.slice(xmlStart, hierarchyStart + (selfClosingHierarchy?.[0].length ?? 0))
+      : output.slice(xmlStart, xmlEnd + "</hierarchy>".length);
   const maxDepth = options.maxDepth ?? 25;
   const maxNodes = options.maxNodes ?? 2_000;
   const canonical: Array<Omit<UiNode, "ref">> = [];
@@ -177,6 +242,12 @@ export function parseUiHierarchy(
     totalNodes,
     returnedNodes: nodes.length,
     truncated,
+    filtering: {
+      interactiveOnly: options.interactiveOnly === true,
+      maxDepth,
+      maxNodes,
+    },
+    limitations: hierarchyLimitations(canonical),
     nodes,
   };
 }
