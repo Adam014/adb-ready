@@ -97,6 +97,8 @@ describe("GitHub emulator example", () => {
     expect(workflow).toContain("permissions:\n  contents: read");
     expect(workflow).toContain("if: always()");
     expect(workflow).toContain("include-hidden-files: true");
+    expect(workflow).toContain("script: >-");
+    expect(workflow).not.toContain("node dist/cli.js run \\");
     expect(workflow).toContain("--device emulator-5554");
     expect(workflow).toContain("--non-interactive");
   });

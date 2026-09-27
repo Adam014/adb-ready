@@ -75,16 +75,16 @@ jobs:
           emulator-port: 5554
           emulator-boot-timeout: 600
           disable-animations: true
-          script: |
-            mkdir -p .adb-ready
-            node dist/cli.js run \
-              --config examples/ci-emulator/adb-ready.config.json \
-              --device emulator-5554 \
-              --run-timeout 2m \
-              --format ndjson \
-              --non-interactive \
-              -- node examples/ci-emulator/verify-emulator.mjs \
-              > .adb-ready/ci-result.ndjson
+          script: >-
+            mkdir -p .adb-ready &&
+            node dist/cli.js run
+            --config examples/ci-emulator/adb-ready.config.json
+            --device emulator-5554
+            --run-timeout 2m
+            --format ndjson
+            --non-interactive
+            -- node examples/ci-emulator/verify-emulator.mjs
+            > .adb-ready/ci-result.ndjson
 
       - name: Preserve normalized result and evidence
         if: always()
