@@ -149,7 +149,7 @@ describe("home screen", () => {
     const sink = new MemorySink();
     const selected = await showHomeScreen({
       version: "0.0.0",
-      input: new AutoInput("3\r", "2\r"),
+      input: new AutoInput("3\r", "3\r"),
       sink,
       capabilities: { ...interactive, animation: false },
     });

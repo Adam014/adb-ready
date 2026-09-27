@@ -90,7 +90,8 @@ to reveal an action.
   runtime-permission dialogs—assert state, audit accessibility, and capture the
   screen.
 - [**Debug with evidence**](./docs/logs-and-context.md) — keep focused logs,
-  session history, screenshots, recordings, and redacted context together.
+  correlated crash/ANR/native findings, session history, screenshots,
+  recordings, and redacted context together.
 - [**Automate a real device**](./docs/automation.md#run-one-bounded-verification)
   — gate a finite command on readiness and return stable results, reports, and
   artifacts.

@@ -24,6 +24,7 @@ import type { EventBus } from "../core/event-bus.js";
 import type { AdbReadyEvent, OperationPlan, Problem, ResultEnvelope } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import type { CaptureData } from "../evidence/capture.js";
+import type { InspectFailuresData } from "../evidence/failure-evidence.js";
 import type { InspectAppData, InspectUiData } from "../evidence/inspect.js";
 import type { UiActionData } from "../evidence/ui-actions.js";
 import type { AndroidTarget } from "../target/model.js";
@@ -262,6 +263,19 @@ function isCaptureData(value: unknown): value is CaptureData {
 
 function isInspectAppData(value: unknown): value is InspectAppData {
   return isRecord(value) && value.kind === "app" && isRecord(value.selected) && isRecord(value.app);
+}
+
+function isInspectFailuresData(value: unknown): value is InspectFailuresData {
+  return (
+    isRecord(value) &&
+    value.kind === "failures" &&
+    isRecord(value.selected) &&
+    typeof value.applicationId === "string" &&
+    isRecord(value.identity) &&
+    Array.isArray(value.incidents) &&
+    Array.isArray(value.sources) &&
+    typeof value.truncated === "boolean"
+  );
 }
 
 function isInspectUiData(value: unknown): value is InspectUiData {
@@ -636,6 +650,34 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
       `${style.warning(glyphs.warning, capabilities)} Screenshot explicit capture required · adb-ready capture screenshot`,
       `${style.warning(glyphs.warning, capabilities)} Privacy    sensitive device evidence`,
     );
+  }
+
+  if (result.command === "inspect failures" && isInspectFailuresData(result.data)) {
+    const data = result.data;
+    const total = data.incidents.length;
+    lines.push(
+      `${style.success(glyphs.success, capabilities)} Target    ${clean(data.selected.target.name)} · ${clean(data.selected.transport.serial)}`,
+      `${style.success(glyphs.success, capabilities)} App       ${clean(data.applicationId)}`,
+      `${style.success(glyphs.success, capabilities)} Identity  UID ${data.identity.uid === undefined ? "not observed" : String(data.identity.uid)} · PID ${data.identity.currentPid === undefined ? "not running" : String(data.identity.currentPid)}`,
+      `${total === 0 ? style.success(glyphs.success, capabilities) : style.warning(glyphs.warning, capabilities)} Findings  ${String(total)}${data.truncated ? "+ (bounded)" : ""} in ${Math.round(data.window.durationMs / 60_000)}m · Java ${String(data.summary["java-crash"])} · native ${String(data.summary["native-crash"])} · ANR ${String(data.summary.anr)} · RN ${String(data.summary["react-native"])}`,
+    );
+    for (const source of data.sources) {
+      const marker = source.available
+        ? source.truncated
+          ? style.warning(glyphs.warning, capabilities)
+          : style.success(glyphs.success, capabilities)
+        : style.warning(glyphs.warning, capabilities);
+      lines.push(
+        `${marker} ${clean(source.name.padEnd(25))}${source.available ? `${String(source.records)} record(s)${source.truncated ? " · bounded" : ""}` : clean(source.limitation ?? "unavailable")}`,
+      );
+    }
+    data.incidents.slice(0, 10).forEach((incident, index) => {
+      const branch = index === Math.min(data.incidents.length, 10) - 1 ? glyphs.end : glyphs.branch;
+      lines.push(
+        `${style.dim(branch, capabilities)} ${style.warning(incident.kind, capabilities)} · ${clean(incident.summary)}${incident.corroboratedBy === undefined ? "" : ` · confirmed by ${clean(incident.corroboratedBy.join(", "))}`}`,
+      );
+    });
+    lines.push(`${style.warning(glyphs.warning, capabilities)} Privacy   sensitive app evidence`);
   }
 
   if (result.command === "inspect ui" && isInspectUiData(result.data)) {
@@ -1061,6 +1103,25 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`record_count=${String(result.data.logs.records.length)}\n`);
       sink.write(`finding_count=${String(result.data.logs.findings.length)}\n`);
     }
+    sink.write("sensitive=true\n");
+  }
+  if (isInspectFailuresData(result.data)) {
+    sink.write("kind=failures\n");
+    sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);
+    sink.write(`package=${clean(result.data.applicationId)}\n`);
+    if (result.data.identity.uid !== undefined) {
+      sink.write(`uid=${String(result.data.identity.uid)}\n`);
+    }
+    if (result.data.identity.currentPid !== undefined) {
+      sink.write(`current_pid=${String(result.data.identity.currentPid)}\n`);
+    }
+    sink.write(`window_since=${clean(result.data.window.since)}\n`);
+    sink.write(`incident_count=${String(result.data.incidents.length)}\n`);
+    sink.write(`truncated=${String(result.data.truncated)}\n`);
+    sink.write(`java_crash_count=${String(result.data.summary["java-crash"])}\n`);
+    sink.write(`native_crash_count=${String(result.data.summary["native-crash"])}\n`);
+    sink.write(`anr_count=${String(result.data.summary.anr)}\n`);
+    sink.write(`react_native_count=${String(result.data.summary["react-native"])}\n`);
     sink.write("sensitive=true\n");
   }
   if (isInspectUiData(result.data)) {

@@ -74,6 +74,7 @@ import {
 } from "../domain/contracts.js";
 import { ProblemCode } from "../domain/problems.js";
 import { type CaptureData, runCapture } from "../evidence/capture.js";
+import { type InspectFailuresData, runInspectFailures } from "../evidence/failure-evidence.js";
 import {
   type InspectAppData,
   type InspectUiData,
@@ -318,11 +319,16 @@ Init options:
 `,
   inspect: `Usage:
   adb-ready inspect app [APP_ID] [options]
+  adb-ready inspect failures [APP_ID] [--since 15m] [--max-records 20] [options]
   adb-ready inspect ui [--interactive-only] [--max-depth N] [--acquisition PROFILE] [options]
 
 Returns a bounded evidence snapshot for one deterministic target. UI text and
 hierarchy data are explicitly marked sensitive and are never added to AI
 context implicitly.
+
+Failure inspection correlates package-scoped ApplicationExitInfo, logcat crash
+buffers, ANR markers, native failures, and permitted DropBox records. Missing
+or permission-limited Android sources remain explicit in the result.
 
 UI acquisition profiles:
   balanced              One bounded fresh platform-idle snapshot (default)
@@ -829,6 +835,7 @@ async function runInteractiveSession(
       help: ["help"],
       init: ["init"],
       "inspect-app": ["inspect", "app"],
+      "inspect-failures": ["inspect", "failures"],
       "inspect-ui": ["inspect", "ui", "--interactive-only"],
       "ui-audit": ["ui", "audit"],
       logs: ["logs"],
@@ -1709,6 +1716,7 @@ async function runCliInternal(
     | CommandExecution<CaptureData>
     | CommandExecution<DevicesData>
     | CommandExecution<InspectAppData>
+    | CommandExecution<InspectFailuresData>
     | CommandExecution<InspectUiData>
     | CommandExecution<UiActionData>
     | CommandExecution<UiActionData | UiSystemActionData>
@@ -1831,25 +1839,49 @@ async function runCliInternal(
               commandDependencies,
               signal,
             )
-          : await runInspectApp(
-              {
-                cwd: io.cwd,
-                ...(options.appId === undefined ? {} : { applicationId: options.appId }),
-                ...(values.appPackage === undefined
-                  ? {}
-                  : {
-                      configuredPackage: {
-                        value: values.appPackage,
-                        ...(loaded.config.provenance.appPackage?.location === undefined
-                          ? {}
-                          : { location: loaded.config.provenance.appPackage.location }),
-                      },
-                    }),
-              },
-              config,
-              commandDependencies,
-              signal,
-            );
+          : options.inspectKind === "failures"
+            ? await runInspectFailures(
+                {
+                  cwd: io.cwd,
+                  ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+                  ...(options.failureSinceMs === undefined
+                    ? {}
+                    : { sinceMs: options.failureSinceMs }),
+                  ...(options.logMaxRecords === undefined ? {} : { limit: options.logMaxRecords }),
+                  ...(values.appPackage === undefined
+                    ? {}
+                    : {
+                        configuredPackage: {
+                          value: values.appPackage,
+                          ...(loaded.config.provenance.appPackage?.location === undefined
+                            ? {}
+                            : { location: loaded.config.provenance.appPackage.location }),
+                        },
+                      }),
+                },
+                config,
+                commandDependencies,
+                signal,
+              )
+            : await runInspectApp(
+                {
+                  cwd: io.cwd,
+                  ...(options.appId === undefined ? {} : { applicationId: options.appId }),
+                  ...(values.appPackage === undefined
+                    ? {}
+                    : {
+                        configuredPackage: {
+                          value: values.appPackage,
+                          ...(loaded.config.provenance.appPackage?.location === undefined
+                            ? {}
+                            : { location: loaded.config.provenance.appPackage.location }),
+                        },
+                      }),
+                },
+                config,
+                commandDependencies,
+                signal,
+              );
     } else if (options.command === "ui") {
       if (options.uiRequest === undefined) {
         throw new Error("Validated UI command is missing its action request.");
@@ -2436,6 +2468,7 @@ async function runCliInternal(
         | AppsData
         | CaptureData
         | InspectAppData
+        | InspectFailuresData
         | InspectUiData
         | OpenData
         | UiActionData

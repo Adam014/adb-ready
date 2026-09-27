@@ -37,6 +37,10 @@ breaking changes.
   proportional dimension limits, capture provenance, and truncation metadata;
   MCP image results now default to a context-safe 1024×1024 and 4 MiB base64 budget
   with an explicit full-resolution opt-in.
+- Add `inspect failures` and `inspect_failures` to correlate bounded,
+  package-scoped ApplicationExitInfo, crash-buffer, ANR, React Native, native,
+  and permitted DropBox evidence while reporting unavailable Android sources
+  and excluding unrelated process failures.
 
 ## [0.5.1] - 2026-09-25
 

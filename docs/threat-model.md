@@ -59,6 +59,13 @@ must fit an encoded payload budget; full-resolution delivery is an explicit
 client choice. These controls bound transport and context size, not the visual
 sensitivity of the selected pixels.
 
+Failure inspection accepts only a verified installed package, binds every
+probe to the same target, uses package-scoped exit history and log filtering,
+and retains DropBox blocks only when an exact package or package-process line
+matches. Unavailable or permission-limited sources are reported rather than
+replaced by target-wide evidence. Source bytes, time windows, record counts,
+and returned excerpts are bounded and redacted.
+
 ### Unbounded or misleading automation
 
 Process output, recordings, UI trees, session storage, context, retries, and

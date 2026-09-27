@@ -637,6 +637,43 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses bounded package-scoped failure inspection", () => {
+    expect(parseArguments(["inspect"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+      message: "inspect requires app, failures, or ui.",
+    });
+    expect(
+      parseArguments([
+        "inspect",
+        "failures",
+        "com.example.app",
+        "--since",
+        "15m",
+        "--max-records",
+        "25",
+        "--json",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "inspect",
+        inspectKind: "failures",
+        appId: "com.example.app",
+        failureSinceMs: 900_000,
+        logMaxRecords: 25,
+      },
+    });
+    expect(parseArguments(["inspect", "app", "--since", "15m"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(parseArguments(["inspect", "failures", "--max-records", "101"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+  });
+
   test("parses UI acquisition profiles only for semantic UI workflows", () => {
     expect(parseArguments(["inspect", "ui", "--acquisition", "strict"])).toMatchObject({
       ok: true,

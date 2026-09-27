@@ -155,6 +155,22 @@ produce a complete standard non-interlaced 8-bit PNG. Confirm that the selected
 display is available and not blocked by a secure surface, then retry without
 assuming that a PNG signature alone proves usable evidence.
 
+## Failure inspection has unavailable sources
+
+`adb-ready inspect failures APP_ID` succeeds when the app and target are
+verified even if an optional Android evidence source is absent. Read the
+`sources` list: each entry distinguishes available, truncated,
+permission-limited, and unsupported evidence.
+The top-level `truncated` flag means the requested incident limit bounded the
+combined result; a source-level flag means Android output or log retention was
+bounded before correlation.
+
+Application exit history requires Android 11/API 30 or a compatible OEM
+backport. DropBox visibility varies by Android build and shell permissions.
+ADB Ready does not substitute unrelated target-wide crashes. Use a recent
+`--since` window, reproduce the failure, and retry; use focused `adb-ready logs`
+when the app is still running and live output is required.
+
 ## Report a reproducible issue
 
 For ordinary bugs, open a GitHub issue with the ADB Ready version, host/runtime,

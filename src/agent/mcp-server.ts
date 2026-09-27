@@ -23,6 +23,7 @@ import { loadConfig } from "../config/loader.js";
 import type { LoadedConfig } from "../config/types.js";
 import type { ResultEnvelope } from "../domain/contracts.js";
 import { runCapture } from "../evidence/capture.js";
+import { runInspectFailures } from "../evidence/failure-evidence.js";
 import { runInspectApp, runInspectUi } from "../evidence/inspect.js";
 import { runUiAction } from "../evidence/ui-actions.js";
 import type { UiHierarchySnapshot } from "../evidence/ui-hierarchy.js";
@@ -672,6 +673,44 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       if (execution.result.ok && execution.result.data?.kind === "ui") {
         rememberUiSnapshot(execution.result.data.snapshot);
       }
+      return toolResult(execution.result);
+    },
+  );
+  register(
+    "inspect_failures",
+    "Correlate bounded package-scoped Java, native, React Native, and ANR evidence from supported Android sources without mutating the target.",
+    z.object({
+      ...targetHandleShape,
+      applicationId: z.string().min(3).optional(),
+      sinceMs: z
+        .number()
+        .int()
+        .min(1_000)
+        .max(7 * 24 * 60 * 60_000)
+        .optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    }),
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      targetBound: true,
+    },
+    async ({ applicationId, sinceMs, limit }, signal, loaded) => {
+      const execution = await runInspectFailures(
+        {
+          cwd: options.cwd,
+          ...(applicationId === undefined ? {} : { applicationId }),
+          ...(sinceMs === undefined ? {} : { sinceMs }),
+          ...(limit === undefined ? {} : { limit }),
+          ...(loaded.values.appPackage === undefined
+            ? {}
+            : { configuredPackage: { value: loaded.values.appPackage } }),
+        },
+        commandConfig(loaded, bound),
+        dependencies,
+        signal,
+      );
       return toolResult(execution.result);
     },
   );
