@@ -1809,6 +1809,54 @@ describe("runDev", () => {
     );
   });
 
+  test("normalizes verifier staging failures instead of rejecting the session promise", async () => {
+    const deps = dependencies(async (request) => {
+      const probe = targetProbe(request);
+      if (probe !== undefined) return probe;
+      if (request.executable === "dev-service") {
+        return await new Promise<ProcessResult>((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => resolve(result(request, { exitCode: null, signal: "SIGTERM", aborted: true })),
+            { once: true },
+          );
+        });
+      }
+      return result(request);
+    });
+    deps.prepareVerifierDirectory = async () => {
+      const error = new Error("permission denied") as Error & { code: string };
+      error.code = "EACCES";
+      throw error;
+    };
+
+    const execution = await runDev(
+      {
+        cwd: "/workspace/app",
+        mode: "run",
+        preset: "custom",
+        command: { executable: "dev-service", args: [] },
+        verification: { command: { executable: "maestro", args: ["test", "flow.yaml"] } },
+        reversePorts: [],
+        logs: false,
+        watch: false,
+      },
+      {},
+      deps,
+    );
+
+    expect(execution.result.data?.verification).toMatchObject({
+      passed: false,
+      adapter: "maestro",
+      outcome: "tool-failed",
+      exitCode: null,
+      stderr: "permission denied",
+    });
+    expect(execution.result.problems).toContainEqual(
+      expect.objectContaining({ code: ProblemCode.VerificationFailed }),
+    );
+  });
+
   test("does not diagnose intentional run teardown as a recovery degradation", async () => {
     let mapped = false;
     let healthProbeStarted: (() => void) | undefined;

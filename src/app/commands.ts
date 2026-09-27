@@ -4652,7 +4652,9 @@ export async function runDev(
             aborted: verificationProcess.aborted,
             unavailable: verificationProcess.spawnError?.code === "ENOENT",
             targetFailed: recoverySummary.failed,
-            preparationFailed: verificationProcess.spawnError?.code === "ADB_READY_TARGET_MISMATCH",
+            preparationFailed:
+              verificationProcess.spawnError !== undefined &&
+              verificationProcess.spawnError.code !== "ENOENT",
           }),
           targetArgument: preparedVerifier?.targetArgument ?? null,
           artifactReferences: preparedVerifier?.artifactReferences ?? [],
