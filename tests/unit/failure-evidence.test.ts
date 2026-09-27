@@ -29,7 +29,14 @@ function result(request: ProcessRequest, stdout = "", exitCode = 0): ProcessResu
 }
 
 function fixture(
-  options: { unavailableExit?: boolean; deniedDropbox?: boolean; invalidClock?: boolean } = {},
+  options: {
+    unavailableApp?: boolean;
+    unavailableExit?: boolean;
+    failedExit?: boolean;
+    deniedDropbox?: boolean;
+    failedDropbox?: boolean;
+    invalidClock?: boolean;
+  } = {},
 ): CommandDependencies {
   let id = 0;
   return {
@@ -53,6 +60,7 @@ function fixture(
       if (args.includes("mdns")) return result(request, "List of discovered mdns services\n");
       if (args.includes("ro.serialno")) return result(request, "hardware-1\n");
       if (args.includes("packages")) {
+        if (options.unavailableApp === true) return result(request, "");
         return result(
           request,
           args.includes("-U")
@@ -61,6 +69,7 @@ function fixture(
         );
       }
       if (args.includes("dumpsys") && args.includes("package")) {
+        if (options.unavailableApp === true) return result(request, "Unknown package\n", 1);
         return result(
           request,
           "Package [com.example.app]\n codePath=/data/app/example\n versionCode=7 targetSdk=36\n versionName=1.2.3\n pkgFlags=[ DEBUGGABLE ]\n",
@@ -82,6 +91,7 @@ function fixture(
       }
       if (args.includes("date") && args.includes("+%z")) return result(request, "+0000\n");
       if (args.includes("exit-info")) {
+        if (options.failedExit === true) return result(request, "dumpsys failed\n", 2);
         return result(
           request,
           options.unavailableExit === true
@@ -118,6 +128,7 @@ function fixture(
         return result(request, output);
       }
       if (args.includes("dropbox")) {
+        if (options.failedDropbox === true) return result(request, "dumpsys failed\n", 2);
         if (options.deniedDropbox === true) return result(request, "Permission Denial\n", 1);
         const tag = args.at(-1);
         return result(
@@ -234,6 +245,47 @@ ANR in com.example.app
     ]);
   });
 
+  test("preserves separate processes and fills missing correlated identity", () => {
+    const separate = correlateFailureIncidents([
+      {
+        kind: "java-crash",
+        source: "application-exit-info",
+        process: "com.example.app:first",
+        pid: 50,
+        summary: "first",
+        evidence: [],
+      },
+      {
+        kind: "java-crash",
+        source: "logcat",
+        process: "com.example.app:second",
+        pid: 50,
+        summary: "second",
+        evidence: [],
+      },
+    ]);
+    expect(separate).toHaveLength(2);
+
+    const filled = correlateFailureIncidents([
+      {
+        kind: "anr",
+        source: "application-exit-info",
+        pid: 51,
+        summary: "primary",
+        evidence: [],
+      },
+      {
+        kind: "anr",
+        source: "logcat",
+        observedAt: "2026-09-10T09:59:30.000Z",
+        pid: 51,
+        summary: "secondary",
+        evidence: [],
+      },
+    ]);
+    expect(filled[0]?.observedAt).toBe("2026-09-10T09:59:30.000Z");
+  });
+
   test("correlates bounded Java, React Native, native, and ANR evidence while excluding unrelated exits", async () => {
     const execution = await runInspectFailures(
       { cwd: "/project", applicationId: "com.example.app", sinceMs: 60_000, limit: 10 },
@@ -281,6 +333,33 @@ ANR in com.example.app
         ],
       },
     });
+  });
+
+  test("reports failed optional Android sources without fabricating evidence", async () => {
+    const execution = await runInspectFailures(
+      { cwd: "/project", applicationId: "com.example.app" },
+      {},
+      fixture({ failedExit: true, failedDropbox: true }),
+    );
+    expect(execution.result).toMatchObject({
+      ok: true,
+      data: {
+        sources: [
+          { name: "application-exit-info", available: false },
+          { name: "logcat", available: true },
+          { name: "dropbox", available: false },
+        ],
+      },
+    });
+  });
+
+  test("returns the verified app-resolution failure before reading target evidence", async () => {
+    const execution = await runInspectFailures(
+      { cwd: "/project", applicationId: "com.example.app" },
+      {},
+      fixture({ unavailableApp: true }),
+    );
+    expect(execution.result).toMatchObject({ ok: false, data: null });
   });
 
   test("fails closed when Android cannot anchor the evidence window", async () => {
