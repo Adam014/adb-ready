@@ -211,7 +211,7 @@
     },
     {
       "name": "capture_screenshot",
-      "description": "Capture a verified PNG inside the project and return its image pixels to the client without overwriting an existing file.",
+      "description": "Capture a verified PNG inside the project and return its pixels. Agent results default to a 1024×1024, 4 MiB context-safe budget; use crop or explicit limits to focus evidence, or fullResolution only when the client can accept it.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -224,6 +224,45 @@
           "out": {
             "type": "string",
             "minLength": 1
+          },
+          "crop": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16383
+              },
+              "y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16383
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16384
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16384
+              }
+            },
+            "required": ["x", "y", "width", "height"]
+          },
+          "maxWidth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16384
+          },
+          "maxHeight": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16384
+          },
+          "fullResolution": {
+            "type": "boolean"
           }
         }
       },

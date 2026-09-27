@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, writeSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import {
   type Context,
   context,
@@ -21,6 +21,7 @@ import {
   prepareEvidenceDestination,
 } from "./files.js";
 import { inspectMp4Recording } from "./mp4.js";
+import { type PngCrop, PngError, transformPng } from "./png.js";
 
 export type CaptureKind = "screen-record" | "screenshot";
 
@@ -30,6 +31,11 @@ export interface CaptureRequest {
   out?: string;
   force?: boolean;
   durationSeconds?: number;
+  crop?: PngCrop;
+  maxWidth?: number;
+  maxHeight?: number;
+  payloadBudgetBytes?: number;
+  budget?: "context-safe" | "custom" | "full-resolution";
 }
 
 export interface EvidenceFile {
@@ -39,6 +45,16 @@ export interface EvidenceFile {
   sha256: string;
   durationMs?: number;
   frameCount?: number;
+  observedAt: string;
+  image?: {
+    source: { width: number; height: number };
+    output: { width: number; height: number };
+    crop?: PngCrop;
+    encoding: { format: "png"; bitDepth: 8; colorType: "rgba" };
+    budget: "context-safe" | "custom" | "full-resolution";
+    truncated: boolean;
+    truncation: Array<"cropped" | "resized">;
+  };
   provenance: {
     command: "exec-out screencap -p" | "shell screenrecord";
     targetSerial: string;
@@ -50,6 +66,71 @@ export interface CaptureData {
   selected: import("../target/selection.js").SelectedTarget;
   evidence: EvidenceFile;
   durationSeconds?: number;
+}
+
+function captureInputProblem(request: CaptureRequest, commandId: string): Problem | undefined {
+  const screenshotOptions = [
+    request.crop,
+    request.maxWidth,
+    request.maxHeight,
+    request.payloadBudgetBytes,
+    request.budget,
+  ];
+  if (request.kind !== "screenshot" && screenshotOptions.some((value) => value !== undefined)) {
+    return problem(
+      "SCREENSHOT_OPTIONS_MISMATCH",
+      "input.evidence.screenshot",
+      "Screenshot crop and dimension options cannot be used for a screen recording.",
+      "Remove screenshot-only options or capture a screenshot.",
+      commandId,
+    );
+  }
+  for (const value of [request.maxWidth, request.maxHeight]) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1 || value > 16_384)) {
+      return problem(
+        "SCREENSHOT_DIMENSION_LIMIT_INVALID",
+        "input.evidence.screenshot",
+        "Screenshot dimension limits must be whole pixels from 1 to 16384.",
+        "Pass a positive --max-width or --max-height within the decoder budget.",
+        commandId,
+      );
+    }
+  }
+  if (request.crop !== undefined) {
+    const { x, y, width, height } = request.crop;
+    if (
+      ![x, y, width, height].every(Number.isSafeInteger) ||
+      x < 0 ||
+      y < 0 ||
+      width < 1 ||
+      height < 1 ||
+      x + width > 16_384 ||
+      y + height > 16_384
+    ) {
+      return problem(
+        "SCREENSHOT_CROP_INVALID",
+        "input.evidence.screenshot",
+        "Screenshot crop must be X,Y,WIDTH,HEIGHT in bounded whole pixels.",
+        "Use non-negative origins, positive dimensions, and an area inside the source screenshot.",
+        commandId,
+      );
+    }
+  }
+  if (
+    request.payloadBudgetBytes !== undefined &&
+    (!Number.isSafeInteger(request.payloadBudgetBytes) ||
+      request.payloadBudgetBytes < 1 ||
+      request.payloadBudgetBytes > MAX_SCREENSHOT_BYTES)
+  ) {
+    return problem(
+      "SCREENSHOT_PAYLOAD_BUDGET_INVALID",
+      "input.evidence.screenshot",
+      "Screenshot payload budget must be from 1 byte to 64 MiB.",
+      "Choose a bounded agent payload budget.",
+      commandId,
+    );
+  }
+  return undefined;
 }
 
 function pathProblem(caught: unknown, current: Context): Problem {
@@ -70,6 +151,7 @@ function defaultName(kind: CaptureKind, current: Context): string {
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_PNG_TEXT_PREAMBLE_BYTES = 16 * 1024;
+const MAX_SCREENSHOT_BYTES = 64 * 1024 * 1024;
 
 function isTextPreamble(value: Uint8Array): boolean {
   return value.every(
@@ -91,6 +173,10 @@ class PngStreamWriter {
   write(chunk: Uint8Array): void {
     if (this.#rejected) return;
     if (this.#started) {
+      if (this.bytes + chunk.byteLength > MAX_SCREENSHOT_BYTES) {
+        this.#rejected = true;
+        return;
+      }
       writeSync(this.#fd, chunk);
       this.bytes += chunk.byteLength;
       return;
@@ -114,6 +200,11 @@ class PngStreamWriter {
     }
 
     const png = combined.subarray(offset);
+    if (png.byteLength > MAX_SCREENSHOT_BYTES) {
+      this.#rejected = true;
+      this.#pending = Buffer.alloc(0);
+      return;
+    }
     writeSync(this.#fd, png);
     this.bytes += png.byteLength;
     this.#pending = Buffer.alloc(0);
@@ -173,12 +264,70 @@ async function captureScreenshot(
     );
     return undefined;
   }
+  let transformed: ReturnType<typeof transformPng>;
+  try {
+    transformed = transformPng(await readFile(destination.temporaryPath), {
+      ...(request.crop === undefined ? {} : { crop: request.crop }),
+      ...(request.maxWidth === undefined ? {} : { maxWidth: request.maxWidth }),
+      ...(request.maxHeight === undefined ? {} : { maxHeight: request.maxHeight }),
+    });
+  } catch (caught) {
+    await discardEvidenceDestination(destination);
+    const pngError = caught instanceof PngError ? caught : undefined;
+    problems.push(
+      problem(
+        pngError?.code === "BOUNDS"
+          ? "SCREENSHOT_BOUNDS_INVALID"
+          : pngError?.code === "UNSUPPORTED"
+            ? "SCREENSHOT_ENCODING_UNSUPPORTED"
+            : "SCREENSHOT_INVALID",
+        pngError?.code === "BOUNDS" ? "input.evidence.screenshot" : "evidence.capture",
+        pngError?.message ?? "ADB did not return a decodable PNG screenshot.",
+        "Use a crop inside the reported source dimensions and limits from 1 to 16384 pixels. The target must emit a standard non-interlaced 8-bit PNG.",
+        current.commandId,
+      ),
+    );
+    return undefined;
+  }
+  if (
+    request.payloadBudgetBytes !== undefined &&
+    transformed.bytes.byteLength > request.payloadBudgetBytes
+  ) {
+    await discardEvidenceDestination(destination);
+    problems.push(
+      problem(
+        "SCREENSHOT_PAYLOAD_TOO_LARGE",
+        "evidence.capture",
+        `The processed screenshot is ${String(transformed.bytes.byteLength)} bytes, above the ${String(request.payloadBudgetBytes)}-byte agent payload budget.`,
+        "Crop a smaller region, lower maxWidth/maxHeight, or request fullResolution only when the client can accept the larger payload.",
+        current.commandId,
+      ),
+    );
+    return undefined;
+  }
+  await writeFile(destination.temporaryPath, transformed.bytes, { flag: "w", mode: 0o600 });
   await commitEvidenceDestination(destination, request.force === true);
   return {
     path: destination.relativePath,
     mediaType: "image/png",
-    bytes: png.bytes,
+    bytes: transformed.bytes.byteLength,
     sha256: await sha256(destination.finalPath),
+    observedAt: current.clock().toISOString(),
+    image: {
+      source: transformed.source,
+      output: transformed.output,
+      ...(transformed.crop === undefined ? {} : { crop: transformed.crop }),
+      encoding: transformed.encoding,
+      budget:
+        request.budget ??
+        (request.maxWidth === undefined &&
+        request.maxHeight === undefined &&
+        request.crop === undefined
+          ? "full-resolution"
+          : "custom"),
+      truncated: transformed.truncated,
+      truncation: transformed.truncation,
+    },
     provenance: { command: "exec-out screencap -p", targetSerial: ready.target.serial },
   };
 }
@@ -269,6 +418,7 @@ async function captureScreenRecord(
       sha256: await sha256(destination.finalPath),
       durationMs: inspection.durationMs,
       frameCount: inspection.frameCount,
+      observedAt: current.clock().toISOString(),
       provenance: { command: "shell screenrecord", targetSerial: ready.target.serial },
     };
   } finally {
@@ -294,6 +444,11 @@ export async function runCapture(
 ): Promise<CommandExecution<CaptureData>> {
   const current = context(`capture ${request.kind}`, dependencies);
   const problems: Problem[] = [];
+  const inputProblem = captureInputProblem(request, current.commandId);
+  if (inputProblem !== undefined) {
+    problems.push(inputProblem);
+    return finish<CaptureData>(current, null, problems);
+  }
   const ready = await readyTarget(current, config, dependencies, problems, signal);
   if (ready === undefined) return finish<CaptureData>(current, null, problems);
   let destination: Awaited<ReturnType<typeof prepareEvidenceDestination>>;

@@ -140,6 +140,21 @@ Resolve the user-action problem, then start a new session. Increase the recovery
 budget only when the environment is known to need more time; do not use an
 unbounded timeout.
 
+## Screenshot capture is rejected
+
+`SCREENSHOT_BOUNDS_INVALID` means the requested `--crop X,Y,WIDTH,HEIGHT` lies
+outside the decoded source image. Capture once without a crop and read the
+reported `image.source` dimensions, then retry with coordinates inside them.
+
+`SCREENSHOT_PAYLOAD_TOO_LARGE` protects an MCP client from an unexpectedly
+large image. Crop the relevant region or lower `maxWidth`/`maxHeight`; use
+`fullResolution: true` only when the client can deliberately accept it.
+
+`SCREENSHOT_INVALID` or `SCREENSHOT_ENCODING_UNSUPPORTED` means ADB did not
+produce a complete standard non-interlaced 8-bit PNG. Confirm that the selected
+display is available and not blocked by a secure surface, then retry without
+assuming that a PNG signature alone proves usable evidence.
+
 ## Report a reproducible issue
 
 For ordinary bugs, open a GitHub issue with the ADB Ready version, host/runtime,

@@ -123,6 +123,7 @@ Capture a PNG directly from the selected target:
 ```bash
 adb-ready capture screenshot
 adb-ready capture screenshot --out artifacts/login.png
+adb-ready capture screenshot --crop 120,300,840,900 --max-width 640
 ```
 
 Capture a bounded MP4 recording:
@@ -146,7 +147,10 @@ instead of publishing unusable evidence; create visible activity and retry.
 
 Some multi-display Android builds, including foldables, emit a short textual
 warning before the screenshot bytes. ADB Ready removes only a bounded text
-preamble and still requires a valid PNG signature before publishing the file.
+preamble and still decodes the complete PNG, verifies its chunks and checksums,
+and validates its dimensions before publishing the file. `--crop` uses source
+pixels in `X,Y,WIDTH,HEIGHT` order. `--max-width` and `--max-height` preserve
+aspect ratio and never upscale.
 
 The result contains:
 
@@ -154,11 +158,20 @@ The result contains:
 - media type and byte size;
 - measured duration and video frame count for recordings;
 - SHA-256 digest;
+- capture timestamp, source/output dimensions, effective crop, PNG encoding,
+  and whether crop or resize intentionally truncated the original frame;
 - selected target and capture-command provenance.
 
 Binary data is stored as a file rather than embedded into JSON or AI context.
 Screenshots and recordings can contain private information; ADB Ready does not
 upload or implicitly attach them to diagnostic context.
+
+MCP screenshot results are different by design: `capture_screenshot` returns
+image content to the requesting client, so it defaults to a proportional
+1024×1024 maximum and a 4 MiB base64 content budget. Agents may provide a
+smaller `crop`, `maxWidth`, or `maxHeight`. `fullResolution: true` is an
+explicit escape hatch for clients that can safely accept the complete image;
+it cannot be combined with dimension limits.
 
 ## Target selection and automation
 

@@ -221,11 +221,14 @@ List options:
   --filter TEXT         Keep package names containing this text
 `,
   capture: `Usage:
-  adb-ready capture screenshot [--out PATH] [--force]
+  adb-ready capture screenshot [--out PATH] [--crop X,Y,W,H]
+                               [--max-width PX] [--max-height PX] [--force]
   adb-ready capture screen-record [--out PATH] [--duration 10s] [--force]
 
 Writes verified binary evidence inside the current project. Existing files are
 never replaced unless --force is explicit. Recordings are bounded to 180s.
+Screenshot crops use source pixels. Dimension limits preserve aspect ratio and
+never upscale the image. The CLI keeps full resolution unless limits are set.
 `,
   config: `Usage:
   adb-ready config validate [options]
@@ -1799,6 +1802,13 @@ async function runCliInternal(
           ...(options.durationSeconds === undefined
             ? {}
             : { durationSeconds: options.durationSeconds }),
+          ...(options.screenshotCrop === undefined ? {} : { crop: options.screenshotCrop }),
+          ...(options.screenshotMaxWidth === undefined
+            ? {}
+            : { maxWidth: options.screenshotMaxWidth }),
+          ...(options.screenshotMaxHeight === undefined
+            ? {}
+            : { maxHeight: options.screenshotMaxHeight }),
         },
         config,
         commandDependencies,

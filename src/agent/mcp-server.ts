@@ -1299,17 +1299,52 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "capture_screenshot",
-    "Capture a verified PNG inside the project and return its image pixels to the client without overwriting an existing file.",
-    z.object({ ...targetHandleShape, out: z.string().min(1).optional() }),
+    "Capture a verified PNG inside the project and return its pixels. Agent results default to a 1024×1024, 4 MiB context-safe budget; use crop or explicit limits to focus evidence, or fullResolution only when the client can accept it.",
+    z.object({
+      ...targetHandleShape,
+      out: z.string().min(1).optional(),
+      crop: z
+        .object({
+          x: z.number().int().min(0).max(16_383),
+          y: z.number().int().min(0).max(16_383),
+          width: z.number().int().min(1).max(16_384),
+          height: z.number().int().min(1).max(16_384),
+        })
+        .optional(),
+      maxWidth: z.number().int().min(1).max(16_384).optional(),
+      maxHeight: z.number().int().min(1).max(16_384).optional(),
+      fullResolution: z.boolean().optional(),
+    }),
     {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
       targetBound: true,
     },
-    async ({ out }, signal, loaded) => {
+    async ({ out, crop, maxWidth, maxHeight, fullResolution }, signal, loaded) => {
+      if (fullResolution === true && (maxWidth !== undefined || maxHeight !== undefined)) {
+        return inputFailure(
+          "MCP_SCREENSHOT_LIMIT_CONFLICT",
+          "fullResolution cannot be combined with maxWidth or maxHeight; choose explicit limits or full resolution.",
+        );
+      }
+      const bounded = fullResolution !== true;
       const execution = await runCapture(
-        { kind: "screenshot", cwd: options.cwd, ...(out === undefined ? {} : { out }) },
+        {
+          kind: "screenshot",
+          cwd: options.cwd,
+          ...(out === undefined ? {} : { out }),
+          ...(crop === undefined ? {} : { crop }),
+          ...(bounded ? { maxWidth: maxWidth ?? 1_024, maxHeight: maxHeight ?? 1_024 } : {}),
+          // Three raw MiB remain at or below four MiB after base64 expansion.
+          ...(bounded ? { payloadBudgetBytes: 3 * 1024 * 1024 } : {}),
+          budget:
+            fullResolution === true
+              ? "full-resolution"
+              : maxWidth === undefined && maxHeight === undefined
+                ? "context-safe"
+                : "custom",
+        },
         commandConfig(loaded, bound),
         dependencies,
         signal,

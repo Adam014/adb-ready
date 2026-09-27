@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CommandDependencies } from "../../src/app/commands.js";
 import { runCapture } from "../../src/evidence/capture.js";
+import { decodePng, encodePng } from "../../src/evidence/png.js";
 import type { ProcessRequest, ProcessResult } from "../../src/platform/process-runner.js";
 import { recordingMp4 } from "../fixtures/mp4.js";
 
@@ -57,7 +58,11 @@ function fixture(png: Uint8Array, requests: string[][]): CommandDependencies {
 describe("evidence capture", () => {
   test("streams a PNG into an atomic project file and returns verified metadata", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capture-"));
-    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const png = encodePng(
+      2,
+      2,
+      Uint8Array.from({ length: 16 }, (_, index) => index * 8),
+    );
     const requests: string[][] = [];
     try {
       const execution = await runCapture(
@@ -74,10 +79,18 @@ describe("evidence capture", () => {
             mediaType: "image/png",
             bytes: png.byteLength,
             sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            image: {
+              source: { width: 2, height: 2 },
+              output: { width: 2, height: 2 },
+              budget: "full-resolution",
+              truncated: false,
+            },
           },
         },
       });
-      expect(new Uint8Array(await readFile(path.join(root, "evidence/screen.png")))).toEqual(png);
+      expect([...new Uint8Array(await readFile(path.join(root, "evidence/screen.png")))]).toEqual([
+        ...png,
+      ]);
       expect(requests.some((args) => args.includes("exec-out") && args.includes("screencap"))).toBe(
         true,
       );
@@ -88,7 +101,7 @@ describe("evidence capture", () => {
 
   test("strips a bounded textual OEM warning before streamed PNG data", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capture-"));
-    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const png = encodePng(1, 1, Uint8Array.from([10, 20, 30, 255]));
     const warning = new TextEncoder().encode(
       "[Warning] Multiple displays were found, but no display id was specified.\n",
     );
@@ -105,7 +118,89 @@ describe("evidence capture", () => {
         ok: true,
         data: { evidence: { bytes: png.byteLength } },
       });
-      expect(new Uint8Array(await readFile(path.join(root, "screen.png")))).toEqual(png);
+      expect([...new Uint8Array(await readFile(path.join(root, "screen.png")))]).toEqual([...png]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("crops and bounds screenshots with correlated metadata", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capture-"));
+    const pixels = new Uint8Array(4 * 4 * 4);
+    for (let index = 0; index < pixels.length; index += 1) pixels[index] = index;
+    try {
+      const execution = await runCapture(
+        {
+          kind: "screenshot",
+          cwd: root,
+          out: "bounded.png",
+          crop: { x: 1, y: 0, width: 2, height: 4 },
+          maxHeight: 2,
+          budget: "custom",
+          payloadBudgetBytes: 1_000,
+        },
+        {},
+        fixture(encodePng(4, 4, pixels), []),
+      );
+      expect(execution.result).toMatchObject({
+        ok: true,
+        data: {
+          evidence: {
+            image: {
+              source: { width: 4, height: 4 },
+              output: { width: 1, height: 2 },
+              crop: { x: 1, y: 0, width: 2, height: 4 },
+              budget: "custom",
+              truncated: true,
+              truncation: ["cropped", "resized"],
+            },
+          },
+        },
+      });
+      expect(decodePng(await readFile(path.join(root, "bounded.png")))).toMatchObject({
+        width: 1,
+        height: 2,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects crops outside decoded source bounds without keeping evidence", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capture-"));
+    try {
+      const execution = await runCapture(
+        {
+          kind: "screenshot",
+          cwd: root,
+          out: "bad.png",
+          crop: { x: 2, y: 0, width: 2, height: 2 },
+        },
+        {},
+        fixture(encodePng(2, 2, new Uint8Array(16)), []),
+      );
+      expect(execution.result).toMatchObject({
+        ok: false,
+        problems: [{ code: "SCREENSHOT_BOUNDS_INVALID" }],
+      });
+      await expect(readFile(path.join(root, "bad.png"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("enforces the processed screenshot payload budget", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-capture-"));
+    try {
+      const execution = await runCapture(
+        { kind: "screenshot", cwd: root, out: "large.png", payloadBudgetBytes: 1 },
+        {},
+        fixture(encodePng(1, 1, new Uint8Array([1, 2, 3, 255])), []),
+      );
+      expect(execution.result).toMatchObject({
+        ok: false,
+        problems: [{ code: "SCREENSHOT_PAYLOAD_TOO_LARGE" }],
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
