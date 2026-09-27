@@ -257,6 +257,72 @@ describe("agent setup", () => {
       await rm(linkedParentRoot, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
     }
+
+    const linkedConfigParentRoot = await mkdtemp(path.join(tmpdir(), "adb-ready-agent-"));
+    const configOutside = await mkdtemp(path.join(tmpdir(), "adb-ready-agent-outside-"));
+    try {
+      await symlink(configOutside, path.join(linkedConfigParentRoot, ".codex"));
+      const linkedConfigParent = await runAgentSetup(
+        { client: "codex", cwd: linkedConfigParentRoot },
+        dependencies(linkedConfigParentRoot),
+      );
+      expect(linkedConfigParent.result.problems).toMatchObject([
+        { code: "AGENT_CONFIG_UNSAFE_PARENT" },
+      ]);
+      expect(
+        await readFile(path.join(configOutside, "config.toml"), "utf8").catch(() => null),
+      ).toBeNull();
+    } finally {
+      await rm(linkedConfigParentRoot, { recursive: true, force: true });
+      await rm(configOutside, { recursive: true, force: true });
+    }
+
+    const linkedSkillRoot = await mkdtemp(path.join(tmpdir(), "adb-ready-agent-"));
+    try {
+      const skill = path.join(linkedSkillRoot, ".agents/skills/adb-ready/SKILL.md");
+      const actual = path.join(linkedSkillRoot, "custom-skill.md");
+      await mkdir(path.dirname(skill), { recursive: true });
+      await writeFile(actual, "custom\n");
+      await symlink(actual, skill);
+      const linkedSkill = await runAgentSetup(
+        { client: "codex", cwd: linkedSkillRoot },
+        dependencies(linkedSkillRoot),
+      );
+      expect(linkedSkill.result.problems).toMatchObject([{ code: "AGENT_SKILL_SYMLINK" }]);
+      expect(await readFile(actual, "utf8")).toBe("custom\n");
+    } finally {
+      await rm(linkedSkillRoot, { recursive: true, force: true });
+    }
+
+    const invalidSkillRoot = await mkdtemp(path.join(tmpdir(), "adb-ready-agent-"));
+    try {
+      await mkdir(path.join(invalidSkillRoot, ".agents/skills/adb-ready/SKILL.md"), {
+        recursive: true,
+      });
+      const invalidSkill = await runAgentSetup(
+        { client: "codex", cwd: invalidSkillRoot },
+        dependencies(invalidSkillRoot),
+      );
+      expect(invalidSkill.result.problems).toMatchObject([{ code: "AGENT_SKILL_INVALID_PATH" }]);
+    } finally {
+      await rm(invalidSkillRoot, { recursive: true, force: true });
+    }
+
+    const missingSkillRoot = await mkdtemp(path.join(tmpdir(), "adb-ready-agent-"));
+    try {
+      const missingSkill = await runAgentSetup(
+        { client: "codex", cwd: missingSkillRoot },
+        {
+          ...dependencies(missingSkillRoot),
+          loadSkill: async () => {
+            throw new Error("missing skill");
+          },
+        },
+      );
+      expect(missingSkill.result.problems).toMatchObject([{ code: "AGENT_SKILL_UNAVAILABLE" }]);
+    } finally {
+      await rm(missingSkillRoot, { recursive: true, force: true });
+    }
   });
 
   test("rejects JSON documents whose root or server collection is not an object", async () => {

@@ -596,6 +596,11 @@ describe("parseArguments", () => {
       code: "CLI_INVALID_VALUE",
       option: "--mcp-profile",
     });
+    expect(parseArguments(["doctor", "--mcp-profile", "debug"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+      option: "--mcp-profile",
+    });
   });
 
   test("parses safe agent client setup and dry runs", () => {
