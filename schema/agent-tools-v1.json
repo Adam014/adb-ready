@@ -2604,7 +2604,14 @@
           },
           "decision": {
             "type": "string",
-            "enum": ["allow", "allow-always", "allow-once", "allow-while-using", "deny", "deny-and-dont-ask-again"]
+            "enum": [
+              "allow",
+              "allow-always",
+              "allow-once",
+              "allow-while-using",
+              "deny",
+              "deny-and-dont-ask-again"
+            ]
           },
           "dryRun": {
             "type": "boolean"

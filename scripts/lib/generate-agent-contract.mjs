@@ -81,16 +81,25 @@ export async function generateAgentContract(options) {
     transport: "stdio",
     tools,
   };
-  const json = JSON.stringify(artifact, null, 2).replace(
+  const json = stringifyAgentContract(artifact);
+  await writeFile(path.join(options.root, "schema", "agent-tools-v1.json"), `${json}\n`, "utf8");
+}
+
+/** Keep primitive arrays compact only when the complete indented line fits Biome's width. */
+/** @param {unknown} artifact */
+export function stringifyAgentContract(artifact) {
+  const source = JSON.stringify(artifact, null, 2);
+  return source.replace(
     /\[\n((?:\s+(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?|true|false|null),?\n)+)\s*\]/gu,
-    (match, /** @type {string} */ body) => {
+    (match, /** @type {string} */ body, offset) => {
       const compact = `[${body
         .trim()
         .split(/\n/u)
         .map((line) => line.trim())
         .join(" ")}]`;
-      return compact.length <= 100 ? compact : match;
+      const lineStart = source.lastIndexOf("\n", offset - 1) + 1;
+      const indentation = offset - lineStart;
+      return indentation + compact.length <= 100 ? compact : match;
     },
   );
-  await writeFile(path.join(options.root, "schema", "agent-tools-v1.json"), `${json}\n`, "utf8");
 }
