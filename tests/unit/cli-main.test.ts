@@ -315,6 +315,18 @@ describe("runCli", () => {
     expect(humanTerminal.error.value).toContain("pool usb  running");
     expect(humanTerminal.error.value).toContain("pool second  passed · exit 0");
     expect(humanTerminal.error.value).toContain("2 passed · 0 failed");
+
+    const missingTerminal = io();
+    const missingExitCode = await runCli(
+      ["run", "--pool", "missing", "--dry-run", "--json", "--", "node", "verify.mjs"],
+      missingTerminal,
+      fixture,
+    );
+    expect(missingExitCode).toBe(ExitCode.InvalidInput);
+    expect(JSON.parse(missingTerminal.output.value)).toMatchObject({
+      ok: false,
+      problems: [{ code: "TARGET_POOL_NOT_FOUND" }],
+    });
   });
 
   test("fans a Firebase pool into one provider matrix plan per dimension", async () => {

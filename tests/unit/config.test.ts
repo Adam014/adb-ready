@@ -226,6 +226,73 @@ describe("loadConfig", () => {
     }
   });
 
+  test("reports every malformed target-pool boundary without accepting a partial pool", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "malformed-pools.json");
+    await writeJson(projectFile, {
+      version: 1,
+      targets: {
+        pools: {
+          "bad/name": {},
+          scalar: true,
+          settings: {
+            maxConcurrency: 1,
+            members: [],
+            failFast: "yes",
+            leaseWaitMs: -1,
+          },
+          members: {
+            maxConcurrency: 1,
+            members: [
+              null,
+              { id: "required", kind: "adb", serial: "USB-1", required: "yes" },
+              { id: "shape", kind: "unknown" },
+            ],
+          },
+        },
+      },
+    });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(result.ok).toBeFalse();
+    if (!result.ok) {
+      const paths = result.errors.map(({ path: errorPath }) => errorPath);
+      expect(paths).toContain("targets.pools.bad/name");
+      expect(paths).toContain("targets.pools.scalar");
+      expect(paths).toContain("targets.pools.settings.members");
+      expect(paths).toContain("targets.pools.settings.failFast");
+      expect(paths).toContain("targets.pools.settings.leaseWaitMs");
+      expect(paths).toContain("targets.pools.members.members.0");
+      expect(paths).toContain("targets.pools.members.members.1.required");
+      expect(paths).toContain("targets.pools.members.members.2");
+    }
+  });
+
+  test("rejects a non-object target-pool collection", async () => {
+    const directory = await temporaryDirectory();
+    const projectFile = path.join(directory, "invalid-pool-collection.json");
+    await writeJson(projectFile, { version: 1, targets: { pools: [] } });
+
+    const result = await loadConfig({
+      cwd: directory,
+      env: {},
+      homeDirectory: directory,
+      userConfigPath: path.join(directory, "missing-user.json"),
+      projectConfigPath: projectFile,
+      explicitProjectConfig: true,
+    });
+
+    expect(result).toMatchObject({ ok: false, errors: [{ path: "targets.pools" }] });
+  });
+
   test("loads project app identity with provenance and rejects invalid package names", async () => {
     const directory = await temporaryDirectory();
     const validFile = path.join(directory, "app-valid.json");
