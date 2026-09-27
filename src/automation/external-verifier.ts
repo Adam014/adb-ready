@@ -42,6 +42,7 @@ const NATIVE_EXTENSIONS = new Set([
   ".log",
   ".mp4",
   ".png",
+  ".proto",
   ".txt",
   ".webm",
   ".xml",
@@ -182,7 +183,12 @@ export function classifyExternalVerifier(options: {
 
 export async function collectNativeVerifierArtifacts(
   directory: string,
-  limits: { maxFiles?: number; maxFileBytes?: number; maxTotalBytes?: number } = {},
+  limits: {
+    maxFiles?: number;
+    maxFileBytes?: number;
+    maxTotalBytes?: number;
+    modifiedSinceMs?: number;
+  } = {},
 ): Promise<{ artifacts: NativeVerifierArtifact[]; omitted: number }> {
   const maxFiles = limits.maxFiles ?? 100;
   const maxFileBytes = limits.maxFileBytes ?? 20 * 1024 * 1024;
@@ -211,6 +217,7 @@ export async function collectNativeVerifierArtifacts(
       const file = await stat(absolute).catch(() => undefined);
       if (
         file === undefined ||
+        (limits.modifiedSinceMs !== undefined && file.mtimeMs < limits.modifiedSinceMs) ||
         file.size > maxFileBytes ||
         total + file.size > maxTotalBytes ||
         artifacts.length >= maxFiles

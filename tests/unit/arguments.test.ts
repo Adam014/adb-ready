@@ -238,6 +238,42 @@ describe("parseArguments", () => {
     });
   });
 
+  test("parses Gradle managed-device discovery, planning, and execution options", () => {
+    expect(parseArguments(["test", "gradle"])).toMatchObject({
+      ok: true,
+      options: { command: "test", testKind: "gradle" },
+    });
+    expect(
+      parseArguments([
+        "test",
+        "gradle",
+        ":app:pixel2api35DebugAndroidTest",
+        "--shards",
+        "4",
+        "--software-rendering",
+        "--run-timeout",
+        "20m",
+        "--dry-run",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        command: "test",
+        testKind: "gradle",
+        gradleTask: ":app:pixel2api35DebugAndroidTest",
+        gradleShards: 4,
+        gradleSoftwareRendering: true,
+        runTimeoutMs: 1_200_000,
+        dryRun: true,
+      },
+    });
+    expect(parseArguments(["test"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(parseArguments(["doctor", "--shards", "2"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+  });
+
   test("parses one explicit autonomous AVD, deployment, and verifier workflow", () => {
     expect(
       parseArguments([

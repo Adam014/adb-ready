@@ -17,6 +17,11 @@ breaking changes.
 - Add a manual, commit-pinned self-hosted physical-device recipe with explicit
   runner routing, serial selection, local target leasing, read-only preflight,
   portable execution, and retained failure evidence.
+- Add a Gradle Managed Devices handoff that discovers declared virtual-device
+  and group tasks, previews exact execution, preserves Gradle lifecycle
+  ownership, supports explicit sharding and server rendering, and normalizes
+  current JUnit, report, timeout, cancellation, assertion, and infrastructure
+  evidence.
 
 ## [0.6.0] - 2026-09-27
 

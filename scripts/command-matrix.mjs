@@ -263,6 +263,7 @@ try {
       ["dev help", ["dev", "--help"], "adb-ready dev"],
       ["pair help", ["help", "pair"], "adb-ready pair"],
       ["ports help", ["ports", "--help"], "adb-ready ports reverse"],
+      ["Gradle managed-device help", ["test", "--help"], "adb-ready test gradle"],
       ["UI help", ["ui", "--help"], "adb-ready ui tap"],
       ["version flag", ["--version"], manifest.version],
       ["version command", ["version"], manifest.version],
@@ -286,6 +287,44 @@ try {
       !agentPayload.data?.content?.includes('"adb-ready"')
     ) {
       throw new Error(`${alias} agent setup: invalid project configuration plan`);
+    }
+    assertions += 1;
+
+    const fakeGradle = path.join(
+      consumer,
+      process.platform === "win32" ? "gradlew.bat" : "gradlew",
+    );
+    await writeFile(fakeGradle, "");
+    const gradleManagedPlan = command(
+      alias,
+      [
+        "test",
+        "gradle",
+        ":app:pixel2api35DebugAndroidTest",
+        "--gradle",
+        fakeGradle,
+        "--shards",
+        "2",
+        "--software-rendering",
+        "--dry-run",
+        "--json",
+        "--non-interactive",
+      ],
+      env,
+    );
+    expectStatus(gradleManagedPlan, 0, `${alias} Gradle managed-device dry-run`);
+    const gradleManagedPayload = parseJson(
+      gradleManagedPlan.stdout,
+      `${alias} Gradle managed-device dry-run`,
+    );
+    if (
+      gradleManagedPayload.command !== "test gradle" ||
+      gradleManagedPayload.data?.status !== "planned" ||
+      !gradleManagedPayload.data?.command?.args?.includes(
+        "-Pandroid.experimental.androidTest.numManagedDeviceShards=2",
+      )
+    ) {
+      throw new Error(`${alias} Gradle managed-device: invalid packaged dry-run plan`);
     }
     assertions += 1;
 

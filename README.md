@@ -284,6 +284,7 @@ Android transport backend.
 | [Logs and AI context](./docs/logs-and-context.md) | Diagnose a failure with bounded, redacted evidence. |
 | [AI agent integration](./docs/agent-integration.md) | Connect an MCP-capable coding agent. |
 | [Automation](./docs/automation.md) | Use readiness, exit codes, JSON, NDJSON, JUnit, and CI artifacts. |
+| [Gradle Managed Devices](./docs/gradle-managed-devices.md) | Run build-owned virtual-device and group tests with normalized evidence. |
 | [Configuration](./docs/configuration.md) | Share project presets, hooks, aliases, and policies. |
 | [Troubleshooting](./docs/troubleshooting.md) | Resolve a known setup, target, UI, or session problem. |
 | [Compatibility](./COMPATIBILITY.md) | Check hosts, runtimes, package managers, and support tiers. |

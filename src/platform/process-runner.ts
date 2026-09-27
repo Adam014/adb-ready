@@ -13,6 +13,7 @@ export interface ProcessRequest {
   timeoutMs?: number;
   killSignal?: NodeJS.Signals;
   killGraceMs?: number;
+  killProcessGroup?: boolean;
   stdio?: ProcessStdio;
   stdin?: "ignore" | "inherit";
   maxBufferBytes?: number;
@@ -146,6 +147,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
   let streamError: ProcessResult["streamError"];
 
   return await new Promise<ProcessResult>((resolve) => {
+    const ownsProcessGroup = request.killProcessGroup === true;
     const child = spawn(request.executable, args, {
       cwd: request.cwd,
       env: request.inheritEnv === false ? request.env : { ...process.env, ...request.env },
@@ -163,21 +165,43 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
               "pipe",
             ],
       windowsHide: true,
+      detached: ownsProcessGroup && process.platform !== "win32",
     });
 
     const killSignal = request.killSignal ?? "SIGTERM";
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     let escalationTimer: ReturnType<typeof setTimeout> | undefined;
-    const terminate = () => {
-      if (child.exitCode !== null || child.signalCode !== null) {
+    let closed = false;
+    const signalOwnedProcess = (signal: NodeJS.Signals) => {
+      if (ownsProcessGroup && process.platform === "win32" && child.pid !== undefined) {
+        killEscalated = true;
+        spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+          shell: false,
+          stdio: "ignore",
+          windowsHide: true,
+        }).once("error", () => child.kill(signal));
         return;
       }
-      child.kill(killSignal);
+      if (ownsProcessGroup && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch {
+          // Fall back to the direct child when its process group no longer exists.
+        }
+      }
+      child.kill(signal);
+    };
+    const terminate = () => {
+      if (closed || (!ownsProcessGroup && (child.exitCode !== null || child.signalCode !== null))) {
+        return;
+      }
+      signalOwnedProcess(killSignal);
       if (killSignal !== "SIGKILL" && escalationTimer === undefined) {
         escalationTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) {
+          if (!closed) {
             killEscalated = true;
-            child.kill("SIGKILL");
+            signalOwnedProcess("SIGKILL");
           }
         }, killGraceMs);
       }
@@ -264,6 +288,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
     });
 
     child.once("close", (exitCode, signal) => {
+      closed = true;
       if (timeout !== undefined) {
         clearTimeout(timeout);
       }

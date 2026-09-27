@@ -303,3 +303,20 @@ the runner and its custom label scoped to trusted repositories or runner
 groups, and keep the phone unlocked only when the project's assertions require
 it. The example verifier is read-only and intentionally captures no screenshot
 from a personal device.
+
+### Gradle-owned virtual devices
+
+When the Android build declares Gradle Managed Devices, keep lifecycle
+ownership with Gradle instead of treating its transient emulator as an ADB
+Ready target:
+
+```bash
+adb-ready test gradle
+adb-ready test gradle :app:pixel2api35DebugAndroidTest --dry-run
+adb-ready test gradle :app:pixel2api35DebugAndroidTest --software-rendering
+```
+
+ADB Ready preflights the exact task and normalizes fresh JUnit, HTML, shard,
+and Gradle failure evidence without replacing the build's device definitions
+or test DSL. See [Gradle Managed Devices](./gradle-managed-devices.md) for task
+groups, sharding, outcomes, and the ownership boundary.
