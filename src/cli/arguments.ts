@@ -1,3 +1,4 @@
+import type { McpProfile } from "../agent/profiles.js";
 import type { AgentClient } from "../agent/setup.js";
 import type { AppAction, PackageScope } from "../app/app-commands.js";
 import type { PortAction } from "../app/commands.js";
@@ -63,6 +64,7 @@ export interface CliOptions {
   adbPort?: number;
   configPath?: string;
   profileName?: string;
+  mcpProfile?: McpProfile;
   select: boolean;
   device?: string;
   transportId?: string;
@@ -327,6 +329,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let adbPort: number | undefined;
   let configPath: string | undefined;
   let profileName: string | undefined;
+  let mcpProfile: McpProfile | undefined;
   let select = false;
   let device: string | undefined;
   let transportId: string | undefined;
@@ -1175,6 +1178,17 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         return failure("CLI_INVALID_VALUE", `Invalid profile name: ${value}.`, option);
       }
       profileName = value;
+    } else if (option === "--mcp-profile") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value !== "debug" && value !== "full" && value !== "session" && value !== "ui") {
+        return failure(
+          "CLI_INVALID_VALUE",
+          `Invalid MCP profile: ${value}. Expected debug, full, session, or ui.`,
+          option,
+        );
+      }
+      mcpProfile = value;
     } else {
       const knownOptions = new Set([
         ...BOOLEAN_OPTIONS,
@@ -1185,6 +1199,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         "--adb-port",
         "--config",
         "--profile",
+        "--mcp-profile",
         "--device",
         "--serial",
         "--transport-id",
@@ -1775,7 +1790,23 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (format === "markdown" && command !== "context") {
     return failure("CLI_USAGE", "Markdown output is only available for the context command.");
   }
-  if (command === "mcp" && argv.some((argument) => argument !== "mcp")) {
+  if (mcpProfile !== undefined && command !== "mcp" && command !== "agent") {
+    return failure(
+      "CLI_USAGE",
+      "--mcp-profile can only be used with mcp or agent setup.",
+      "--mcp-profile",
+    );
+  }
+  if (
+    command === "mcp" &&
+    argv.some(
+      (argument, index) =>
+        argument !== "mcp" &&
+        argument !== "--mcp-profile" &&
+        argv[index - 1] !== "--mcp-profile" &&
+        !argument.startsWith("--mcp-profile="),
+    )
+  ) {
     return failure(
       "CLI_USAGE",
       "mcp does not accept CLI output or target options; configure the spawned stdio server through the project and environment.",
@@ -1803,6 +1834,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(adbPort === undefined ? {} : { adbPort }),
       ...(configPath === undefined ? {} : { configPath }),
       ...(profileName === undefined ? {} : { profileName }),
+      ...(mcpProfile === undefined ? {} : { mcpProfile }),
       select,
       ...(device === undefined ? {} : { device }),
       ...(transportId === undefined ? {} : { transportId }),

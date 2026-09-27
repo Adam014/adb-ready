@@ -17,6 +17,7 @@
     "LICENSE",
     "llms.txt",
     "schema",
+    "skills",
     "README.md"
   ],
   "engines": {

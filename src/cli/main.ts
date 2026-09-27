@@ -124,7 +124,7 @@ Usage:
   adbr [command] [options]
 
 Commands:
-  agent setup CLIENT     Configure a project-local AI agent bridge
+  agent setup CLIENT     Configure a project-local AI agent bridge and skill
   app ACTION [APP_ID]   Resolve, inspect, install, or control one app
   apps list             List packages on one Android target
   capture ACTION         Save a verified screenshot or bounded screen recording
@@ -165,6 +165,7 @@ Execution:
   --adb-port PORT        Use an explicit ADB server port
   --config PATH          Use an explicit project configuration file
   --profile NAME         Use a named configuration profile
+  --mcp-profile PROFILE  Limit MCP tools to debug, session, ui, or full
   --select               Interactively select a target
   -s, --device SELECTOR  Select an exact serial or configured alias
   --transport-id ID      Select an exact ADB transport ID
@@ -179,16 +180,18 @@ Other:
 
 const COMMAND_HELP = {
   agent: `Usage:
-  adb-ready agent setup codex [--dry-run]
-  adb-ready agent setup claude-code [--dry-run]
-  adb-ready agent setup cursor [--dry-run]
-  adb-ready agent setup vscode [--dry-run]
-  adb-ready agent setup windsurf [--dry-run]
-  adb-ready agent setup generic [--dry-run]
+  adb-ready agent setup codex [--mcp-profile PROFILE] [--dry-run]
+  adb-ready agent setup claude-code [--mcp-profile PROFILE] [--dry-run]
+  adb-ready agent setup cursor [--mcp-profile PROFILE] [--dry-run]
+  adb-ready agent setup vscode [--mcp-profile PROFILE] [--dry-run]
+  adb-ready agent setup windsurf [--mcp-profile PROFILE] [--dry-run]
+  adb-ready agent setup generic [--mcp-profile PROFILE] [--dry-run]
 
 Creates or safely merges a project MCP configuration without replacing an
-existing adb-ready server entry. Windsurf and generic clients return a manual
-snippet because their configuration is user-scoped or client-defined.
+existing adb-ready server entry. Supported project clients also receive the
+versioned ADB Ready Agent Skill. PROFILE is debug, session, ui, or full (default).
+Windsurf and generic clients return a manual snippet because their configuration
+is user-scoped or client-defined.
 `,
   app: `Usage:
   adb-ready app resolve [APP_ID] [options]
@@ -396,10 +399,11 @@ Log options:
   --dump                 Read the current buffer and exit instead of following
   --max-records COUNT    Bound records retained in the final result
 `,
-  mcp: `Usage: adb-ready mcp
+  mcp: `Usage: adb-ready mcp [--mcp-profile PROFILE]
 
 Starts the local MCP stdio server. Standard output is reserved for the MCP
 protocol; the command never opens a network listener or exposes raw shell/ADB.
+PROFILE narrows discovery to debug, session, ui, or full (default).
 `,
   open: `Usage: adb-ready open URL [--package APP_ID] [options]
 
@@ -1026,6 +1030,7 @@ async function runCliInternal(
         env: io.env,
         dependencies,
         version: VERSION,
+        ...(options.mcpProfile === undefined ? {} : { profile: options.mcpProfile }),
       },
       signal,
     );
@@ -1036,6 +1041,7 @@ async function runCliInternal(
       {
         client: options.agentClient ?? "generic",
         cwd: io.cwd,
+        ...(options.mcpProfile === undefined ? {} : { mcpProfile: options.mcpProfile }),
         ...(options.dryRun ? { dryRun: true } : {}),
       },
       dependencies,

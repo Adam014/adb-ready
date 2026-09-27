@@ -63,6 +63,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -145,6 +156,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -272,6 +294,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "debug", "full"],
+          "safety": "mutating",
+          "sensitiveData": true,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -397,6 +430,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -485,6 +529,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -572,6 +627,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "debug",
+          "profiles": ["debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": true,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -658,6 +724,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -734,6 +811,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -820,6 +908,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -967,6 +1066,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1089,6 +1199,105 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "command",
+          "commandId",
+          "ok",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "data",
+          "problems"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    {
+      "name": "get_capabilities",
+      "description": "Describe the active MCP profile, discoverable tool profiles, and negotiated long-running task compatibility.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1173,6 +1382,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "session",
+          "profiles": ["session", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1254,6 +1474,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "debug",
+          "profiles": ["debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": true,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1377,6 +1608,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1463,6 +1705,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "debug",
+          "profiles": ["debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": true,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1561,6 +1814,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "debug",
+          "profiles": ["debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": true,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1644,6 +1908,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1726,6 +2001,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1821,6 +2107,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": true,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1928,6 +2225,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2018,6 +2326,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2121,6 +2440,17 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "debug",
+          "profiles": ["debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": true,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2197,6 +2527,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2359,6 +2700,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2451,6 +2803,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2542,6 +2905,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2623,6 +2997,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2722,6 +3107,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2812,6 +3208,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "foundation",
+          "profiles": ["session", "ui", "debug", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2942,6 +3349,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3024,6 +3442,17 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "session",
+          "profiles": ["session", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3108,6 +3537,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "session",
+          "profiles": ["session", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": false
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3218,6 +3658,17 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3380,6 +3831,17 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
+      },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3486,6 +3948,17 @@
         "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "mutating",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": false,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3612,6 +4085,17 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "_meta": {
+        "dev.adbready/tool": {
+          "category": "ui",
+          "profiles": ["ui", "full"],
+          "safety": "read-only",
+          "sensitiveData": false,
+          "destructive": false,
+          "idempotent": true,
+          "targetBound": true
+        }
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

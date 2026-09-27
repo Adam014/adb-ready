@@ -107,16 +107,20 @@ Windsurf, or another MCP client:
 npx adb-ready agent setup codex
 ```
 
+Setup writes the project MCP bridge and a version-matched Agent Skill. Use
+`--mcp-profile debug`, `session`, or `ui` to expose only the tools needed for
+that job; `full` remains the default.
+
 Then ask for the outcome you want:
 
 > Start this Expo app on my Android phone, wait until the login screen is
 > actually ready, verify my change, and keep the failure evidence.
 
 The local MCP server gives agents typed tools for target readiness, durable
-development sessions, app lifecycle, semantic UI, logs, screenshots, and saved
-evidence. Every result is schema-validated and checked against fresh device
-state. Agents do not receive a generic shell, unrestricted raw ADB, or app
-removal.
+development sessions, app lifecycle, semantic UI, correlated failure evidence,
+screenshots, and saved diagnostics. Every result is schema-validated, annotated
+for safety, and checked against fresh device state. Agents do not receive a
+generic shell, unrestricted raw ADB, or app removal.
 
 [Connect an AI agent in minutes →](./docs/agent-integration.md)
 

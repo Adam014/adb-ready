@@ -587,14 +587,34 @@ describe("parseArguments", () => {
       ok: false,
       code: "CLI_USAGE",
     });
+    expect(parseArguments(["mcp", "--mcp-profile", "debug"])).toMatchObject({
+      ok: true,
+      options: { command: "mcp", mcpProfile: "debug" },
+    });
+    expect(parseArguments(["mcp", "--mcp-profile=unsafe"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+      option: "--mcp-profile",
+    });
   });
 
   test("parses safe agent client setup and dry runs", () => {
-    expect(parseArguments(["agent", "setup", "codex", "--dry-run", "--json"])).toMatchObject({
+    expect(
+      parseArguments([
+        "agent",
+        "setup",
+        "codex",
+        "--mcp-profile",
+        "session",
+        "--dry-run",
+        "--json",
+      ]),
+    ).toMatchObject({
       ok: true,
       options: {
         command: "agent",
         agentClient: "codex",
+        mcpProfile: "session",
         dryRun: true,
         format: "json",
       },

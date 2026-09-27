@@ -41,6 +41,16 @@ breaking changes.
   package-scoped ApplicationExitInfo, crash-buffer, ANR, React Native, native,
   and permitted DropBox evidence while reporting unavailable Android sources
   and excluding unrelated process failures.
+- Add discoverable `debug`, `session`, `ui`, and backward-compatible `full` MCP
+  profiles, a config-independent capabilities tool/resource, and namespaced
+  safety, sensitivity, target-binding, and profile metadata generated into the
+  public agent contract.
+- Generate and package a version-matched task-first Agent Skill from the real
+  MCP tool contract, then install it atomically with project-scoped Codex,
+  Claude Code, Cursor, or VS Code setup without overwriting custom content.
+- Document durable start/get/stop development handles as the cross-client
+  compatibility path while keeping the MCP Tasks extension unadvertised until
+  negotiated interoperability is proven in two supported clients.
 
 ## [0.5.1] - 2026-09-25
 
