@@ -706,6 +706,57 @@ describe("parseArguments", () => {
       ok: true,
       options: { uiRequest: { action: "type", text: "hello world", submit: true } },
     });
+    expect(
+      parseArguments([
+        "ui",
+        "fill",
+        "id=com.example:id/password",
+        "--secret-stdin",
+        "--input-mode",
+        "unicode",
+        "--typing-delay",
+        "40",
+      ]),
+    ).toMatchObject({
+      ok: true,
+      options: {
+        uiSecretStdin: true,
+        uiRequest: {
+          action: "fill",
+          selector: "id=com.example:id/password",
+          text: "pending-secret-stdin",
+          secret: true,
+          inputMode: "unicode",
+          typingDelayMs: 40,
+        },
+      },
+    });
+    expect(parseArguments(["ui", "type", "--secret-stdin"])).toMatchObject({
+      ok: true,
+      options: {
+        uiSecretStdin: true,
+        uiRequest: { action: "type", text: "pending-secret-stdin", secret: true },
+      },
+    });
+    expect(parseArguments(["ui", "type", "hello", "--input-mode", "binary"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["ui", "type", "hello", "--typing-delay", "2001"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["ui", "type", "visible", "--secret-stdin"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
+    expect(
+      parseArguments(["ui", "fill", "id=com.example:id/email", "visible", "--secret-stdin"]),
+    ).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(parseArguments(["devices", "--input-mode", "ascii"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
     expect(parseArguments(["ui", "press", "back"])).toMatchObject({
       ok: true,
       options: { uiRequest: { action: "press", key: "back" } },

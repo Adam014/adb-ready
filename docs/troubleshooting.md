@@ -34,6 +34,8 @@ adb-ready context --since 5m --only problems,recovery,logs
 | `UI_HIERARCHY_BUSY` | Another process held the selected target's single UI Automation service through the UI timeout | Let that capture finish or increase the UI timeout, then retry |
 | `UI_HIERARCHY_LOCK_UNAVAILABLE` | The per-user coordination directory is not writable | Restore write access to the ADB Ready state directory, then retry |
 | `UI_NOT_IDLE` | Android UI Automator could not observe a quiet accessibility window | Pause continuous UI changes or navigate to a stable screen, then retry |
+| `UI_UNICODE_INPUT_UNAVAILABLE` | Unicode/multiline input was requested but ADBKeyBoard is not installed and enabled | Install a compatible official ADBKeyBoard release, enable it in Android settings, and retry; ADB Ready will not enable an IME silently |
+| `UI_INPUT_METHOD_UNKNOWN` | Android did not expose the current IME, so it cannot be restored safely | Select a keyboard on the target before retrying Unicode input |
 | `SESSION_RECOVERY_FAILED` | The bounded target/port recovery budget was exhausted | Inspect `problems`, network state, and saved recovery events |
 | `SESSION_PERSISTENCE_FAILED` | The private session record could not be written | Check user-state directory permissions and capacity |
 | `FRAMEWORK_LAUNCHER_NOT_FOUND` | The detected Flutter or Gradle project has no runnable launcher | Install Flutter and expose `flutter` on PATH, or restore the project's checked-in Gradle Wrapper |

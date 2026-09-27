@@ -104,6 +104,7 @@ import { clearInteractiveScreen, showHomeScreen } from "../ui/home.js";
 import { readPairingCode } from "../ui/pairing-code.js";
 import { ProgressRenderer } from "../ui/progress-renderer.js";
 import { NdjsonEventRenderer, renderResult } from "../ui/result-renderer.js";
+import { readSecretText } from "../ui/secret-text.js";
 import { type SelectInput, selectOne } from "../ui/select.js";
 import type { TextSink } from "../ui/spinner.js";
 import { renderChildStreamLine, renderLogStreamLine } from "../ui/stream-renderer.js";
@@ -336,17 +337,22 @@ UI acquisition profiles:
   adb-ready ui scroll up|down|left|right [SELECTOR] [--dry-run]
   adb-ready ui swipe up|down|left|right [--dry-run]
   adb-ready ui swipe X1 Y1 X2 Y2 [--dry-run]
-  adb-ready ui fill SELECTOR TEXT [--submit] [--dry-run]
+  adb-ready ui fill SELECTOR TEXT [--input-mode auto|ascii|unicode] [--typing-delay MS] [--submit] [--dry-run]
+  printf '%s' "$SECRET" | adb-ready ui fill SELECTOR --secret-stdin [--input-mode auto|ascii|unicode]
   adb-ready ui clear SELECTOR [--dry-run]
-  adb-ready ui type TEXT [--submit] [--dry-run]
+  adb-ready ui type TEXT [--input-mode auto|ascii|unicode] [--typing-delay MS] [--submit] [--dry-run]
+  printf '%s' "$SECRET" | adb-ready ui type --secret-stdin [--input-mode auto|ascii|unicode]
   adb-ready ui press back|home|enter|menu|volume-up|volume-down [--dry-run]
   adb-ready ui wait SELECTOR [--state visible|gone] [--timeout 5s]
 
 Uses fresh UI evidence before every mutation. A ui:* reference is accepted only
 while its snapshot digest still matches. Compact selectors use exact class=,
 id=, text=, desc=, or package= values; MCP additionally supports structured
-contains and prefix matching with state qualifiers. Typed text uses a
-conservative shell-safe character set. fill and clear require Android's safe
+contains and prefix matching with state qualifiers. ASCII input works through
+Android's built-in input command. Unicode and multiline input require a
+pre-installed, enabled ADBKeyBoard IME; ADB Ready restores the prior IME and
+never installs or enables one silently. --secret-stdin keeps protected text out
+of argv and retained results. fill and clear require Android's safe
 key-combination capability and verify the observable field value afterward.
 Scroll directions describe content navigation (down reveals content below);
 swipe directions describe the physical finger gesture. Add --acquisition
@@ -1829,7 +1835,54 @@ async function runCliInternal(
       if (options.uiRequest === undefined) {
         throw new Error("Validated UI command is missing its action request.");
       }
-      execution = await runUiAction(options.uiRequest, config, commandDependencies, signal);
+      let request = options.uiRequest;
+      if (options.uiSecretStdin) {
+        if (io.input.isTTY === true) {
+          const failure = failureResult(
+            "ui",
+            [
+              inputProblem(
+                "UI_SECRET_STDIN_REQUIRED",
+                "Protected UI text must be piped through non-interactive stdin.",
+                "Pipe the value to --secret-stdin so the terminal cannot echo it or retain it in shell history.",
+              ),
+            ],
+            dependencies,
+          );
+          renderFailure(failure, options.format, io);
+          return ExitCode.InvalidInput;
+        }
+        const secret = await readSecretText(io.input, signal);
+        if (secret.kind !== "submitted") {
+          const interrupted = secret.kind === "cancelled" && secret.reason === "signal";
+          const tooLarge = secret.kind === "cancelled" && secret.reason === "too-large";
+          const failure = failureResult(
+            "ui",
+            [
+              inputProblem(
+                interrupted ? "OPERATION_INTERRUPTED" : "UI_SECRET_INPUT_INVALID",
+                interrupted
+                  ? "Secret text input was cancelled."
+                  : tooLarge
+                    ? "Secret text input exceeds the 4096-byte limit."
+                    : "No secret text was received from stdin.",
+                "Pipe one bounded value to stdin with --secret-stdin; one final line ending is removed and embedded newlines are preserved.",
+              ),
+            ],
+            dependencies,
+          );
+          renderFailure(failure, options.format, io);
+          return interrupted ? ExitCode.Interrupted : ExitCode.InvalidInput;
+        } else {
+          if (request.action !== "type" && request.action !== "fill") {
+            throw new Error("Secret stdin was accepted for a non-text UI action.");
+          }
+          request = { ...request, text: secret.value };
+          execution = await runUiAction(request, config, commandDependencies, signal);
+        }
+      } else {
+        execution = await runUiAction(request, config, commandDependencies, signal);
+      }
     } else if (options.command === "open") {
       execution = await runOpen(
         options.url ?? "",

@@ -119,6 +119,7 @@ field happens to be focused:
 adb-ready ui get 'id=com.example:id/email' --json
 adb-ready ui fill 'id=com.example:id/email' 'person@example.com'
 adb-ready ui fill 'id=com.example:id/search' 'pixel' --submit
+adb-ready ui fill 'id=com.example:id/name' 'Příliš žluťoučký 🦊' --input-mode unicode
 adb-ready ui clear 'id=com.example:id/search'
 ```
 
@@ -155,9 +156,49 @@ node whose `scrollable` property is true; without a selector it uses the screen.
 Supported keys are `back`, `home`, `enter`, `menu`, `volume-up`, and
 `volume-down`.
 
-Android's text-input command passes through a device shell. ADB Ready therefore
-accepts only 1–256 ASCII letters, numbers, spaces, and `._@+,:/-`. Unsupported
-characters are rejected instead of being reinterpreted by a shell.
+Text input is bounded to 1–256 Unicode code points and 4096 UTF-8 bytes. The
+default `--input-mode auto` uses Android's built-in `input text` only for the
+conservative ASCII set of letters, numbers, spaces, and `._@+,:/-`. Use
+`--input-mode ascii` to require that path explicitly.
+
+Unicode, emoji, RTL, CJK, and multiline input use the open-source
+[ADBKeyBoard](https://github.com/senzhk/ADBKeyBoard) broadcast contract because
+Android's built-in input command does not reliably represent those values. The
+IME must already be installed and enabled on the selected target. ADB Ready
+checks that contract before touching the screen, temporarily selects the IME,
+and restores the exact previous IME in a `finally` path. It never downloads,
+installs, enables, or leaves a keyboard selected silently. If the helper or a
+restorable current IME is unavailable, the action fails before typing.
+
+Some apps drop text delivered too quickly. Pace either backend by Unicode code
+point with a whole-millisecond delay from 0 to 2000:
+
+```bash
+adb-ready ui type 'مرحبا بالعالم' --input-mode unicode --typing-delay 40
+```
+
+### Protected input
+
+Do not put passwords or tokens in a command argument. Pipe one value to stdin:
+
+```bash
+printf '%s' "$TEST_PASSWORD" |
+  adb-ready ui fill 'id=com.example:id/password' --secret-stdin --submit
+```
+
+`--secret-stdin` reads at most 4096 bytes to EOF, removes one final line ending,
+and preserves embedded newlines. Plaintext is excluded from host process
+arguments, operation plans, terminal output, structured results, event
+journals, screenshots created by this action, and AI context. The value exists
+only in process memory and the pipe used to deliver it to the selected target.
+For Unicode, the on-device shell receives base64 rather than plaintext.
+
+This is a bounded host-side guarantee, not a secure-input claim about Android
+or the app: the selected IME and target receive the value, a normal visible
+field may display it, and device/OEM auditing can observe shell activity. Use a
+password field and assert a non-secret postcondition. A protected field cannot
+expose its value for exact verification, so ADB Ready returns
+`text-not-observable` rather than inventing success.
 
 ## Find, assert, compare, and wait
 
@@ -220,6 +261,13 @@ qualify enabled/actionable state. An optional one-based occurrence is accepted
 only when repeated nodes are intentional. Arguments are schema-validated, each
 MCP connection stays bound to one target, and no raw ADB or shell tool is
 exposed.
+
+`type_text_ui` and `fill_ui` accept `inputMode` and `typingDelayMs`. For a
+secret, set `secretEnv` to the *name* of an environment variable already passed
+to the local MCP server and omit `text`. ADB Ready reads the value locally; the
+MCP request, tool result, and retained agent conversation contain only the
+variable name. Supplying both fields, neither field, or a missing/empty variable
+fails before device mutation.
 
 `inspect_ui` retains at most eight sensitive snapshots in memory for that MCP
 connection only. `compare_ui` accepts one of those complete digests and returns

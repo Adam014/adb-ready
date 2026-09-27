@@ -73,6 +73,13 @@ ADB Ready's isolation boundary.
 - autonomous destructive recovery;
 - automatic screenshot or UI-text upload.
 
+Protected UI text is accepted from CLI stdin or by environment-variable name
+through MCP. It is not placed in host argv, result envelopes, plans, journals,
+screenshots created by the action, or AI context. It still exists transiently
+in ADB Ready memory and the child-process pipe, and the selected Android target,
+input method, app, or OEM auditing may observe it. ADB Ready does not claim to
+turn a normal visible field or an untrusted target into a secure channel.
+
 ## Residual risk
 
 A trusted ADB server can control connected Android targets, and an approved AI

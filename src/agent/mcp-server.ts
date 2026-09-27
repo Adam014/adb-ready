@@ -996,10 +996,16 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "type_text_ui",
-    "Type conservative shell-safe text into the focused Android field and optionally press enter.",
+    "Type bounded ASCII or capability-detected Unicode text into the focused Android field; use secretEnv to keep a sensitive value out of MCP arguments and retained results.",
     z.object({
       ...targetHandleShape,
-      text: z.string().min(1).max(256),
+      text: z.string().min(1).max(4_096).optional(),
+      secretEnv: z
+        .string()
+        .regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u)
+        .optional(),
+      inputMode: z.enum(["ascii", "auto", "unicode"]).optional(),
+      typingDelayMs: z.number().int().min(0).max(2_000).optional(),
       submit: z.boolean().optional(),
       dryRun: z.boolean().optional(),
     }),
@@ -1009,11 +1015,24 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       idempotentHint: false,
       targetBound: true,
     },
-    async ({ text, submit, dryRun }, signal, loaded) => {
+    async ({ text, secretEnv, inputMode, typingDelayMs, submit, dryRun }, signal, loaded) => {
+      if ((text === undefined) === (secretEnv === undefined)) {
+        return inputFailure("MCP_INVALID_INPUT", "Provide exactly one of text or secretEnv.");
+      }
+      const value = secretEnv === undefined ? text : options.env[secretEnv];
+      if (value === undefined || value === "") {
+        return inputFailure(
+          "MCP_SECRET_ENV_UNAVAILABLE",
+          "The requested secret environment variable is missing or empty in the MCP server environment.",
+        );
+      }
       const execution = await runUiAction(
         {
           action: "type",
-          text,
+          text: value,
+          ...(secretEnv === undefined ? {} : { secret: true }),
+          ...(inputMode === undefined ? {} : { inputMode }),
+          ...(typingDelayMs === undefined ? {} : { typingDelayMs }),
           ...(submit === undefined ? {} : { submit }),
           ...(dryRun === undefined ? {} : { dryRun }),
         },
@@ -1026,12 +1045,18 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "fill_ui",
-    "Focus one semantic editable field, replace its value with conservative shell-safe text, and verify the observable value.",
+    "Focus one semantic editable field, replace it with bounded ASCII or capability-detected Unicode text, and verify the observable value; secretEnv keeps sensitive text out of MCP arguments and retained results.",
     z.object({
       ...targetHandleShape,
       selector: uiSelectorSchema,
       occurrence: z.number().int().min(1).max(10_000).optional(),
-      text: z.string().min(1).max(256),
+      text: z.string().min(1).max(4_096).optional(),
+      secretEnv: z
+        .string()
+        .regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u)
+        .optional(),
+      inputMode: z.enum(["ascii", "auto", "unicode"]).optional(),
+      typingDelayMs: z.number().int().min(0).max(2_000).optional(),
       submit: z.boolean().optional(),
       dryRun: z.boolean().optional(),
     }),
@@ -1041,14 +1066,31 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       idempotentHint: false,
       targetBound: true,
     },
-    async ({ selector, occurrence, text, submit, dryRun }, signal, loaded) =>
-      toolResult(
+    async (
+      { selector, occurrence, text, secretEnv, inputMode, typingDelayMs, submit, dryRun },
+      signal,
+      loaded,
+    ) => {
+      if ((text === undefined) === (secretEnv === undefined)) {
+        return inputFailure("MCP_INVALID_INPUT", "Provide exactly one of text or secretEnv.");
+      }
+      const value = secretEnv === undefined ? text : options.env[secretEnv];
+      if (value === undefined || value === "") {
+        return inputFailure(
+          "MCP_SECRET_ENV_UNAVAILABLE",
+          "The requested secret environment variable is missing or empty in the MCP server environment.",
+        );
+      }
+      return toolResult(
         (
           await runUiAction(
             {
               action: "fill",
               selector,
-              text,
+              text: value,
+              ...(secretEnv === undefined ? {} : { secret: true }),
+              ...(inputMode === undefined ? {} : { inputMode }),
+              ...(typingDelayMs === undefined ? {} : { typingDelayMs }),
               ...(occurrence === undefined ? {} : { occurrence }),
               ...(submit === undefined ? {} : { submit }),
               ...(dryRun === undefined ? {} : { dryRun }),
@@ -1058,7 +1100,8 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
             signal,
           )
         ).result,
-      ),
+      );
+    },
   );
   register(
     "clear_ui",
