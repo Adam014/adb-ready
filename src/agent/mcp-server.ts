@@ -25,6 +25,8 @@ import type { ResultEnvelope } from "../domain/contracts.js";
 import { runCapture } from "../evidence/capture.js";
 import { runInspectApp, runInspectUi } from "../evidence/inspect.js";
 import { runUiAction } from "../evidence/ui-actions.js";
+import type { UiHierarchySnapshot } from "../evidence/ui-hierarchy.js";
+import { diffUiHierarchies } from "../evidence/ui-hierarchy-diff.js";
 import { planTargetAcquisition } from "../session/target-acquisition.js";
 import { acquireTargetLease, type TargetLeaseOptions } from "../state/target-lease.js";
 import { selectTarget } from "../target/selection.js";
@@ -37,6 +39,16 @@ interface BoundTarget {
   identity: string;
   transportId?: string;
 }
+
+interface CachedUiSnapshot {
+  snapshot: UiHierarchySnapshot;
+  targetHandle: string;
+  targetIdentity: string;
+  storedAt: number;
+}
+
+const UI_SNAPSHOT_CACHE_LIMIT = 8;
+const UI_SNAPSHOT_CACHE_TTL_MS = 5 * 60_000;
 
 export interface McpServerOptions {
   cwd: string;
@@ -157,8 +169,25 @@ async function projectFile(root: string, requested: string): Promise<string | un
 
 export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   let bound: BoundTarget | undefined;
+  const uiSnapshots = new Map<string, CachedUiSnapshot>();
   const toolQueue = new SerialTaskQueue();
   const dependencies = options.dependencies ?? {};
+  const now = (): number => dependencies.clock?.().getTime() ?? Date.now();
+  const rememberUiSnapshot = (snapshot: UiHierarchySnapshot): void => {
+    if (bound === undefined) return;
+    uiSnapshots.delete(snapshot.digest);
+    uiSnapshots.set(snapshot.digest, {
+      snapshot,
+      targetHandle: bound.handle,
+      targetIdentity: bound.identity,
+      storedAt: now(),
+    });
+    while (uiSnapshots.size > UI_SNAPSHOT_CACHE_LIMIT) {
+      const oldest = uiSnapshots.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      uiSnapshots.delete(oldest);
+    }
+  };
   const server = new McpServer(
     { name: "adb-ready", version: options.version ?? manifest.version },
     {
@@ -640,6 +669,9 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
         dependencies,
         signal,
       );
+      if (execution.result.ok && execution.result.data?.kind === "ui") {
+        rememberUiSnapshot(execution.result.data.snapshot);
+      }
       return toolResult(execution.result);
     },
   );
@@ -749,7 +781,7 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
   );
   register(
     "compare_ui",
-    "Compare the current UI with a complete digest returned by an earlier inspection or action.",
+    "Return a compact semantic diff from a recent inspect_ui snapshot on this target.",
     z.object({ ...targetHandleShape, digest: z.string().regex(/^[a-f0-9]{64}$/u) }),
     {
       readOnlyHint: true,
@@ -757,17 +789,53 @@ export function createAdbReadyMcpServer(options: McpServerOptions): McpServer {
       idempotentHint: true,
       targetBound: true,
     },
-    async ({ digest }, signal, loaded) =>
-      toolResult(
-        (
-          await runUiAction(
-            { action: "compare", digest },
-            commandConfig(loaded, bound),
-            dependencies,
-            signal,
-          )
-        ).result,
-      ),
+    async ({ digest }, signal, loaded) => {
+      const cached = uiSnapshots.get(digest);
+      if (cached === undefined) {
+        return inputFailure(
+          "MCP_UI_BASE_NOT_FOUND",
+          "No recent UI snapshot with this digest exists in the current MCP connection. Call inspect_ui and use its complete digest.",
+        );
+      }
+      if (
+        bound === undefined ||
+        cached.targetHandle !== bound.handle ||
+        cached.targetIdentity !== bound.identity
+      ) {
+        return inputFailure(
+          "MCP_UI_BASE_TARGET_MISMATCH",
+          "The UI base snapshot belongs to a different Android target. Call inspect_ui on the bound target.",
+        );
+      }
+      if (now() - cached.storedAt > UI_SNAPSHOT_CACHE_TTL_MS) {
+        uiSnapshots.delete(digest);
+        return inputFailure(
+          "MCP_UI_BASE_STALE",
+          "The UI base snapshot is older than five minutes. Call inspect_ui for a fresh base.",
+        );
+      }
+      const base = cached.snapshot;
+      const execution = await runInspectUi(
+        {
+          ...(base.acquisition === undefined ? {} : { acquisition: base.acquisition.profile }),
+          interactiveOnly: base.filtering.interactiveOnly,
+          maxDepth: base.filtering.maxDepth,
+        },
+        commandConfig(loaded, bound),
+        dependencies,
+        signal,
+      );
+      const data = execution.result.data;
+      if (!execution.result.ok || data === null) return toolResult(execution.result);
+      const compared = diffUiHierarchies(base, data.snapshot);
+      if (!compared.ok) return inputFailure(compared.code, compared.message);
+      rememberUiSnapshot(data.snapshot);
+      return toolResult({
+        ...execution.result,
+        command: "mcp compare_ui",
+        data: { kind: "ui-diff", selected: data.selected, diff: compared.diff },
+      });
+    },
   );
   const pointSchema = z.union([
     z.object({ ref: z.string().regex(/^ui:[a-f0-9]{12}:\d+$/u) }),

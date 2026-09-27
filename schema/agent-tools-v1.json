@@ -423,7 +423,7 @@
     },
     {
       "name": "compare_ui",
-      "description": "Compare the current UI with a complete digest returned by an earlier inspection or action.",
+      "description": "Return a compact semantic diff from a recent inspect_ui snapshot on this target.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",

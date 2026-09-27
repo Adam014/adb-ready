@@ -17,6 +17,9 @@ breaking changes.
   observation timing, freshness, stability, filtering, truncation, and
   framework-limitation metadata; reject empty and continuously unstable UI
   hierarchies instead of returning a silent false success.
+- Add bounded `compare_ui` hierarchy diffs for agents, reporting semantic nodes
+  that were added, removed, updated, or moved while refusing stale,
+  cross-target, partial, differently filtered, or display-incompatible bases.
 
 ## [0.5.1] - 2026-09-25
 
