@@ -13,6 +13,7 @@ const cases = [
   ["capacitor", "capacitor"],
   ["custom", "custom"],
   ["ci-emulator", "custom"],
+  ["ci-physical", "custom"],
 ] as const;
 
 describe("public configuration examples", () => {

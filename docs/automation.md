@@ -283,3 +283,23 @@ The evidence upload uses `if: always()` so a product assertion or verifier
 failure retains the same manifest, result, JUnit, native files, and GitHub step
 summary as a successful run. A failure before ADB Ready starts cannot produce
 an ADB Ready bundle and is reported by the provisioning step instead.
+
+### Self-hosted physical target
+
+Use the maintained [physical-device recipe](../examples/ci-physical/) when a
+dedicated self-hosted runner owns one pre-authorized Android phone or tablet.
+The workflow is manual-only, routes through an explicit `android-device`
+runner label, queues competing GitHub jobs, and still relies on ADB Ready's
+host-local target lease as the final ownership boundary.
+
+The configured serial must match one `adb devices -l` row exactly. Missing,
+`unauthorized`, `offline`, replaced, and concurrently owned targets fail before
+the verifier can mutate another device. ADB Ready does not restart the shared
+ADB server, approve Android's RSA dialog, or claim a distributed lock across
+runner machines.
+
+Do not expose a physical self-hosted runner to untrusted pull requests. Keep
+the runner and its custom label scoped to trusted repositories or runner
+groups, and keep the phone unlocked only when the project's assertions require
+it. The example verifier is read-only and intentionally captures no screenshot
+from a personal device.
