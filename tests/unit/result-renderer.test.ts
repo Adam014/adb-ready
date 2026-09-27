@@ -83,6 +83,68 @@ describe("result renderer", () => {
     expect(sink.value).not.toContain("\u001b");
   });
 
+  test("renders Firebase matrix identity and bounded provider evidence", () => {
+    const firebase: ResultEnvelope<unknown> = {
+      ...result,
+      command: "test firebase",
+      data: {
+        status: "completed",
+        action: "instrumentation",
+        project: "demo-project",
+        outcome: "passed",
+        matrixId: "matrix-123",
+        consoleUrl: "https://console.firebase.google.com/project/demo/testlab/matrix-123",
+        evidence: {
+          path: ".adb-ready/artifacts/firebase-command-1",
+          providerFiles: 4,
+          omittedFiles: 2,
+          collection: "complete",
+          remotePrefix: "gs://demo-results/ci/run-42",
+        },
+      },
+    };
+    const human = new MemorySink();
+    const plain = new MemorySink();
+
+    renderResult(firebase, { format: "human", capabilities, sink: human });
+    renderResult(firebase, { format: "plain", capabilities, sink: plain });
+
+    expect(human.value).toContain("Firebase instrumentation · completed · passed");
+    expect(human.value).toContain("Matrix   matrix-123");
+    expect(human.value).toContain("4 provider files · complete");
+    expect(plain.value).toContain("matrix_id=matrix-123\n");
+    expect(plain.value).toContain("provider_file_count=4\n");
+    expect(plain.value).toContain("provider_file_omitted=2\n");
+    expect(plain.value).toContain("evidence_collection=complete\n");
+    expect(plain.value).toContain("provider_result_prefix=gs://demo-results/ci/run-42\n");
+
+    const catalog = new MemorySink();
+    renderResult(
+      {
+        ...result,
+        command: "test firebase",
+        data: {
+          status: "catalogued",
+          action: "devices",
+          devices: Array.from({ length: 21 }, (_, index) => ({
+            model: `model-${String(index)}`,
+            version: "35",
+            locale: "en",
+            orientation: "portrait",
+            name: `Model ${String(index)}`,
+            form: "VIRTUAL",
+            capacity: "high",
+            tags: index === 0 ? ["default"] : [],
+          })),
+        },
+      },
+      { format: "human", capabilities, sink: catalog },
+    );
+    expect(catalog.value).toContain("Catalog  21 compatible model/version choices");
+    expect(catalog.value).toContain("model-0/35 · virtual · high capacity · default");
+    expect(catalog.value).toContain("1 more · use --json for the full catalog");
+  });
+
   test("surfaces autonomous deployment evidence without exposing artifact paths", () => {
     const autonomous: ResultEnvelope<unknown> = {
       ...result,

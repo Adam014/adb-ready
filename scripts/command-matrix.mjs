@@ -264,6 +264,7 @@ try {
       ["pair help", ["help", "pair"], "adb-ready pair"],
       ["ports help", ["ports", "--help"], "adb-ready ports reverse"],
       ["Gradle managed-device help", ["test", "--help"], "adb-ready test gradle"],
+      ["Firebase Test Lab help", ["test", "--help"], "adb-ready test firebase"],
       ["UI help", ["ui", "--help"], "adb-ready ui tap"],
       ["version flag", ["--version"], manifest.version],
       ["version command", ["version"], manifest.version],

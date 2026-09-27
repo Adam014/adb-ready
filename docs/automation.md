@@ -320,3 +320,23 @@ ADB Ready preflights the exact task and normalizes fresh JUnit, HTML, shard,
 and Gradle failure evidence without replacing the build's device definitions
 or test DSL. See [Gradle Managed Devices](./gradle-managed-devices.md) for task
 groups, sharding, outcomes, and the ownership boundary.
+
+### Firebase-owned remote devices
+
+Use Firebase Test Lab when the provider should own remote physical or virtual
+targets while ADB Ready owns the deterministic invocation, outcome language,
+and bounded evidence handoff:
+
+```bash
+adb-ready test firebase devices --project my-project
+adb-ready test firebase instrumentation \
+  --project my-project \
+  --app app-debug.apk \
+  --test-apk app-debug-androidTest.apk \
+  --test-device model=Pixel2.arm,version=35 \
+  --dry-run --json
+```
+
+See [Firebase Test Lab](./firebase-test-lab.md) for live catalog policy,
+provider-owned lifecycle, result buckets, normalized outcomes, and explicit
+remote cancellation.

@@ -18,6 +18,7 @@ import type {
   SessionCommandData,
 } from "../app/session-commands.js";
 import type { AutomationRunData, AutonomousRunEvidence } from "../automation/evidence-bundle.js";
+import type { FirebaseTestLabData } from "../automation/firebase-test-lab.js";
 import type { GradleManagedTestData } from "../automation/gradle-managed-devices.js";
 import type { ReadinessAssertion } from "../automation/readiness.js";
 import type { OutputFormat } from "../cli/arguments.js";
@@ -215,6 +216,20 @@ function isGradleManagedTestData(value: unknown): value is GradleManagedTestData
     isRecord(value) &&
     (value.status === "completed" || value.status === "discovered" || value.status === "planned") &&
     typeof value.wrapper === "string"
+  );
+}
+
+function isFirebaseTestLabData(value: unknown): value is FirebaseTestLabData {
+  return (
+    isRecord(value) &&
+    (value.status === "cancelled" ||
+      value.status === "catalogued" ||
+      value.status === "completed" ||
+      value.status === "planned") &&
+    (value.action === "cancel" ||
+      value.action === "devices" ||
+      value.action === "instrumentation" ||
+      value.action === "robo")
   );
 }
 
@@ -572,6 +587,53 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
           `${style.accent(glyphs.active, capabilities)} Evidence ${clean(data.evidence.path)} · ${String(data.evidence.nativeFiles)} native files · ${clean(data.evidence.provenance)}`,
         );
       }
+    }
+  }
+
+  if (result.command === "test firebase" && isFirebaseTestLabData(result.data)) {
+    const data = result.data;
+    const marker =
+      data.outcome === "flaky"
+        ? style.warning(glyphs.warning, capabilities)
+        : data.outcome === undefined || data.outcome === "passed" || data.status === "catalogued"
+          ? style.success(glyphs.success, capabilities)
+          : style.failure(glyphs.failure, capabilities);
+    lines.push(
+      `${marker} Firebase ${clean(data.action)} · ${clean(data.status)}${data.outcome === undefined ? "" : ` · ${clean(data.outcome)}`}`,
+    );
+    if (data.status === "catalogued") {
+      const devices = data.devices ?? [];
+      lines.push(
+        `${style.accent(glyphs.active, capabilities)} Catalog  ${String(devices.length)} compatible model/version choices`,
+        ...devices.slice(0, 20).map((device, index) => {
+          const branch = index === Math.min(devices.length, 20) - 1 ? glyphs.end : glyphs.branch;
+          return `${style.dim(branch, capabilities)} ${clean(device.model)}/${clean(device.version)} · ${clean(device.form.toLowerCase())} · ${clean(device.capacity)} capacity${device.tags.length === 0 ? "" : ` · ${device.tags.map(clean).join(", ")}`}`;
+        }),
+        ...(devices.length > 20
+          ? [
+              style.dim(
+                `  ${String(devices.length - 20)} more · use --json for the full catalog`,
+                capabilities,
+              ),
+            ]
+          : []),
+      );
+    }
+    if (data.matrixId !== undefined) {
+      lines.push(`${style.accent(glyphs.active, capabilities)} Matrix   ${clean(data.matrixId)}`);
+    }
+    if (data.consoleUrl !== undefined) {
+      lines.push(`${style.accent(glyphs.active, capabilities)} Results  ${clean(data.consoleUrl)}`);
+    }
+    if (data.remoteContinues === true) {
+      lines.push(
+        `${style.warning(glyphs.warning, capabilities)} Remote   still running · explicit cancel required`,
+      );
+    }
+    if (data.evidence !== undefined) {
+      lines.push(
+        `${style.accent(glyphs.active, capabilities)} Evidence ${clean(data.evidence.path)} · ${String(data.evidence.providerFiles)} provider files · ${clean(data.evidence.collection)}`,
+      );
     }
   }
 
@@ -1143,6 +1205,28 @@ function renderPlain(result: CommandResult, sink: TextSink): void {
       sink.write(`native_file_count=${String(result.data.evidence.nativeFiles)}\n`);
       sink.write(`evidence_provenance=${clean(result.data.evidence.provenance)}\n`);
     }
+  }
+  if (isFirebaseTestLabData(result.data)) {
+    sink.write(`status=${clean(result.data.status)}\n`);
+    sink.write(`action=${clean(result.data.action)}\n`);
+    if (result.data.project !== undefined) sink.write(`project=${clean(result.data.project)}\n`);
+    if (result.data.outcome !== undefined) sink.write(`outcome=${clean(result.data.outcome)}\n`);
+    if (result.data.matrixId !== undefined)
+      sink.write(`matrix_id=${clean(result.data.matrixId)}\n`);
+    if (result.data.consoleUrl !== undefined)
+      sink.write(`console_url=${clean(result.data.consoleUrl)}\n`);
+    if (result.data.devices !== undefined)
+      sink.write(`device_count=${String(result.data.devices.length)}\n`);
+    if (result.data.evidence !== undefined) {
+      sink.write(`evidence=${clean(result.data.evidence.path)}\n`);
+      sink.write(`provider_file_count=${String(result.data.evidence.providerFiles)}\n`);
+      sink.write(`provider_file_omitted=${String(result.data.evidence.omittedFiles)}\n`);
+      sink.write(`evidence_collection=${clean(result.data.evidence.collection)}\n`);
+      if (result.data.evidence.remotePrefix !== undefined)
+        sink.write(`provider_result_prefix=${clean(result.data.evidence.remotePrefix)}\n`);
+    }
+    if (result.data.remoteContinues !== undefined)
+      sink.write(`remote_continues=${String(result.data.remoteContinues)}\n`);
   }
   if (isLogsData(result.data)) {
     sink.write(`serial=${clean(result.data.selected.transport.serial)}\n`);

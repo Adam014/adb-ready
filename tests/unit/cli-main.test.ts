@@ -189,6 +189,64 @@ describe("runCli", () => {
     });
   });
 
+  test("routes a Firebase Test Lab plan without loading ADB", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-ftl-cli-"));
+    await writeFile(path.join(root, "app.apk"), "app");
+    const terminal = io();
+    terminal.cwd = root;
+    let adbCalls = 0;
+    try {
+      const deps = dependencies();
+      deps.locateAdb = async () => {
+        adbCalls += 1;
+        return "/sdk/platform-tools/adb";
+      };
+      deps.runner = async (request) => {
+        if (request.args?.includes("models")) {
+          return result(
+            request,
+            JSON.stringify([
+              {
+                id: "Pixel2.arm",
+                name: "Pixel 2",
+                form: "VIRTUAL",
+                supportedVersionIds: ["35"],
+                perVersionInfo: [{ versionId: "35", deviceCapacity: "DEVICE_CAPACITY_HIGH" }],
+              },
+            ]),
+          );
+        }
+        return result(request, JSON.stringify([{ id: "35", tags: ["default"] }]));
+      };
+      const exitCode = await runCli(
+        [
+          "test",
+          "firebase",
+          "robo",
+          "--project",
+          "demo-project",
+          "--app",
+          "app.apk",
+          "--test-device",
+          "model=Pixel2.arm,version=35",
+          "--dry-run",
+          "--json",
+        ],
+        terminal,
+        deps,
+      );
+
+      expect(exitCode).toBe(0);
+      expect(adbCalls).toBe(0);
+      expect(JSON.parse(terminal.output.value)).toMatchObject({
+        command: "test firebase",
+        data: { status: "planned", action: "robo" },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("routes the complete non-interactive public command surface", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "adb-ready-cli-surface-"));
     const ui =

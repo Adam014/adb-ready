@@ -23,6 +23,10 @@ claims move to the CI tier only after they have a reproducible test environment.
 - Node.js 22 or newer is the installation baseline.
 - `adb` remains an external dependency and can be supplied through `PATH`, an
   Android SDK location, or `--adb PATH`.
+- Firebase Test Lab workflows delegate to the current Google Cloud CLI supplied
+  through `PATH` or `--gcloud PATH`. Provider access, billing, quotas, catalog
+  availability, and Cloud Storage permissions remain Google Cloud project
+  capabilities rather than host-runtime guarantees.
 - USB and wireless visibility depend on what the selected ADB server can access.
   Remote servers are supported through `--adb-host` and `--adb-port`.
 - npm, pnpm, Yarn, and Bun consumers use the same package and the same
@@ -43,3 +47,10 @@ Recorded physical acceptance:
 Physical USB, emulator, wireless, VPN, container, WSL, and remote-server claims
 must be recorded as tested only after they pass on that real environment. ADB
 Ready never treats a fixture as proof of hardware compatibility.
+
+Firebase Test Lab command construction, catalog parsing, official exit-code
+normalization, bounded evidence collection, cancellation, and failure paths are
+covered by deterministic fixtures. The current Google Cloud CLI has also been
+used to verify the real unauthenticated failure boundary. A paid remote matrix
+has not yet been recorded for this release, so successful provider execution is
+not presented as observed acceptance evidence.

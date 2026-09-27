@@ -120,6 +120,7 @@ describe("home screen", () => {
     expect(startSink.value).toContain("Connect wirelessly");
     expect(startSink.value).toContain("Pair a new device");
     expect(startSink.value).toContain("Gradle managed-device tests");
+    expect(startSink.value).toContain("Firebase Test Lab");
 
     const deviceSink = new MemorySink();
     await showHomeScreen({

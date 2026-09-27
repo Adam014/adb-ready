@@ -2,6 +2,11 @@ import type { McpProfile } from "../agent/profiles.js";
 import type { AgentClient } from "../agent/setup.js";
 import type { AppAction, PackageScope } from "../app/app-commands.js";
 import type { PortAction } from "../app/commands.js";
+import {
+  type FirebaseAction,
+  type FirebaseDevice,
+  parseFirebaseDevice,
+} from "../automation/firebase-test-lab.js";
 import type { DevPreset, PackageManagerName } from "../dev/project.js";
 import type {
   UiAction,
@@ -87,11 +92,24 @@ export interface CliOptions {
   customCommand?: { executable: string; args: string[] };
   runCommand?: { executable: string; args: string[] };
   runTimeoutMs?: number;
-  testKind?: "gradle";
+  testKind?: "firebase" | "gradle";
   gradleTask?: string;
   gradlePath?: string;
   gradleShards?: number;
   gradleSoftwareRendering?: boolean;
+  firebaseAction?: FirebaseAction;
+  firebaseMatrixId?: string;
+  firebaseDevices?: FirebaseDevice[];
+  gcloudPath?: string;
+  cloudProject?: string;
+  firebaseApp?: string;
+  firebaseTest?: string;
+  firebaseResultsBucket?: string;
+  firebaseResultsDir?: string;
+  firebaseTestTimeout?: string;
+  firebaseAllowDeprecated?: boolean;
+  firebaseAllowReducedStability?: boolean;
+  firebaseAllowLowCapacity?: boolean;
   avdName?: string;
   deployArtifact?: boolean;
   runArtifactPaths?: string[];
@@ -258,6 +276,9 @@ const BOOLEAN_OPTIONS = new Set([
   "--all-projects",
   "--interactive-only",
   "--software-rendering",
+  "--allow-deprecated",
+  "--allow-reduced-stability",
+  "--allow-low-capacity",
   "--submit",
   "--secret-stdin",
 ]);
@@ -364,6 +385,19 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   let gradlePath: string | undefined;
   let gradleShards: number | undefined;
   let gradleSoftwareRendering = false;
+  let firebaseAction: FirebaseAction | undefined;
+  let firebaseMatrixId: string | undefined;
+  const firebaseDevices: FirebaseDevice[] = [];
+  let gcloudPath: string | undefined;
+  let cloudProject: string | undefined;
+  let firebaseApp: string | undefined;
+  let firebaseTest: string | undefined;
+  let firebaseResultsBucket: string | undefined;
+  let firebaseResultsDir: string | undefined;
+  let firebaseTestTimeout: string | undefined;
+  let firebaseAllowDeprecated = false;
+  let firebaseAllowReducedStability = false;
+  let firebaseAllowLowCapacity = false;
   let avdName: string | undefined;
   let deployArtifact = false;
   const runArtifactPaths: string[] = [];
@@ -496,12 +530,31 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         continue;
       }
       if (command === "test") {
-        if (testKind === undefined && argument === "gradle") {
-          testKind = "gradle";
+        if (testKind === undefined && (argument === "firebase" || argument === "gradle")) {
+          testKind = argument;
           continue;
         }
         if (testKind === "gradle" && gradleTask === undefined) {
           gradleTask = argument;
+          continue;
+        }
+        if (
+          testKind === "firebase" &&
+          firebaseAction === undefined &&
+          (argument === "cancel" ||
+            argument === "devices" ||
+            argument === "instrumentation" ||
+            argument === "robo")
+        ) {
+          firebaseAction = argument;
+          continue;
+        }
+        if (
+          testKind === "firebase" &&
+          firebaseAction === "cancel" &&
+          firebaseMatrixId === undefined
+        ) {
+          firebaseMatrixId = argument;
           continue;
         }
       }
@@ -1129,6 +1182,116 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       gradleShards = parsed;
     } else if (option === "--software-rendering") {
       gradleSoftwareRendering = true;
+    } else if (option === "--allow-deprecated") {
+      firebaseAllowDeprecated = true;
+    } else if (option === "--allow-reduced-stability") {
+      firebaseAllowReducedStability = true;
+    } else if (option === "--allow-low-capacity") {
+      firebaseAllowLowCapacity = true;
+    } else if (option === "--gcloud") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (value.trim() !== value || value.length === 0 || !printableValue(value)) {
+        return failure("CLI_INVALID_VALUE", "--gcloud must be a non-empty printable path.", option);
+      }
+      gcloudPath = value;
+    } else if (option === "--project") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/u.test(value)) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--project must be an explicit Google Cloud project ID.",
+          option,
+        );
+      }
+      cloudProject = value;
+    } else if (option === "--app") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (
+        value.trim() !== value ||
+        value.length === 0 ||
+        !printableValue(value) ||
+        (value.startsWith("gs://") &&
+          !/^gs:\/\/[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]\/.+/u.test(value)) ||
+        value.includes("?")
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--app must be a non-empty printable artifact path.",
+          option,
+        );
+      }
+      firebaseApp = value;
+    } else if (option === "--test-apk") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (
+        value.trim() !== value ||
+        value.length === 0 ||
+        !printableValue(value) ||
+        (value.startsWith("gs://") &&
+          !/^gs:\/\/[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]\/.+/u.test(value)) ||
+        value.includes("?")
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--test-apk must be a non-empty printable path.",
+          option,
+        );
+      }
+      firebaseTest = value;
+    } else if (option === "--test-device") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      const parsed = parseFirebaseDevice(value);
+      if (parsed === undefined) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--test-device requires model=ID,version=ID with optional locale and orientation.",
+          option,
+        );
+      }
+      firebaseDevices.push(parsed);
+    } else if (option === "--results-bucket") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (!/^gs:\/\/[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$/u.test(value)) {
+        return failure("CLI_INVALID_VALUE", "--results-bucket must be a gs:// bucket URI.", option);
+      }
+      firebaseResultsBucket = value;
+    } else if (option === "--results-dir") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (
+        value.length > 512 ||
+        !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/u.test(value) ||
+        value.trim() !== value ||
+        value.startsWith("/") ||
+        value.endsWith("/") ||
+        value.includes("//") ||
+        value.split("/").some((segment) => segment === "." || segment === "..") ||
+        !printableValue(value)
+      ) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--results-dir must be a safe unique bucket-relative path.",
+          option,
+        );
+      }
+      firebaseResultsDir = value;
+    } else if (option === "--test-timeout") {
+      const value = readValue();
+      if (typeof value !== "string") return value;
+      if (parseDuration(value) === undefined) {
+        return failure(
+          "CLI_INVALID_VALUE",
+          "--test-timeout must be a positive duration such as 5m.",
+          option,
+        );
+      }
+      firebaseTestTimeout = value;
     } else if (option === "--avd") {
       const value = readValue();
       if (typeof value !== "string") return value;
@@ -1272,6 +1435,14 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
         "--run-timeout",
         "--gradle",
         "--shards",
+        "--gcloud",
+        "--project",
+        "--app",
+        "--test-apk",
+        "--test-device",
+        "--results-bucket",
+        "--results-dir",
+        "--test-timeout",
         "--avd",
         "--artifact",
         "--variant",
@@ -1747,22 +1918,88 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     if (command !== "test") {
       return failure(
         "CLI_USAGE",
-        "--run-timeout can only be used with run or test gradle.",
+        "--run-timeout can only be used with run or a supported test workflow.",
         "--run-timeout",
       );
     }
   }
-  if (command === "test" && testKind !== "gradle") {
-    return failure("CLI_USAGE", "test requires the gradle workflow: adb-ready test gradle [TASK].");
+  if (command === "test" && testKind === undefined) {
+    return failure(
+      "CLI_USAGE",
+      "test requires a workflow: adb-ready test gradle [TASK] or adb-ready test firebase ACTION.",
+    );
   }
   if (
-    command !== "test" &&
+    testKind !== "gradle" &&
     (gradlePath !== undefined || gradleShards !== undefined || gradleSoftwareRendering)
   ) {
     return failure(
       "CLI_USAGE",
       "--gradle, --shards, and --software-rendering can only be used with test gradle.",
     );
+  }
+  const firebaseOptions =
+    firebaseAction !== undefined ||
+    firebaseMatrixId !== undefined ||
+    firebaseDevices.length > 0 ||
+    gcloudPath !== undefined ||
+    cloudProject !== undefined ||
+    firebaseApp !== undefined ||
+    firebaseTest !== undefined ||
+    firebaseResultsBucket !== undefined ||
+    firebaseResultsDir !== undefined ||
+    firebaseTestTimeout !== undefined ||
+    firebaseAllowDeprecated ||
+    firebaseAllowReducedStability ||
+    firebaseAllowLowCapacity;
+  if (firebaseOptions && (command !== "test" || testKind !== "firebase")) {
+    return failure("CLI_USAGE", "Firebase options can only be used with adb-ready test firebase.");
+  }
+  if (testKind === "firebase") {
+    if (firebaseAction === undefined) {
+      return failure(
+        "CLI_USAGE",
+        "test firebase requires devices, instrumentation, robo, or cancel.",
+      );
+    }
+    if (firebaseResultsDir !== undefined && firebaseResultsBucket === undefined) {
+      return failure("CLI_USAGE", "--results-dir requires --results-bucket.");
+    }
+    if (firebaseAction === "instrumentation" && firebaseTest === undefined) {
+      return failure("CLI_USAGE", "Firebase instrumentation requires --test-apk PATH.");
+    }
+    if (
+      (firebaseAction === "instrumentation" || firebaseAction === "robo") &&
+      (firebaseApp === undefined || firebaseDevices.length === 0)
+    ) {
+      return failure(
+        "CLI_USAGE",
+        `Firebase ${firebaseAction} requires --app PATH and at least one --test-device.`,
+      );
+    }
+    if (
+      firebaseAction === "cancel" &&
+      (firebaseMatrixId === undefined || cloudProject === undefined)
+    ) {
+      return failure(
+        "CLI_USAGE",
+        "Firebase cancellation requires MATRIX_ID and --project PROJECT.",
+      );
+    }
+    if (
+      (firebaseAction === "cancel" || firebaseAction === "devices") &&
+      (firebaseApp !== undefined ||
+        firebaseTest !== undefined ||
+        firebaseDevices.length > 0 ||
+        firebaseResultsBucket !== undefined ||
+        firebaseResultsDir !== undefined ||
+        firebaseTestTimeout !== undefined)
+    ) {
+      return failure(
+        "CLI_USAGE",
+        `Firebase ${firebaseAction} does not accept test artifacts, dimensions, or result storage options.`,
+      );
+    }
   }
   const autonomousRunOptions =
     avdName !== undefined ||
@@ -1923,6 +2160,19 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       ...(gradlePath === undefined ? {} : { gradlePath }),
       ...(gradleShards === undefined ? {} : { gradleShards }),
       ...(gradleSoftwareRendering ? { gradleSoftwareRendering: true } : {}),
+      ...(firebaseAction === undefined ? {} : { firebaseAction }),
+      ...(firebaseMatrixId === undefined ? {} : { firebaseMatrixId }),
+      ...(firebaseDevices.length === 0 ? {} : { firebaseDevices }),
+      ...(gcloudPath === undefined ? {} : { gcloudPath }),
+      ...(cloudProject === undefined ? {} : { cloudProject }),
+      ...(firebaseApp === undefined ? {} : { firebaseApp }),
+      ...(firebaseTest === undefined ? {} : { firebaseTest }),
+      ...(firebaseResultsBucket === undefined ? {} : { firebaseResultsBucket }),
+      ...(firebaseResultsDir === undefined ? {} : { firebaseResultsDir }),
+      ...(firebaseTestTimeout === undefined ? {} : { firebaseTestTimeout }),
+      ...(firebaseAllowDeprecated ? { firebaseAllowDeprecated: true } : {}),
+      ...(firebaseAllowReducedStability ? { firebaseAllowReducedStability: true } : {}),
+      ...(firebaseAllowLowCapacity ? { firebaseAllowLowCapacity: true } : {}),
       ...(avdName === undefined ? {} : { avdName }),
       ...(deployArtifact ? { deployArtifact: true } : {}),
       ...(runArtifactPaths.length === 0 ? {} : { runArtifactPaths }),

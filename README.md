@@ -95,6 +95,9 @@ to reveal an action.
 - [**Automate a real device**](./docs/automation.md#run-one-bounded-verification)
   — gate a finite command on readiness and return stable results, reports, and
   artifacts.
+- [**Run cloud device matrices**](./docs/firebase-test-lab.md) — validate live
+  Firebase dimensions, run instrumentation or Robo tests, and retain normalized
+  provider evidence without storing cloud credentials.
 
 ## Choose how you work
 
@@ -285,6 +288,7 @@ Android transport backend.
 | [AI agent integration](./docs/agent-integration.md) | Connect an MCP-capable coding agent. |
 | [Automation](./docs/automation.md) | Use readiness, exit codes, JSON, NDJSON, JUnit, and CI artifacts. |
 | [Gradle Managed Devices](./docs/gradle-managed-devices.md) | Run build-owned virtual-device and group tests with normalized evidence. |
+| [Firebase Test Lab](./docs/firebase-test-lab.md) | Run explicit remote instrumentation or Robo matrices with bounded evidence. |
 | [Configuration](./docs/configuration.md) | Share project presets, hooks, aliases, and policies. |
 | [Troubleshooting](./docs/troubleshooting.md) | Resolve a known setup, target, UI, or session problem. |
 | [Compatibility](./COMPATIBILITY.md) | Check hosts, runtimes, package managers, and support tiers. |
