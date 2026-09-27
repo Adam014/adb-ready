@@ -41,11 +41,13 @@ function result(request: ProcessRequest, stdout = "", exitCode = 0): ProcessResu
   };
 }
 
-function dependencies(): CommandDependencies {
+function dependencies(
+  options: { clock?: () => Date; ui?: () => string } = {},
+): CommandDependencies {
   let id = 0;
   return {
     idFactory: () => `mcp-${String(++id)}`,
-    clock: () => new Date("2026-09-11T10:00:00.000Z"),
+    clock: options.clock ?? (() => new Date("2026-09-11T10:00:00.000Z")),
     locateAdb: async () => "/sdk/adb",
     locateExecutable: async (executable) => `/bin/${executable}`,
     runtime: () => ({
@@ -80,7 +82,7 @@ function dependencies(): CommandDependencies {
       if (args.includes("input") && args.includes("help")) {
         return result(request, "text keyevent keycombination\n");
       }
-      if (args.includes("uiautomator")) return result(request, UI);
+      if (args.includes("uiautomator")) return result(request, options.ui?.() ?? UI);
       if (args.includes("screencap")) {
         request.onStdoutChunk?.(PNG);
         return result(request);
@@ -255,6 +257,32 @@ describe("MCP server protocol", () => {
       });
 
       const target = { targetHandle };
+      const inspectedUi = await callTool(peer, "inspect_ui", target);
+      const inspectedContent = inspectedUi.structuredContent as {
+        data: { snapshot: { digest: string } };
+      };
+      expect(
+        await callTool(peer, "compare_ui", {
+          ...target,
+          digest: inspectedContent.data.snapshot.digest,
+        }),
+      ).toMatchObject({
+        structuredContent: {
+          ok: true,
+          data: {
+            kind: "ui-diff",
+            diff: { changed: false, totalChanges: 0, added: [], removed: [] },
+          },
+        },
+      });
+      expect(
+        await callTool(peer, "compare_ui", { ...target, digest: "0".repeat(64) }),
+      ).toMatchObject({
+        structuredContent: {
+          ok: false,
+          problems: [{ code: "MCP_UI_BASE_NOT_FOUND" }],
+        },
+      });
       const calls: Array<[string, Record<string, unknown>]> = [
         ["launch_app", { ...target, applicationId: "com.example.app" }],
         ["restart_app", { ...target, applicationId: "com.example.app" }],
@@ -266,7 +294,6 @@ describe("MCP server protocol", () => {
         ["find_ui", { ...target, selector: "text=Open" }],
         ["get_ui", { ...target, selector: "id=com.example:id/open" }],
         ["assert_ui", { ...target, selector: "text=Open" }],
-        ["compare_ui", { ...target, digest: "0".repeat(64) }],
         ["tap_ui", { ...target, target: { selector: "text=Open" }, dryRun: true }],
         ["long_press_ui", { ...target, target: { x: 120, y: 150 }, dryRun: true }],
         ["swipe_ui", { ...target, direction: "up", dryRun: true }],
@@ -344,6 +371,60 @@ describe("MCP server protocol", () => {
       ]) {
         expect(resultBody(await peer.request("resources/read", { uri })).contents).toBeArray();
       }
+    } finally {
+      await server.close();
+      await peer.close();
+    }
+  });
+
+  test("bounds and expires sensitive UI snapshots inside one MCP connection", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "adb-ready-mcp-ui-cache-"));
+    roots.push(root);
+    let timestamp = Date.parse("2026-09-11T10:00:00.000Z");
+    let uiVersion = 0;
+    const server = createAdbReadyMcpServer({
+      cwd: root,
+      env: { ...process.env, XDG_CONFIG_HOME: path.join(root, "config") },
+      dependencies: dependencies({
+        clock: () => new Date(timestamp),
+        ui: () => UI.replace('text="Open"', `text="Open ${String(++uiVersion)}"`),
+      }),
+      targetLease: false,
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const peer = new McpPeer(clientTransport);
+    await peer.start();
+    await server.connect(serverTransport);
+    try {
+      await peer.request("initialize", {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "adb-ready-cache-tests", version: "1" },
+      });
+      await peer.notify("notifications/initialized");
+      const ready = await callTool(peer, "ensure_ready", { device: "USB-1" });
+      const targetHandle = (ready.structuredContent as { data: { targetHandle: string } }).data
+        .targetHandle;
+      const digests: string[] = [];
+      for (let index = 0; index < 9; index += 1) {
+        const inspected = await callTool(peer, "inspect_ui", { targetHandle });
+        digests.push(
+          (inspected.structuredContent as { data: { snapshot: { digest: string } } }).data.snapshot
+            .digest,
+        );
+      }
+      expect(
+        await callTool(peer, "compare_ui", { targetHandle, digest: digests[0] }),
+      ).toMatchObject({
+        structuredContent: { ok: false, problems: [{ code: "MCP_UI_BASE_NOT_FOUND" }] },
+      });
+
+      timestamp += 5 * 60_000 + 1;
+      expect(
+        await callTool(peer, "compare_ui", { targetHandle, digest: digests.at(-1) }),
+      ).toMatchObject({
+        structuredContent: { ok: false, problems: [{ code: "MCP_UI_BASE_STALE" }] },
+      });
     } finally {
       await server.close();
       await peer.close();

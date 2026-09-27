@@ -37,6 +37,11 @@ export interface UiBounds {
   bottom: number;
 }
 
+export interface UiDisplayObservation {
+  bounds: UiBounds | null;
+  rotation?: number;
+}
+
 export interface UiNode {
   ref: string;
   depth: number;
@@ -71,6 +76,7 @@ export interface UiHierarchySnapshot {
     maxDepth: number;
     maxNodes: number;
   };
+  display: UiDisplayObservation;
   limitations: UiHierarchyLimitation[];
   acquisition?: UiAcquisitionMetadata;
   nodes: UiNode[];
@@ -179,6 +185,9 @@ export function parseUiHierarchy(
   const maxNodes = options.maxNodes ?? 2_000;
   const canonical: Array<Omit<UiNode, "ref">> = [];
   const digestHash = createHash("sha256");
+  const hierarchyValues = attributes(xml.match(/<hierarchy\b([^>]*)>/u)?.[1] ?? "");
+  const rotation = Number(hierarchyValues.rotation);
+  let displayBounds: UiBounds | undefined;
   let depth = 0;
   let totalNodes = 0;
   let truncated = false;
@@ -193,6 +202,17 @@ export function parseUiHierarchy(
     totalNodes += 1;
     const values = attributes(token[1] ?? "");
     const parsedBounds = bounds(values.bounds);
+    if (parsedBounds !== undefined) {
+      displayBounds =
+        displayBounds === undefined
+          ? parsedBounds
+          : {
+              left: Math.min(displayBounds.left, parsedBounds.left),
+              top: Math.min(displayBounds.top, parsedBounds.top),
+              right: Math.max(displayBounds.right, parsedBounds.right),
+              bottom: Math.max(displayBounds.bottom, parsedBounds.bottom),
+            };
+    }
     const node: Omit<UiNode, "ref"> = {
       depth: currentDepth,
       ...(values.class === undefined || values.class === "" ? {} : { className: values.class }),
@@ -246,6 +266,10 @@ export function parseUiHierarchy(
       interactiveOnly: options.interactiveOnly === true,
       maxDepth,
       maxNodes,
+    },
+    display: {
+      bounds: displayBounds ?? null,
+      ...(Number.isSafeInteger(rotation) && rotation >= 0 && rotation <= 3 ? { rotation } : {}),
     },
     limitations: hierarchyLimitations(canonical),
     nodes,

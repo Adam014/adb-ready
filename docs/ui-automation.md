@@ -50,8 +50,9 @@ adb-ready inspect ui --acquisition strict
 
 Every successful structured snapshot reports its observation time, duration,
 attempt count, stability status, source and idle strategy, requested filters,
-node limits, truncation, and detected semantic limitations. An empty hierarchy
-is an explicit `UI_HIERARCHY_EMPTY` failure. WebView, Compose, and Flutter
+node limits, truncation, observed display bounds and rotation, and detected
+semantic limitations. An empty hierarchy is an explicit `UI_HIERARCHY_EMPTY`
+failure. WebView, Compose, and Flutter
 markers are reported only when their corresponding platform view is actually
 observed; they describe framework accessibility boundaries rather than guessing
 why an otherwise unreadable window failed.
@@ -169,8 +170,9 @@ adb-ready ui assert 'text=Loading' --state gone
 adb-ready ui compare 7c4a31b8d2ef0000000000000000000000000000000000000000000000000000
 ```
 
-`compare` consumes the complete digest returned by inspection or another UI
-action and reports whether the current hierarchy changed.
+The CLI `compare` command consumes the complete digest returned by inspection
+or another UI action and reports whether the current hierarchy changed. It
+does not persist the earlier sensitive hierarchy.
 
 Waits use exact, explicit selectors:
 
@@ -218,5 +220,16 @@ qualify enabled/actionable state. An optional one-based occurrence is accepted
 only when repeated nodes are intentional. Arguments are schema-validated, each
 MCP connection stays bound to one target, and no raw ADB or shell tool is
 exposed.
+
+`inspect_ui` retains at most eight sensitive snapshots in memory for that MCP
+connection only. `compare_ui` accepts one of those complete digests and returns
+a bounded semantic diff: added, removed, updated, and moved nodes with current
+selector context. `changed` describes the requested filtered view, while
+`digestChanged` also reveals changes outside that view. Unchanged screens return
+empty change lists. Bases expire
+after five minutes and are never written to disk; missing or expired digests
+require a fresh `inspect_ui`. A diff is rejected rather than guessed when its
+target, display bounds or rotation, hierarchy filters, acquisition contract, or
+completeness differs from the base.
 
 [Connect an agent →](./agent-integration.md)
