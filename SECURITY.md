@@ -4,7 +4,8 @@
 
 | Version | Supported |
 | --- | --- |
-| `0.9.x` | Yes |
+| `1.0.x` | Yes |
+| `0.9.x` | No |
 | `0.8.x` | No |
 | `0.7.x` | No |
 | `0.6.x` | No |
@@ -15,8 +16,9 @@
 | `0.1.x` | No |
 | `< 0.1.0` | No |
 
-Security fixes target the latest published minor release. Because ADB Ready is
-still below `1.0.0`, minor releases may include documented breaking changes.
+Security fixes target the latest published minor release. Documented public
+surfaces in `1.x` follow the compatibility and deprecation policy in
+[Stability and versioning](./docs/stability.md).
 
 ## Report a vulnerability privately
 

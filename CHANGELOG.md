@@ -4,10 +4,17 @@ All notable changes to ADB Ready are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-While the project is below `1.0.0`, minor releases may include documented
-breaking changes.
+Documented public surfaces in the `1.x` line follow the compatibility and
+deprecation policy in [Stability and versioning](./docs/stability.md).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-09-29
+
+### Added
+
+- Activate the documented 1.x compatibility, additive-change, deprecation,
+  migration, exit-code, and versioned machine-contract guarantees.
 
 ### Changed
 
@@ -527,7 +534,8 @@ breaking changes.
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Adam014/adb-ready/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Adam014/adb-ready/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Adam014/adb-ready/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Adam014/adb-ready/compare/v0.6.0...v0.7.0
