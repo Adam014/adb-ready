@@ -191,17 +191,111 @@ jobs:
           RELEASE_TARBALL: ${{ runner.temp }}/adb-ready-release/adb-ready.tgz
         run: npm publish "$RELEASE_TARBALL" --access public
 
+  registry-verification:
+    name: Verify the public npm release
+    if: inputs.mode == 'publish'
+    needs:
+      - validate
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the immutable release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag }}
+          persist-credentials: false
+
+      - name: Set up Node.js without publish credentials
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Set up the pinned pnpm consumer
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
+        with:
+          version: 12.3.4
+          cache: false
+          install: false
+
+      - name: Set up Bun from packageManager
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Set up Deno 2
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+
+      - name: Install the locked verification toolchain
+        run: bun install --frozen-lockfile
+
+      - name: Wait for the exact public registry version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          for attempt in {1..30}; do
+            observed=$(npm view "adb-ready@$version" version 2>/dev/null || true)
+            if [ "$observed" = "$version" ]; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::adb-ready@$version did not become readable from the public npm registry within 5 minutes."
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Verify the public tarball digest
+        env:
+          EXPECTED_SHA256: ${{ needs.validate.outputs.artifact-sha256 }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          destination="$RUNNER_TEMP/public-package"
+          mkdir -p "$destination"
+          npm pack "adb-ready@$version" --ignore-scripts --pack-destination "$destination"
+          actual=$(sha256sum "$destination/adb-ready-$version.tgz" | cut -d ' ' -f 1)
+          test "$actual" = "$EXPECTED_SHA256"
+
+      - name: Install and run the public package with required package managers
+        env:
+          ADB_READY_REQUIRE_PACKAGE_MANAGERS: npm,pnpm,yarn,bun
+          ADB_READY_YARN_CLI: ${{ github.workspace }}/node_modules/yarn/bin/yarn.js
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: bun run scripts/package-manager-smoke.mjs --package "adb-ready@${RELEASE_TAG#v}"
+
+      - name: Install and run the public package with modern Yarn
+        env:
+          ADB_READY_REQUIRE_PACKAGE_MANAGERS: yarn
+          ADB_READY_YARN_CLI: ${{ github.workspace }}/node_modules/@yarnpkg/cli-dist/bin/yarn.js
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: bun run scripts/package-manager-smoke.mjs --package "adb-ready@${RELEASE_TAG#v}"
+
+      - name: Run the public package with Deno
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          test "$(deno run -A --minimum-dependency-age 0 "npm:adb-ready@$version" --version)" = "$version"
+
   github-release:
     name: Publish the prepared GitHub release
     if: inputs.mode == 'publish'
-    needs: publish
+    needs: registry-verification
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write # Publish the already prepared draft release after npm succeeds.
+      contents: write # Publish the prepared draft only after public-registry verification succeeds.
 
     steps:
-      - name: Publish the draft after npm succeeds
+      - name: Publish the draft after public-registry verification succeeds
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}

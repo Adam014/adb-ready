@@ -16,6 +16,8 @@ describe("release workflow", () => {
     );
     const artifactStep = workflow.indexOf("- name: Create the immutable npm artifact");
     const publishStep = workflow.indexOf("- name: Publish with npm trusted publishing");
+    const registryJob = workflow.indexOf("  registry-verification:");
+    const githubReleaseJob = workflow.indexOf("  github-release:");
 
     expect(preflightJob).toBeGreaterThan(-1);
     expect(validateJob).toBeGreaterThan(preflightJob);
@@ -24,6 +26,8 @@ describe("release workflow", () => {
     expect(draftReleaseStep).toBeLessThan(validateJob);
     expect(artifactStep).toBeGreaterThan(immutableTargetStep);
     expect(publishStep).toBeGreaterThan(artifactStep);
+    expect(registryJob).toBeGreaterThan(publishStep);
+    expect(githubReleaseJob).toBeGreaterThan(registryJob);
 
     const draftPreflight = workflow.slice(preflightJob, validateJob);
     expect(draftPreflight).toContain("if: inputs.mode == 'publish'");
@@ -44,5 +48,19 @@ describe("release workflow", () => {
     expect(validation).toContain('"refs/tags/$RELEASE_TAG"');
     expect(validation).toContain('git rev-parse "$RELEASE_TAG^{commit}"');
     expect(validation).not.toContain("contents: write");
+
+    const registryVerification = workflow.slice(registryJob, githubReleaseJob);
+    expect(registryVerification).toContain("- publish");
+    expect(registryVerification).toContain("Wait for the exact public registry version");
+    expect(registryVerification).toContain("Verify the public tarball digest");
+    expect(registryVerification).toContain("EXPECTED_SHA256");
+    expect(registryVerification).toContain("npm,pnpm,yarn,bun");
+    expect(registryVerification).toContain("modern Yarn");
+    expect(registryVerification).toContain("minimum-dependency-age 0");
+    expect(registryVerification).not.toContain("id-token: write");
+    expect(registryVerification).not.toContain("contents: write");
+
+    const githubRelease = workflow.slice(githubReleaseJob);
+    expect(githubRelease).toContain("needs: registry-verification");
   });
 });
