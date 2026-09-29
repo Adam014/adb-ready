@@ -9,6 +9,18 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add a packaged JSON Schema for the stable JSON result and NDJSON event
+  envelopes, plus an explicit 1.x compatibility, deprecation, migration, and
+  support-claim policy for CLI, configuration, automation, and MCP consumers.
+
+### Changed
+
+- Strengthen package and release verification so the automation schema is
+  always shipped and generated agent contracts cannot drift from the package
+  version.
+
 ## [0.8.0] - 2026-09-29
 
 ### Added

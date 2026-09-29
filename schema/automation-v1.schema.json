@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Adam014/adb-ready/blob/main/schema/automation-v1.schema.json",
+  "title": "ADB Ready automation envelope v1",
+  "description": "Common JSON result and NDJSON event envelopes emitted by ADB Ready.",
+  "oneOf": [{ "$ref": "#/$defs/result" }, { "$ref": "#/$defs/event" }],
+  "$defs": {
+    "jsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "correlation": {
+      "type": "object",
+      "required": ["commandId"],
+      "properties": {
+        "commandId": { "type": "string", "minLength": 1 },
+        "operationId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "targetId": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["source", "value"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "value": { "$ref": "#/$defs/jsonValue" },
+        "redacted": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "action": {
+      "type": "object",
+      "required": ["id", "title", "kind", "risk", "automatic"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["command", "user", "documentation"] },
+        "risk": {
+          "enum": [
+            "none",
+            "read-only",
+            "local-additive",
+            "device-reversible",
+            "shared-global",
+            "destructive",
+            "open-world"
+          ]
+        },
+        "automatic": { "type": "boolean" },
+        "idempotent": { "type": "boolean" },
+        "command": {
+          "type": "object",
+          "required": ["executable", "args"],
+          "properties": {
+            "executable": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "problem": {
+      "type": "object",
+      "required": [
+        "code",
+        "category",
+        "severity",
+        "summary",
+        "detail",
+        "retryable",
+        "evidence",
+        "actions",
+        "correlation"
+      ],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["warning", "error"] },
+        "summary": { "type": "string" },
+        "detail": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
+        "correlation": { "$ref": "#/$defs/correlation" }
+      },
+      "additionalProperties": true
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "command",
+        "commandId",
+        "ok",
+        "startedAt",
+        "finishedAt",
+        "durationMs",
+        "data",
+        "problems"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "commandId": { "type": "string", "minLength": 1 },
+        "ok": { "type": "boolean" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "data": { "$ref": "#/$defs/jsonValue" },
+        "problems": { "type": "array", "items": { "$ref": "#/$defs/problem" } }
+      },
+      "additionalProperties": true
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "sequence",
+        "timestamp",
+        "type",
+        "source",
+        "severity",
+        "message",
+        "correlation"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["debug", "info", "warning", "error"] },
+        "message": { "type": "string" },
+        "correlation": { "$ref": "#/$defs/correlation" },
+        "data": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -292,6 +292,7 @@ Android transport backend.
 | [Logs and AI context](./docs/logs-and-context.md) | Diagnose a failure with bounded, redacted evidence. |
 | [AI agent integration](./docs/agent-integration.md) | Connect an MCP-capable coding agent. |
 | [Automation](./docs/automation.md) | Use readiness, exit codes, JSON, NDJSON, JUnit, and CI artifacts. |
+| [Stability and versioning](./docs/stability.md) | Understand the 1.x API, schema, deprecation, and migration guarantees. |
 | [Gradle Managed Devices](./docs/gradle-managed-devices.md) | Run build-owned virtual-device and group tests with normalized evidence. |
 | [Firebase Test Lab](./docs/firebase-test-lab.md) | Run explicit remote instrumentation or Robo matrices with bounded evidence. |
 | [Target pools and fan-out](./docs/target-pools.md) | Bound parallel verification across an explicit target set. |
