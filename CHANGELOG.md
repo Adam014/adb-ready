@@ -9,6 +9,12 @@ breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add deterministic, offline shell completion generation for Bash, zsh, fish,
+  PowerShell, and Nushell, covering both `adb-ready` and `adbr` without loading
+  project configuration or contacting ADB.
+
 ## [0.7.0] - 2026-09-27
 
 ### Added

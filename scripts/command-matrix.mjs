@@ -224,6 +224,24 @@ try {
   assertions += 1;
 
   for (const alias of ["adb-ready", "adbr"]) {
+    /** @type {Array<[string, string]>} */
+    const completionCases = [
+      ["bash", "complete -F _adb_ready_complete adb-ready adbr"],
+      ["zsh", "#compdef adb-ready adbr"],
+      ["fish", "complete -c adb-ready"],
+      ["powershell", "Register-ArgumentCompleter -Native -CommandName adb-ready,adbr"],
+      ["nushell", 'export extern "adbr"'],
+    ];
+    for (const [shell, marker] of completionCases) {
+      const generated = command(alias, ["completion", shell], env);
+      expectStatus(generated, 0, `${alias} ${shell} completion`);
+      expectIncludes(generated.stdout, marker, `${alias} ${shell} completion`);
+      if (generated.stderr !== "") {
+        throw new Error(`${alias} ${shell} completion wrote to stderr`);
+      }
+      assertions += 1;
+    }
+
     /** @type {Array<[string, string[]]>} */
     const rootMachineCases = [
       ["root JSON non-interactive", ["--json", "--non-interactive"]],

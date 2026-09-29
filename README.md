@@ -284,6 +284,7 @@ Android transport backend.
 | Guide | Start here when you want to… |
 | --- | --- |
 | [Getting started](./docs/getting-started.md) | Reach the first ready development session. |
+| [Shell completion](./docs/completions.md) | Enable command discovery in Bash, zsh, fish, PowerShell, or Nushell. |
 | [Development sessions](./docs/dev-sessions.md) | Configure frameworks, commands, ports, readiness, and cleanup. |
 | [Targets and Wireless debugging](./docs/targets-and-wireless.md) | Pair, connect, recover, or explicitly select a target. |
 | [Apps and evidence](./docs/apps-and-evidence.md) | Control the app and capture screenshots or recordings. |

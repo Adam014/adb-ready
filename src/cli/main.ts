@@ -124,6 +124,7 @@ import type { TextSink } from "../ui/spinner.js";
 import { renderChildStreamLine, renderLogStreamLine } from "../ui/stream-renderer.js";
 import { resolveTerminalCapabilities, type TerminalCapabilities } from "../ui/terminal.js";
 import { type CliOptions, type OutputFormat, parseArguments } from "./arguments.js";
+import { generateCompletion } from "./completion.js";
 
 export const VERSION = manifest.version;
 
@@ -140,6 +141,7 @@ Commands:
   app ACTION [APP_ID]   Resolve, inspect, install, or control one app
   apps list             List packages on one Android target
   capture ACTION         Save a verified screenshot or bounded screen recording
+  completion SHELL       Generate completion for bash, zsh, fish, PowerShell, or Nushell
   config ACTION          Validate or explain resolved configuration
   connect [HOST:PORT]    Connect and verify a wireless Android target
   context [SESSION]      Export bounded AI-ready diagnostic context
@@ -247,6 +249,12 @@ Writes verified binary evidence inside the current project. Existing files are
 never replaced unless --force is explicit. Recordings are bounded to 180s.
 Screenshot crops use source pixels. Dimension limits preserve aspect ratio and
 never upscale the image. The CLI keeps full resolution unless limits are set.
+`,
+  completion: `Usage: adb-ready completion bash|zsh|fish|powershell|nushell
+
+Prints a static completion script for both adb-ready and adbr. Generation is
+offline, deterministic, and never loads project configuration or contacts ADB.
+See docs/completions.md for one-time installation instructions.
 `,
   config: `Usage:
   adb-ready config validate [options]
@@ -1213,6 +1221,10 @@ async function runCliInternal(
         verbose: options.verbose,
       },
     );
+    return ExitCode.Success;
+  }
+  if (options.command === "completion") {
+    io.output.write(generateCompletion(options.completionShell ?? "bash"));
     return ExitCode.Success;
   }
   if (options.command === "mcp") {

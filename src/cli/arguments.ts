@@ -18,12 +18,14 @@ import type {
 } from "../evidence/ui-actions.js";
 import type { UiAcquisitionProfile } from "../evidence/ui-hierarchy.js";
 import type { PortDirection } from "../ports/model.js";
+import { COMPLETION_SHELLS, type CompletionShell } from "./completion.js";
 
 export type CommandName =
   | "agent"
   | "app"
   | "apps"
   | "capture"
+  | "completion"
   | "config"
   | "connect"
   | "context"
@@ -57,6 +59,7 @@ export type ContextFilter =
 export interface CliOptions {
   command: CommandName;
   helpTarget?: Exclude<CommandName, "help">;
+  completionShell?: CompletionShell;
   format: OutputFormat;
   quiet: boolean;
   verbose: boolean;
@@ -186,6 +189,7 @@ const COMMANDS = new Set<CommandName>([
   "app",
   "apps",
   "capture",
+  "completion",
   "config",
   "connect",
   "context",
@@ -351,6 +355,7 @@ function splitLongOption(argument: string): { option: string; inlineValue?: stri
 export function parseArguments(argv: readonly string[]): CliParseResult {
   let command: CommandName | undefined;
   let helpTarget: CliOptions["helpTarget"];
+  let completionShell: CompletionShell | undefined;
   let format: OutputFormat = "human";
   let quiet = false;
   let verbose = false;
@@ -507,6 +512,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
           candidate === "app" ||
           candidate === "apps" ||
           candidate === "capture" ||
+          candidate === "completion" ||
           candidate === "connect" ||
           candidate === "config" ||
           candidate === "context" ||
@@ -533,6 +539,16 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
       }
       if ((command === "connect" || command === "pair") && endpoint === undefined) {
         endpoint = argument;
+        continue;
+      }
+      if (command === "completion" && completionShell === undefined) {
+        if (!COMPLETION_SHELLS.includes(argument as CompletionShell)) {
+          return failure(
+            "CLI_INVALID_VALUE",
+            `Invalid completion shell: ${argument}. Expected bash, zsh, fish, powershell, or nushell.`,
+          );
+        }
+        completionShell = argument as CompletionShell;
         continue;
       }
       if (command === "agent" && argument === "setup" && !agentSetupSeen) {
@@ -1644,6 +1660,18 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
   if (command === "capture" && captureKind === undefined) {
     return failure("CLI_USAGE", "capture requires screenshot or screen-record.");
   }
+  if (command === "completion" && completionShell === undefined) {
+    return failure("CLI_USAGE", "completion requires bash, zsh, fish, powershell, or nushell.");
+  }
+  if (
+    command === "completion" &&
+    argv.some((argument) => argument !== "completion" && argument !== completionShell)
+  ) {
+    return failure(
+      "CLI_USAGE",
+      "completion accepts only one shell name; redirect its exact script output to a file.",
+    );
+  }
   if (command === "inspect" && inspectKind === undefined) {
     return failure("CLI_USAGE", "inspect requires app, failures, or ui.");
   }
@@ -2208,6 +2236,7 @@ export function parseArguments(argv: readonly string[]): CliParseResult {
     options: {
       command,
       ...(helpTarget === undefined ? {} : { helpTarget }),
+      ...(completionShell === undefined ? {} : { completionShell }),
       format,
       quiet,
       verbose,
