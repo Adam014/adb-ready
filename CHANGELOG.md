@@ -9,6 +9,12 @@ breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Keep prepared GitHub releases in draft until the exact public npm tarball
+  matches the verified artifact digest and passes clean-consumer execution
+  through npm, pnpm, Yarn Classic, modern Yarn, Bun, and Deno.
+
 ## [0.9.0] - 2026-09-29
 
 ### Added

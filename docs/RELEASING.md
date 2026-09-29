@@ -1,8 +1,9 @@
 # Releasing ADB Ready
 
 ADB Ready promotes one verified npm tarball through npm trusted publishing. A
-draft GitHub release is made public only after npm accepts that exact artifact.
-The workflow does not use a long-lived npm write token.
+draft GitHub release is made public only after the exact public-registry
+artifact passes clean-consumer verification. The workflow does not use a
+long-lived npm write token.
 
 ## One-time setup
 
@@ -105,13 +106,23 @@ The workflow:
 5. records and rechecks its SHA-256 digest across the job boundary;
 6. grants OIDC only to the isolated npm publish job;
 7. publishes the verified tarball through short-lived trusted-publishing
-   credentials; and
-8. publishes the prepared GitHub release only after npm succeeds.
+   credentials;
+8. waits for bounded npm-registry convergence, verifies the public tarball's
+   SHA-256 digest, and installs and launches it through npm, pnpm, Yarn Classic,
+   modern Yarn, Bun, and Deno; and
+9. publishes the prepared GitHub release only after the public package passes.
 
 Do not rerun a failed publish blindly. Inspect whether the version already
 exists on npm first; published npm versions are immutable. A failed validation
-can be repeated safely. If npm succeeded but the final GitHub release step
-failed, rerun only the failed job or publish the existing draft manually.
+can be repeated safely. If npm succeeded but public-registry verification has
+not, keep the GitHub release as a draft, inspect the immutable npm version, and
+rerun only the failed verification job after the registry has converged.
+
+The immediate modern-Yarn consumer check uses its official one-command
+`--no-time-gate` override, and the Deno check uses
+`--minimum-dependency-age 0`. These narrow release-verification exceptions are
+needed because both tools intentionally quarantine newly published versions;
+normal consumers keep the default supply-chain age gates.
 
 ## Verify from a clean consumer
 

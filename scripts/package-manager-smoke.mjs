@@ -15,6 +15,9 @@ const consumerNpmConfig = path.join(temporary, "consumer.npmrc");
 const tarballArgumentIndex = process.argv.indexOf("--tarball");
 const suppliedTarball =
   tarballArgumentIndex === -1 ? undefined : process.argv[tarballArgumentIndex + 1];
+const packageArgumentIndex = process.argv.indexOf("--package");
+const suppliedPackage =
+  packageArgumentIndex === -1 ? undefined : process.argv[packageArgumentIndex + 1];
 const required = new Set(
   (process.env.ADB_READY_REQUIRE_PACKAGE_MANAGERS ?? "")
     .split(",")
@@ -74,7 +77,7 @@ function checked(executable, args, cwd, label) {
   return result;
 }
 
-/** @type {Array<{name: string, executable: string, prefix: string[], install: (tarball: string, version: string) => string[], execute: (version: string) => string[]}>} */
+/** @type {Array<{name: string, executable: string, prefix: string[], install: (source: string, version: string, publicRegistry: boolean) => string[], execute: (version: string) => string[]}>} */
 const managers = [
   {
     name: "npm",
@@ -94,8 +97,10 @@ const managers = [
     name: "yarn",
     executable: lockedYarnCli === undefined ? "yarn" : "node",
     prefix: lockedYarnCli === undefined ? [] : [path.resolve(lockedYarnCli)],
-    install: (tarball, version) =>
-      isModernYarn(version) ? ["add", tarball] : ["add", "--ignore-scripts", tarball],
+    install: (source, version, publicRegistry) =>
+      isModernYarn(version)
+        ? ["add", source, ...(publicRegistry ? ["--no-time-gate"] : [])]
+        : ["add", "--ignore-scripts", source],
     execute: (version) =>
       isModernYarn(version)
         ? ["run", "adb-ready", "--version"]
@@ -114,8 +119,20 @@ try {
   if (tarballArgumentIndex !== -1 && suppliedTarball === undefined) {
     throw new Error("--tarball requires a path");
   }
-  const tarball =
-    suppliedTarball === undefined
+  if (packageArgumentIndex !== -1 && suppliedPackage === undefined) {
+    throw new Error("--package requires an exact package specifier");
+  }
+  if (suppliedTarball !== undefined && suppliedPackage !== undefined) {
+    throw new Error("use either --tarball or --package, not both");
+  }
+  if (suppliedPackage !== undefined && suppliedPackage !== `${manifest.name}@${manifest.version}`) {
+    throw new Error(
+      `--package must pin the checked-out release exactly: ${manifest.name}@${manifest.version}`,
+    );
+  }
+  const packageSource =
+    suppliedPackage ??
+    (suppliedTarball === undefined
       ? (() => {
           const packed = checked(
             "npm",
@@ -130,8 +147,10 @@ try {
           }
           return path.join(temporary, filename);
         })()
-      : path.resolve(suppliedTarball);
-  await access(tarball);
+      : path.resolve(suppliedTarball));
+  if (suppliedPackage === undefined) {
+    await access(packageSource);
+  }
   let tested = 0;
 
   for (const manager of managers) {
@@ -154,7 +173,10 @@ try {
     }
     checked(
       manager.executable,
-      [...manager.prefix, ...manager.install(tarball, version)],
+      [
+        ...manager.prefix,
+        ...manager.install(packageSource, version, suppliedPackage !== undefined),
+      ],
       consumer,
       `${manager.name} install`,
     );
@@ -167,8 +189,22 @@ try {
     if (execution.stdout.trim() !== manifest.version) {
       throw new Error(`${manager.name} returned unexpected version: ${execution.stdout.trim()}`);
     }
+    const aliasExecution = checked(
+      manager.executable,
+      [
+        ...manager.prefix,
+        ...manager.execute(version).map((value) => (value === "adb-ready" ? "adbr" : value)),
+      ],
+      consumer,
+      `${manager.name} execute alias`,
+    );
+    if (aliasExecution.stdout.trim() !== manifest.version) {
+      throw new Error(
+        `${manager.name} alias returned unexpected version: ${aliasExecution.stdout.trim()}`,
+      );
+    }
     process.stdout.write(
-      `✓ ${manager.name} ${version}: installed artifact and launched adb-ready\n`,
+      `✓ ${manager.name} ${version}: installed artifact and launched both executable names\n`,
     );
     tested += 1;
   }
