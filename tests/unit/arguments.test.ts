@@ -53,6 +53,28 @@ describe("parseArguments", () => {
       ok: true,
       options: { command: "help", helpTarget: "version" },
     });
+    expect(parseArguments(["help", "completion"])).toMatchObject({
+      ok: true,
+      options: { command: "help", helpTarget: "completion" },
+    });
+  });
+
+  test("parses completion shells and rejects ambiguous output", () => {
+    for (const shell of ["bash", "zsh", "fish", "powershell", "nushell"]) {
+      expect(parseArguments(["completion", shell])).toMatchObject({
+        ok: true,
+        options: { command: "completion", completionShell: shell },
+      });
+    }
+    expect(parseArguments(["completion"])).toMatchObject({ ok: false, code: "CLI_USAGE" });
+    expect(parseArguments(["completion", "tcsh"])).toMatchObject({
+      ok: false,
+      code: "CLI_INVALID_VALUE",
+    });
+    expect(parseArguments(["completion", "bash", "--json"])).toMatchObject({
+      ok: false,
+      code: "CLI_USAGE",
+    });
   });
 
   test("uses the last explicit presentation preference", () => {

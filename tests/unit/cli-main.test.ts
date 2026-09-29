@@ -152,6 +152,29 @@ function dependencies(devices = "List of devices attached\n"): CliDependencies {
 }
 
 describe("runCli", () => {
+  test("generates completion without loading project or ADB", async () => {
+    for (const [shell, marker] of [
+      ["bash", "complete -F _adb_ready_complete adb-ready adbr"],
+      ["zsh", "#compdef adb-ready adbr"],
+      ["fish", "complete -c adb-ready"],
+      ["powershell", "Register-ArgumentCompleter -Native -CommandName adb-ready,adbr"],
+      ["nushell", 'export extern "adbr"'],
+    ] as const) {
+      const terminal = io();
+      const blocked = dependencies();
+      blocked.loadConfig = async () => {
+        throw new Error("completion loaded project configuration");
+      };
+      blocked.locateAdb = async () => {
+        throw new Error("completion located ADB");
+      };
+      expect(await runCli(["completion", shell], terminal, blocked)).toBe(ExitCode.Success);
+      expect(terminal.output.value).toContain(marker);
+      expect(terminal.output.value).toContain("completion");
+      expect(terminal.error.value).toBe("");
+    }
+  });
+
   test("routes a complete Gradle managed-device plan through the public CLI", async () => {
     const terminal = io();
     const exitCode = await runCli(

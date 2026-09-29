@@ -81,6 +81,15 @@ try {
       );
     }
 
+    const completion = invoke(runtime, ["completion", "bash"]);
+    expectSuccess(runtime, "completion", completion);
+    if (
+      !completion.stdout.includes("complete -F _adb_ready_complete adb-ready adbr") ||
+      completion.stderr !== ""
+    ) {
+      throw new Error(`${runtime.name} returned invalid Bash completion output`);
+    }
+
     const dev = invoke(runtime, [
       "dev",
       "--no-logs",
@@ -168,7 +177,7 @@ try {
     }
 
     process.stdout.write(
-      `✓ ${runtime.name}: version, dev, UI, target propagation, journal, dry-run, child exit\n`,
+      `✓ ${runtime.name}: version, completion, dev, UI, target propagation, journal, dry-run, child exit\n`,
     );
   }
 } finally {
