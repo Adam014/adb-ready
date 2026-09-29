@@ -45,6 +45,7 @@
 - Logs and diagnostic context: `docs/logs-and-context.md`
 - Configuration: `docs/configuration.md`
 - Automation contract: `docs/automation.md`
+- Stability and versioning: `docs/stability.md`
 - Compatibility: `COMPATIBILITY.md`
 - Security: `SECURITY.md`
 - Threat model: `docs/threat-model.md`
