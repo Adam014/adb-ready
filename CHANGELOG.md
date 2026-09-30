@@ -9,6 +9,16 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-30
+
+### Changed
+
+- Refresh the public README with the ADB Ready terminal-blob logo and a longer
+  motion-led product walkthrough for the npm and GitHub landing pages.
+- Publish the README coverage badge from verified LCOV data while retaining a
+  repository-hosted `≥95%` fallback when the external coverage service is
+  unavailable.
+
 ## [1.0.0] - 2026-09-29
 
 ### Added
@@ -534,7 +544,8 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Adam014/adb-ready/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Adam014/adb-ready/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Adam014/adb-ready/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Adam014/adb-ready/compare/v0.7.0...v0.8.0
