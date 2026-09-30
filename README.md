@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-logo.png" alt="ADB Ready terminal blob logo" width="112" />
+
 # ADB Ready
 
 **The local Android runtime for coding agents.**
@@ -22,7 +24,7 @@ verified evidence—for developers, agents, and CI.
 [AI agents](#with-a-coding-agent) · [CI](#in-ci-and-automation) ·
 [Documentation](#documentation)
 
-<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-demo.gif" alt="ADB Ready prepares an Android development session, verifies the app UI, and lets a coding agent recover lost localhost access." width="1120" />
+<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-demo.gif" alt="ADB Ready prepares an Android development session, verifies the app UI, lets a coding agent recover lost localhost access, and retains evidence from a bounded automation run." width="1120" />
 
 </div>
 
