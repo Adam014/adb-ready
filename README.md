@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-logo.png" alt="ADB Ready terminal blob logo" width="112" />
+
 # ADB Ready
 
 **The local Android runtime for coding agents.**
@@ -9,7 +11,7 @@ verified evidence—for developers, agents, and CI.
 
 [![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
 [![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/Adam014/adb-ready/graph/badge.svg?branch=main)](https://app.codecov.io/gh/Adam014/adb-ready)
+[![Coverage ≥95%](https://raw.githubusercontent.com/Adam014/adb-ready/badges/coverage.svg)](https://app.codecov.io/gh/Adam014/adb-ready)
 [![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
@@ -22,7 +24,7 @@ verified evidence—for developers, agents, and CI.
 [AI agents](#with-a-coding-agent) · [CI](#in-ci-and-automation) ·
 [Documentation](#documentation)
 
-<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-demo.gif" alt="ADB Ready prepares an Android development session, verifies the app UI, and lets a coding agent recover lost localhost access." width="1120" />
+<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-demo.gif" alt="ADB Ready prepares an Android development session, verifies the app UI, lets a coding agent recover lost localhost access, and retains evidence from a bounded automation run." width="1120" />
 
 </div>
 
