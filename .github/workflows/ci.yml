@@ -128,6 +128,54 @@ jobs:
           files: coverage/lcov.info
           use_oidc: true
 
+  coverage-badge:
+    name: Update coverage badge
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # Publish the generated SVG to the dedicated badges branch.
+
+    steps:
+      - name: Check out badge publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: badges
+          path: badge
+          persist-credentials: false
+
+      - name: Check out repository tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Download verified LCOV report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: test-coverage
+          path: source/coverage
+
+      - name: Render coverage badge
+        run: node source/scripts/coverage-badge.mjs source/coverage/lcov.info badge/coverage.svg
+
+      - name: Publish changed badge
+        working-directory: badge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- coverage.svg; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add coverage.svg
+          git commit -m "chore: update coverage badge"
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth_header" \
+            push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:badges
+
   node-compatibility:
     name: Node.js ${{ matrix.node }} artifact
     runs-on: ubuntu-latest
