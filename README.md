@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-logo.png" alt="ADB Ready terminal blob logo" width="112" />
-
-# ADB Ready
+<h1>
+  <img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-logo.png" alt="" width="96" align="absmiddle" />
+  ADB Ready
+</h1>
 
 **The local Android runtime for coding agents.**
 
