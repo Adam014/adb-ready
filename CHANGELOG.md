@@ -9,6 +9,13 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-30
+
+### Changed
+
+- Place the ADB Ready logo and product name side by side with corrected vertical
+  alignment on the GitHub and npm landing pages.
+
 ## [1.0.1] - 2026-09-30
 
 ### Changed
@@ -544,7 +551,8 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/Adam014/adb-ready/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Adam014/adb-ready/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Adam014/adb-ready/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Adam014/adb-ready/compare/v0.8.0...v0.9.0
