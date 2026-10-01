@@ -31,6 +31,12 @@ adb-ready devices --last
 `--device` accepts an exact ADB serial or a configured alias. `--transport-id`
 disambiguates duplicate transports. `--last` resolves the last verified target
 identity; it does not silently choose an unrelated visible device.
+If a local ADB server restart drops the stable wireless transport, `--last`
+first reconnects the exact remembered endpoint when discovery still advertises
+it, then verifies the target again. If Wireless debugging rotates the endpoint,
+ADB Ready probes only already-known connect services and accepts a replacement
+only after its hardware identity matches the remembered target. It never
+substitutes an unrelated device.
 
 An exact serial, serial-backed alias, or transport ID also bounds target-side
 identity inspection to that transport. ADB Ready does not query unrelated

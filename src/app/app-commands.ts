@@ -24,6 +24,7 @@ import { selectTarget } from "../target/selection.js";
 import {
   type AndroidPackageInfo,
   type ForegroundActivity,
+  parseAndroidLockState,
   parseForegroundActivity,
   parsePackageInfo,
   parsePackageList,
@@ -47,6 +48,8 @@ export type AppAction =
   | "stop"
   | "uninstall";
 export type PackageScope = "all" | "system" | "user";
+
+const DEFAULT_APP_INSTALL_TIMEOUT_MS = 5 * 60_000;
 
 export interface AppCommandRequest {
   action: AppAction;
@@ -604,12 +607,24 @@ async function launchApp(
     !succeeded(active.process) ||
     activeValue?.applicationId !== applicationId
   ) {
+    const lockState = await ready.client.targetCommand(
+      ready.target,
+      "app-launch-lock-state",
+      "Reading Android lock-screen state after launch",
+      ["shell", "dumpsys", "window", "policy"],
+      parseAndroidLockState,
+      signal,
+      { maxBufferBytes: 4 * 1024 * 1024 },
+    );
+    const targetIsLocked = succeeded(lockState.process) && lockState.value === "locked";
     problems.push(
       problem(
         "APP_LAUNCH_UNVERIFIED",
         "app.lifecycle",
         `${applicationId} did not become the foreground app.`,
-        "ADB accepted the launch request, but the foreground postcondition was not met.",
+        targetIsLocked
+          ? "ADB launched the app, but Android is locked. Unlock the selected target, then retry."
+          : "ADB accepted the launch request, but the foreground postcondition was not met.",
         commandId,
         [
           {
@@ -623,6 +638,15 @@ async function launchApp(
                     activity: activeValue.activity,
                   },
           },
+          ...(targetIsLocked
+            ? [
+                {
+                  source: "adb.window-policy",
+                  field: "lockState",
+                  value: "locked",
+                },
+              ]
+            : []),
         ],
       ),
     );
@@ -792,7 +816,7 @@ export async function runApp(
       expectedBefore.kind === "resolved"
         ? await inspectPackage(ready, expectedBefore.applicationId, signal)
         : undefined;
-    const installed = await ready.client.targetCommand(
+    const installed = await ready.client.targetCommand<string>(
       ready.target,
       "app-install",
       `Installing ${path.basename(artifact)}`,
@@ -804,6 +828,13 @@ export async function runApp(
       ],
       (output) => output.trim(),
       signal,
+      {
+        ...(config.timeoutWasDefault === true
+          ? { timeoutMs: DEFAULT_APP_INSTALL_TIMEOUT_MS }
+          : config.timeoutMs === undefined
+            ? {}
+            : { timeoutMs: config.timeoutMs }),
+      },
     );
     if (!succeeded(installed.process) || !/\bSuccess\b/u.test(installed.value)) {
       problems.push(operationProblem("app-install", installed, current.commandId));

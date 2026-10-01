@@ -1648,6 +1648,7 @@ async function runCliInternal(
     ...(values.adbHost === undefined ? {} : { adbHost: values.adbHost }),
     ...(values.adbPort === undefined ? {} : { adbPort: values.adbPort }),
     timeoutMs: values.timeoutMs,
+    timeoutWasDefault: loaded.config.provenance.timeoutMs?.source === "default",
     uiTimeoutMs:
       loaded.config.provenance.timeoutMs?.source === "default" ? 15_000 : values.timeoutMs,
     ...(options.device === undefined ? {} : { targetSelector: options.device }),
@@ -1857,6 +1858,7 @@ async function runCliInternal(
     (options.command === "app" && (options.appAction !== "resolve" || options.select)) ||
     options.command === "apps" ||
     options.command === "capture" ||
+    (options.command === "devices" && options.remembered) ||
     ((options.command === "dev" || options.command === "run") && !offlineDevPlan) ||
     options.command === "inspect" ||
     options.command === "logs" ||
@@ -1870,16 +1872,63 @@ async function runCliInternal(
         target.transports.some(({ stable, state }) => stable && state === "device"),
       ) ?? [];
     if (
-      (options.command === "dev" || options.command === "run") &&
+      (options.command === "dev" || options.command === "run" || options.remembered) &&
       selectable.length === 0 &&
       !options.dryRun
     ) {
-      const acquisition = planTargetAcquisition({
+      let acquisition = planTargetAcquisition({
         ...(config.targetSelector === undefined ? {} : { selector: config.targetSelector }),
         ...(values.targetAliases === undefined ? {} : { aliases: values.targetAliases }),
         ...(lastTarget === undefined ? {} : { remembered: lastTarget }),
         services: inventory.result.data?.discovery.mdns.services ?? [],
       });
+      if (
+        acquisition.kind === "ambiguous" &&
+        options.remembered &&
+        lastTarget?.hardwareSerial !== undefined
+      ) {
+        const services = inventory.result.data?.discovery.mdns.services ?? [];
+        const endpoints = [
+          ...new Set(
+            services.flatMap((service) =>
+              (service.serviceType === "legacy" ||
+                (service.serviceType === "connect" && service.knownDevice !== false)) &&
+              service.endpoint.version === 4
+                ? [service.endpoint.serial]
+                : [],
+            ),
+          ),
+        ];
+        for (const candidate of endpoints) {
+          const verified = await runConnect(
+            candidate,
+            {
+              ...config,
+              endpointWasDiscovered: true,
+              discoveredEndpointCandidates: [candidate],
+            },
+            commandDependencies,
+            signal,
+          );
+          const data = verified.result.data;
+          if (
+            verified.result.ok &&
+            data !== null &&
+            "serial" in data &&
+            data.hardwareSerial === lastTarget.hardwareSerial
+          ) {
+            acquisition = {
+              kind: "connect",
+              endpoint: data.serial,
+              candidates: [data.serial],
+              discovered: true,
+              reason: "remembered-identity",
+            };
+            break;
+          }
+          if (signal?.aborted === true) break;
+        }
+      }
       if (acquisition.kind === "connect") {
         const connected = await runConnect(
           acquisition.endpoint,
@@ -1953,11 +2002,13 @@ async function runCliInternal(
     } else {
       preparedSelection = selected.result.data.selected;
       const transport = preparedSelection.transport;
-      if (options.avdName !== undefined || transport.transportId === undefined) {
-        config.targetSelector = transport.serial;
-        delete config.targetTransportId;
-      } else {
-        config.targetTransportId = transport.transportId;
+      if (options.command !== "devices") {
+        if (options.avdName !== undefined || transport.transportId === undefined) {
+          config.targetSelector = transport.serial;
+          delete config.targetTransportId;
+        } else {
+          config.targetTransportId = transport.transportId;
+        }
       }
     }
   }
