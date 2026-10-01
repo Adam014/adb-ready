@@ -9,6 +9,21 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-01
+
+### Fixed
+
+- Allow large APK and split-APK installs up to five minutes by default instead
+  of inheriting the five-second probe timeout, while preserving an explicit
+  `--timeout` override.
+- Recover the same remembered wireless target for `--last` after a local ADB
+  server restart or Wireless debugging port rotation, verifying hardware
+  identity before accepting a newly advertised endpoint.
+- Explain when foreground launch verification is blocked by the Android lock
+  screen instead of returning only a generic launch-postcondition failure.
+- Isolate runtime-smoke remembered-target state so repository verification can
+  never overwrite a developer's real `--last` target with a fixture device.
+
 ## [1.0.2] - 2026-09-30
 
 ### Changed
@@ -551,7 +566,8 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/Adam014/adb-ready/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Adam014/adb-ready/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Adam014/adb-ready/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Adam014/adb-ready/compare/v0.9.0...v1.0.0

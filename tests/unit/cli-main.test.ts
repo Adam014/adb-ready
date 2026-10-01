@@ -2415,6 +2415,77 @@ describe("runCli", () => {
     expect(streams.error.value).toBe("");
   });
 
+  test("recovers a rotated remembered wireless endpoint by hardware identity", async () => {
+    const streams = io();
+    const fixture = dependencies();
+    let connected = false;
+    const requests: ProcessRequest[] = [];
+    fixture.readTargetState = async () => ({
+      ok: true,
+      path: "/state.json",
+      document: {
+        version: 1,
+        targets: {
+          "local:5037": {
+            serial: "192.168.1.20:42000",
+            hardwareSerial: "PHONE-1",
+            updatedAt: "2026-09-09T10:00:00.000Z",
+          },
+        },
+      },
+    });
+    fixture.runner = async (request) => {
+      requests.push(request);
+      const args = request.args ?? [];
+      if (args.includes("devices")) {
+        return result(
+          request,
+          connected
+            ? "List of devices attached\n192.168.1.20:44000 device model:Pixel_9 transport_id:9\nadb-PHONE-x._adb-tls-connect._tcp device model:Pixel_9 transport_id:8\n"
+            : "List of devices attached\nadb-PHONE-x._adb-tls-connect._tcp device model:Pixel_9 transport_id:8\n",
+        );
+      }
+      if (args.includes("host-features")) return result(request, "shell_v2\n");
+      if (args.includes("mdns")) {
+        return result(
+          request,
+          "List of discovered mdns services\n" +
+            "adb-PHONE-x _adb-tls-connect._tcp 192.168.1.20:44000\n" +
+            "adb-OTHER-y _adb-tls-connect._tcp 192.168.1.21:43000\n",
+        );
+      }
+      if (args.includes("connect")) {
+        connected = true;
+        return result(request, `connected to ${args.at(-1) ?? "unknown"}\n`);
+      }
+      if (args.includes("get-state")) return result(request, "device\n");
+      if (args.includes("ro.serialno")) {
+        return result(request, args.includes("192.168.1.21:43000") ? "PHONE-2\n" : "PHONE-1\n");
+      }
+      if (args.includes("dumpsys") && args.includes("package")) {
+        return result(
+          request,
+          "Package [com.example.app]\n codePath=/data/app/com.example.app\n versionCode=1\n versionName=1.0.0\n",
+        );
+      }
+      return result(request, "");
+    };
+
+    const exitCode = await runCli(
+      ["app", "info", "com.example.app", "--last", "--json", "--non-interactive"],
+      streams,
+      fixture,
+    );
+    const payload = JSON.parse(streams.output.value);
+
+    expect(exitCode).toBe(ExitCode.Success);
+    expect(payload.data.selected.transport.serial).toBe("192.168.1.20:44000");
+    expect(
+      requests.some(({ args }) => args?.includes("connect") && args.includes("192.168.1.20:44000")),
+    ).toBeTrue();
+    expect(streams.error.value).toBe("");
+  });
+
   test("automatically uses one discovered endpoint in an interactive connect flow", async () => {
     const streams = io({ inputTTY: true, errorTTY: true });
     const fixture = dependencies();

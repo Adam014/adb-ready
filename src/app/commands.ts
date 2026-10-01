@@ -96,6 +96,7 @@ export interface CommandConfig {
   adbHost?: string;
   adbPort?: number;
   timeoutMs?: number;
+  timeoutWasDefault?: boolean;
   uiTimeoutMs?: number;
   uiAcquisitionProfile?: UiAcquisitionProfile;
   targetSelector?: string;

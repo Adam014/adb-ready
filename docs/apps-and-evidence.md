@@ -66,8 +66,14 @@ created them, then pass those `.apk` files explicitly.
 
 - Installation accepts one ordinary APK or an explicit complete split APK set.
   `.apks`, `.aab`, and implicit downloads are not accepted yet.
+- APK installation allows up to five minutes by default so large artifacts can
+  cross a real wireless ADB connection. An explicit global `--timeout` still
+  overrides that installation default.
 - Install, launch, stop, restart, and explicit deep-link handlers are checked
   after ADB accepts the request.
+- When Android accepts a launch but the selected target remains behind its lock
+  screen, ADB Ready reports the locked state and asks you to unlock and retry;
+  it never attempts to bypass the device lock.
 - `restart` is a verified stop followed by a verified launch.
 - Add `--activity .MainActivity` only when Android cannot resolve a launchable
   activity.
