@@ -235,6 +235,34 @@ describe("app commands", () => {
     );
     expect(launchUnverified.result.problems[0]?.code).toBe("APP_LAUNCH_UNVERIFIED");
 
+    const launchWhileLocked = await runApp(
+      {
+        action: "launch",
+        cwd: "/project",
+        applicationId: "com.example.app",
+        activity: ".MainActivity",
+      },
+      {},
+      fixture((request) => {
+        if (request.args?.includes("activities")) {
+          return result(
+            request,
+            "mResumedActivity: ActivityRecord{42 u0 com.other/.MainActivity t12}\n",
+          );
+        }
+        if (request.args?.includes("policy")) {
+          return result(request, "  isKeyguardShowing=true\n");
+        }
+        return undefined;
+      }),
+    );
+    expect(launchWhileLocked.result.problems[0]?.detail).toContain("Android is locked");
+    expect(launchWhileLocked.result.problems[0]?.evidence).toContainEqual({
+      source: "adb.window-policy",
+      field: "lockState",
+      value: "locked",
+    });
+
     expect((await runOpen("not a URL", undefined, {}, fixture())).result.problems[0]?.code).toBe(
       "APP_URL_INVALID",
     );
@@ -457,6 +485,53 @@ describe("app commands", () => {
           status: "installed",
         },
       });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("gives installs a long default timeout while preserving an explicit override", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "adb-ready-install-timeout-"));
+    const apk = path.join(directory, "example.apk");
+    await writeFile(apk, "fixture");
+
+    const runCase = async (timeoutWasDefault: boolean, timeoutMs: number): Promise<number> => {
+      let installed = false;
+      let observedTimeout = -1;
+      const execution = await runApp(
+        { action: "install", cwd: directory, artifactPath: apk },
+        { timeoutMs, timeoutWasDefault },
+        fixture((request) => {
+          const args = request.args ?? [];
+          if (args.includes("list") && args.includes("packages")) {
+            return result(
+              request,
+              installed
+                ? "package:/data/app/com.example.new/base.apk=com.example.new\n"
+                : "package:/data/app/com.example.app/base.apk=com.example.app\n",
+            );
+          }
+          if (args.includes("install")) {
+            observedTimeout = request.timeoutMs ?? -1;
+            installed = true;
+            return result(request, "Success\n");
+          }
+          if (args.includes("dumpsys") && args.includes("package")) {
+            return result(
+              request,
+              "Package [com.example.new]\n codePath=/data/app/com.example.new\n versionCode=1\n versionName=1.0.0\n lastUpdateTime=2026-09-10 10:00:00\n",
+            );
+          }
+          return undefined;
+        }),
+      );
+      expect(execution.result.ok).toBe(true);
+      return observedTimeout;
+    };
+
+    try {
+      expect(await runCase(true, 5_000)).toBe(300_000);
+      expect(await runCase(false, 42_000)).toBe(42_000);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
