@@ -107,7 +107,7 @@
   },
   "dependencies": {
     "@expo/env": "2.4.3",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.1.0",
     "zod": "4.6.5"
   }
 }
