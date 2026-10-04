@@ -307,6 +307,14 @@ Android transport backend.
 Run `adb-ready --help` for the complete command list or
 `adb-ready help COMMAND` for focused options.
 
+## Sponsors
+
+ADB Ready is independently developed and maintained. Sponsorship helps fund
+compatibility testing, real-device validation, CI, documentation, and reliable
+releases.
+
+[Sponsor ADB Ready and my open-source work →](https://github.com/sponsors/Adam014)
+
 ## Project
 
 [Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md) ·
