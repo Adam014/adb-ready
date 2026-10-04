@@ -69,7 +69,7 @@ jobs:
           package-manager-cache: false
 
       - name: Set up the pinned pnpm consumer
-        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         env:
           # This job intentionally tests pnpm as a consumer of this Bun-managed project.
           PNPM_CONFIG_PM_ON_FAIL: ignore
@@ -216,7 +216,7 @@ jobs:
           package-manager-cache: false
 
       - name: Set up the pinned pnpm consumer
-        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         env:
           PNPM_CONFIG_PM_ON_FAIL: ignore
         with:
