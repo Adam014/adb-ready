@@ -9,6 +9,18 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-04
+
+### Added
+
+- Add GitHub Sponsors repository metadata and npm funding metadata so users can
+  discover the supported funding path from GitHub and `npm fund`.
+
+### Changed
+
+- Surface a dedicated Sponsor action directly below the technical badges on
+  the GitHub and npm landing pages while retaining the detailed section below.
+
 ## [1.0.3] - 2026-10-01
 
 ### Fixed
@@ -566,7 +578,8 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/Adam014/adb-ready/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/Adam014/adb-ready/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Adam014/adb-ready/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Adam014/adb-ready/compare/v1.0.0...v1.0.1

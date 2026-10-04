@@ -21,6 +21,8 @@ verified evidence—for developers, agents, and CI.
 [![Capacitor](https://img.shields.io/badge/Capacitor-supported-119EFF?logo=capacitor&logoColor=white)](./docs/dev-sessions.md)
 [![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
 
+[![Sponsor ADB Ready](https://img.shields.io/badge/Sponsor-ADB_Ready-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Adam014)
+
 [Quick start](#quick-start) · [What it does](#what-adb-ready-does) ·
 [AI agents](#with-a-coding-agent) · [CI](#in-ci-and-automation) ·
 [Documentation](#documentation)
