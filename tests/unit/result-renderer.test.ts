@@ -1030,6 +1030,84 @@ describe("result renderer", () => {
     expect(markdown.value).toBe("# Context\n");
   });
 
+  test.each(["dev", "run"])(
+    "%s keeps the selected transport serial beside each unsuccessful readiness check",
+    (command) => {
+      const session = {
+        sessionId: "session-1",
+        status: "failed",
+        reachedReady: false,
+        selected: {
+          target: { name: "Pixel 9", serial: "USB-1" },
+          transport: { serial: "192.0.2.1:37123" },
+        },
+        project: { root: "/workspace/app" },
+        preset: "custom",
+        ports: { requested: [], created: [], reused: [] },
+        command: { executable: "npm", args: ["run", "start"] },
+        journal: { events: [], dropped: 0 },
+        recovery: { failed: false, recoveries: 0 },
+        readiness: {
+          ready: false,
+          attempts: 3,
+          durationMs: 1000,
+          timedOut: true,
+          assertions: [
+            {
+              assertion: { kind: "ui", selector: "text=Welcome" },
+              status: "failed",
+              detail: "0 node(s) matched text=Welcome.",
+              durationMs: 1,
+            },
+            {
+              assertion: { kind: "unlocked" },
+              status: "unsupported",
+              detail: "Lock-screen state is unavailable.",
+              durationMs: 1,
+            },
+            {
+              assertion: { kind: "boot" },
+              status: "passed",
+              detail: "Android boot completed.",
+              durationMs: 1,
+            },
+          ],
+        },
+      };
+      const failure: ResultEnvelope<unknown> = {
+        ...result,
+        command,
+        ok: false,
+        data:
+          command === "dev"
+            ? session
+            : {
+                session,
+                outcome: "readiness-failed",
+                evidence: { path: ".adb-ready/artifacts/run" },
+              },
+      };
+      const sink = new MemorySink();
+      renderResult(failure, { format: "human", capabilities, sink });
+
+      const lines = sink.value.split("\n");
+      expect(lines).toContain(
+        "  x ui text=Welcome · failed · serial=192.0.2.1:37123 · 0 node(s) matched text=Welcome.",
+      );
+      expect(lines).toContain(
+        "  ! unlocked · unsupported · serial=192.0.2.1:37123 · Lock-screen state is unavailable.",
+      );
+      expect(sink.value).toContain("Checks   not passed · 1/3");
+      expect(sink.value).not.toContain("Android boot completed.");
+      expect(sink.value).not.toContain("USB-1");
+      expect(sink.value).not.toContain("\u001b");
+
+      const json = new MemorySink();
+      renderResult(failure, { format: "json", capabilities, sink: json });
+      expect(JSON.parse(json.value)).toEqual(failure);
+    },
+  );
+
   test("identifies an external Metro attachment without implying a child launch", () => {
     const attached: ResultEnvelope<unknown> = {
       ...result,

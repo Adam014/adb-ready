@@ -9,6 +9,14 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-05
+
+### Changed
+
+- Include the selected ADB transport serial beside every failed or unsupported
+  readiness check in human-readable `dev` and `run` summaries, keeping the
+  target, check, and observed failure together in CI logs.
+
 ## [1.0.4] - 2026-10-04
 
 ### Added
