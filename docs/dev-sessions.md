@@ -200,7 +200,16 @@ final problem instead of briefly presenting the session as ready.
 Foreground, activity, and unlocked checks parse the complete target-scoped
 Android state returned by `dumpsys`, including current Android 16 fields. When a
 contract does not pass, human output identifies every failed or unsupported
-assertion with its observed detail; JSON and NDJSON retain every assertion
+assertion with its observed detail and the selected ADB transport serial on the
+same line. This applies to both `dev` and `run`, so a copied failure line retains
+its target context in CI logs:
+
+```text
+  x ui text=Welcome · failed · serial=emulator-5554 · 0 node(s) matched text=Welcome.
+```
+
+All unsuccessful checks from the final readiness evaluation remain visible;
+passed checks are counted in the summary. JSON and NDJSON retain every assertion
 result for CI and agents.
 
 Recovery waits for a bounded stabilization period, attempts to reacquire the

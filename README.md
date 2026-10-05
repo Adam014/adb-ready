@@ -202,8 +202,9 @@ Each executed run retains a redacted evidence bundle with its result,
 timeline, problems, focused logcat, native verifier output and artifacts, AI
 context, JUnit XML, and GitHub step summary. Maestro and Android CLI primitives
 are pinned to the leased target automatically. Existing matching emulators are reused; only an
-emulator started by that run is stopped. Scripts also get deterministic JSON
-and NDJSON contracts:
+emulator started by that run is stopped. Failed readiness checks show the selected
+transport serial beside the observed failure in the terminal summary.
+Scripts also get deterministic JSON and NDJSON contracts:
 
 ```bash
 adb-ready devices --json --non-interactive

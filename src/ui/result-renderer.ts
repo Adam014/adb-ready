@@ -551,7 +551,7 @@ function renderHuman(result: CommandResult, options: ResultRenderOptions): void 
             ? style.failure(glyphs.failure, capabilities)
             : style.warning(glyphs.warning, capabilities);
         lines.push(
-          `  ${marker} ${clean(readinessAssertionLabel(assertion.assertion))} · ${clean(assertion.status)} · ${clean(assertion.detail)}`,
+          `  ${marker} ${clean(readinessAssertionLabel(assertion.assertion))} · ${clean(assertion.status)} · serial=${clean(data.selected?.transport.serial ?? "unresolved")} · ${clean(assertion.detail)}`,
         );
       }
     }
