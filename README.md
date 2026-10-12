@@ -16,12 +16,7 @@ verified evidence—for developers, agents, and CI.
 [![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
-[![Deno](https://img.shields.io/badge/Deno_2-tested-111827?logo=deno&logoColor=white)](https://deno.com/)
-[![Flutter](https://img.shields.io/badge/Flutter-supported-02569B?logo=flutter&logoColor=white)](./docs/dev-sessions.md)
-[![Capacitor](https://img.shields.io/badge/Capacitor-supported-119EFF?logo=capacitor&logoColor=white)](./docs/dev-sessions.md)
 [![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
-
-[![Sponsor ADB Ready](https://img.shields.io/badge/Sponsor-ADB_Ready-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Adam014)
 
 [Quick start](#quick-start) · [What it does](#what-adb-ready-does) ·
 [AI agents](#with-a-coding-agent) · [CI](#in-ci-and-automation) ·
