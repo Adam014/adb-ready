@@ -1,314 +1,134 @@
-<div align="center">
+# ADB Ready
 
-<h1>
-  <img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-logo.png" alt="" width="96" align="absmiddle" />
-  ADB Ready
-</h1>
+<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-logo.png" width="96" height="96" alt="" align="right" />
 
-**The local Android runtime for coding agents.**
-
-Prepare one Android target, run your project, operate the app, and return
-verified evidence—for developers, agents, and CI.
-
-[![MCP](https://img.shields.io/badge/MCP-native-7c3aed)](./docs/agent-integration.md)
+[![npm](https://img.shields.io/npm/v/adb-ready)](https://www.npmjs.com/package/adb-ready)
 [![CI](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml/badge.svg)](https://github.com/Adam014/adb-ready/actions/workflows/ci.yml)
-[![Coverage ≥95%](https://raw.githubusercontent.com/Adam014/adb-ready/badges/coverage.svg)](https://app.codecov.io/gh/Adam014/adb-ready)
-[![npm](https://img.shields.io/npm/v/adb-ready?label=npm&color=1f9db5)](https://www.npmjs.com/package/adb-ready)
-[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![Bun](https://img.shields.io/badge/Bun-tested-14151a?logo=bun&logoColor=white)](https://bun.sh/)
-[![Platforms](https://img.shields.io/badge/hosts-macOS_%C2%B7_Linux_%C2%B7_Windows-64748b)](./COMPATIBILITY.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-[Quick start](#quick-start) · [What it does](#what-adb-ready-does) ·
-[AI agents](#with-a-coding-agent) · [CI](#in-ci-and-automation) ·
-[Documentation](#documentation)
+A CLI that gets an Android device ready for development and keeps it that way.
 
-<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-demo.gif" alt="ADB Ready prepares an Android development session, verifies the app UI, lets a coding agent recover lost localhost access, and retains evidence from a bounded automation run." width="1120" />
+It picks one device, sets up `adb reverse` for the ports your project needs,
+starts your dev server with that device, and only tells you it's ready once the
+app is actually running on it. When wireless debugging drops or the port
+changes, it reconnects the same device instead of grabbing another one.
 
-</div>
+It also lets coding agents like Claude Code, Codex or Cursor use the phone
+through MCP, without giving them a shell.
 
-## Quick start
+<img src="https://raw.githubusercontent.com/Adam014/adb-ready/main/docs/assets/adb-ready-demo.gif" alt="ADB Ready starting a development session on an Android phone" width="800" />
 
-Install ADB Ready in the Android project your team wants to run:
+## Why
 
-**npm** · default
+I had an `adb-reverse.sh` in my Expo project. It found my phone, reconnected
+wireless debugging after the port changed, skipped the emulator, set up the
+reverse ports and started Expo with the right `ANDROID_SERIAL`. It broke every
+few days in a new way, and once I started letting a coding agent run the app,
+it broke more often.
 
-```bash
+ADB Ready is that script done properly.
+
+## Install
+
+You need Node.js 22+ and Android SDK Platform-Tools (`adb`).
+
+```sh
 npm install --save-dev adb-ready
 npx adb-ready dev
 ```
 
-<details>
-<summary><strong>Use pnpm, Yarn, or Bun</strong></summary>
+pnpm, Yarn and Bun work too (`pnpm add -D adb-ready`, `yarn add -D adb-ready`,
+`bun add -d adb-ready`). `adbr` is a shorter alias for the same command.
 
-#### pnpm
+Running `adb-ready` with no command opens an interactive menu. If you've never
+connected a phone before, start with **Set up first device** there.
 
-```bash
-pnpm add --save-dev adb-ready
-pnpm exec adb-ready dev
+## Usage
+
+Start a development session:
+
+```sh
+adb-ready dev                         # detects Expo, React Native, Flutter, Capacitor or Gradle
+adb-ready dev --port 8081 --port 8000 # also reverse your local API port
+adb-ready dev -- pnpm run android     # run your own command instead
 ```
 
-#### Yarn
+If Metro is already running, ADB Ready checks it belongs to this project and
+attaches to it instead of starting a second one.
 
-```bash
-yarn add --dev adb-ready
-yarn adb-ready dev
+Check what's going on:
+
+```sh
+adb-ready doctor    # is adb installed, can it see devices, what's wrong
+adb-ready devices   # list phones and emulators
+adb-ready logs --package com.example.app
 ```
 
-#### Bun
+Work with the app and the screen:
 
-```bash
-bun add --dev adb-ready
-bunx adb-ready dev
+```sh
+adb-ready ui tap "text=Sign in"
+adb-ready ui fill "id=email" "me@example.com"
+adb-ready capture screenshot
 ```
-
-</details>
-
-ADB Ready handles the state around ADB that a person, script, or coding agent
-should not guess: which device belongs to the run, whether the app is ready,
-which ports and processes the session owns, and what evidence survives a
-failure. It orchestrates your real ADB and framework tools; it does not replace
-them or require an ADB Ready account, hosted service, or model API key.
-
-Running `adb-ready` without a command opens the interactive workflow home.
-`adbr` is the shorter alias for the same CLI.
-New to Android device setup? Open **Start → Set up first device** for a guided
-USB, Wireless debugging, or emulator path.
-The home and its focused menus adapt to the detected terminal width and height,
-including narrow split panes and short terminals, without relying on scrolling
-to reveal an action.
-
-## What ADB Ready does
-
-- [**Run the project**](./docs/dev-sessions.md) — select one target, prepare
-  ports, launch the framework, and keep the session healthy.
-- [**Connect the device**](./docs/targets-and-wireless.md) — discover, pair,
-  reconnect, and deterministically bind a physical device, emulator, or
-  protected remote ADB server without silently restarting shared infrastructure.
-- [**Operate the app**](./docs/apps-and-evidence.md#app-lifecycle) — resolve,
-  install, launch, restart, deep-link, and inspect the project app.
-- [**Verify the UI**](./docs/ui-automation.md) — find semantic elements, act
-  by intent—including international text, protected input, keyboard state, and
-  runtime-permission dialogs—assert state, audit accessibility, and capture the
-  screen.
-- [**Debug with evidence**](./docs/logs-and-context.md) — keep focused logs,
-  correlated crash/ANR/native findings, session history, screenshots,
-  recordings, and redacted context together.
-- [**Automate a real device**](./docs/automation.md#run-one-bounded-verification)
-  — gate a finite command on readiness and return stable results, reports, and
-  artifacts.
-- [**Run cloud device matrices**](./docs/firebase-test-lab.md) — validate live
-  Firebase dimensions, run instrumentation or Robo tests, and retain normalized
-  provider evidence without storing cloud credentials.
-- [**Fan out across explicit targets**](./docs/target-pools.md) — run the same
-  bounded check on named local, AVD, remote-ADB, or Firebase pools while each
-  target keeps an isolated lease, session, result, and cleanup boundary.
-
-## Choose how you work
 
 ### With a coding agent
 
-Connect the current project to Codex, Claude Code, Cursor, VS Code/Copilot,
-Windsurf, or another MCP client:
-
-```bash
-npx adb-ready agent setup codex
+```sh
+npx adb-ready agent setup claude-code   # or codex, cursor, vscode, windsurf
 ```
 
-Setup writes the project MCP bridge and a version-matched Agent Skill. Use
-`--mcp-profile debug`, `session`, or `ui` to expose only the tools needed for
-that job; `full` remains the default.
+This adds the MCP server and a skill file to your project. Then you can ask
+something like *"start the app on my phone, log in, and check the home screen
+loads"*. The agent can start the session, tap and type, take screenshots and
+read the app's logs. It can't run shell commands or uninstall apps. More in
+[AI agent integration](./docs/agent-integration.md).
 
-Then ask for the outcome you want:
+### In CI
 
-> Start this Expo app on my Android phone, wait until the login screen is
-> actually ready, verify my change, and keep the failure evidence.
-
-The local MCP server gives agents typed tools for target readiness, durable
-development sessions, app lifecycle, semantic UI, correlated failure evidence,
-screenshots, and saved diagnostics. Every result is schema-validated, annotated
-for safety, and checked against fresh device state. Agents do not receive a
-generic shell, unrestricted raw ADB, or app removal.
-
-[Connect an AI agent in minutes →](./docs/agent-integration.md)
-
-### From your terminal
-
-Check the host, inspect visible targets, and start the complete development
-loop:
-
-```bash
-npx adb-ready doctor
-npx adb-ready devices
-npx adb-ready dev
-```
-
-Expo, React Native, Flutter, Capacitor, Gradle, and custom commands all receive
-the same selected target through `ANDROID_SERIAL`. Expo sessions go further:
-ADB Ready starts Metro without Expo's all-device auto-open path, resolves the
-project deep link from the verified server, and opens it only on the selected
-ADB transport. Add local services with repeated `--port` flags or replace the
-detected command after `--`:
-
-```bash
-adb-ready dev --port 8081 --port 8000
-adb-ready dev -- pnpm run android:local
-adb-ready dev --dry-run --json
-```
-
-For Expo projects, explicit localhost URLs in `EXPO_PUBLIC_*` environment
-variables are discovered with Expo's own development environment resolution.
-ADB Ready safely adds their ports to the selected target and verifies the host
-services before calling the session ready. Explicit port configuration always
-wins, and `--no-auto-reverse-localhost` disables discovery when required.
-IPv4 and IPv6 loopback listeners are supported; when ADB cannot reach an
-IPv6-only service directly, ADB Ready creates and cleans a local session bridge.
-
-In an interactive Expo session that ADB Ready owns, the ready state activates
-verified `r` reload, `m` developer-menu, `?` help, and `Ctrl+C` cleanup controls.
-ADB Ready advertises only actions it can execute; attached Metro servers keep
-their controls in the original terminal, while automation and redirected output
-stay prompt-free. [See live-session behavior →](./docs/dev-sessions.md#live-terminal-controls)
-
-If Expo or React Native Metro is already running, ADB Ready verifies its
-standard status endpoint and project identity before attaching the Android
-session without restarting or owning that server. A Metro server from another
-project—or an unrelated process on the same port—is reported as a clear
-conflict instead of being reused.
-
-[Reach your first ready session →](./docs/getting-started.md)
-
-### In CI and automation
-
-Wait for declared readiness, execute one bounded verification command, preserve
-its exit code, and clean only resources created by the run:
-
-```bash
+```sh
 npx adb-ready run -- npm run test:e2e
 ```
 
-Or make the target and deployment part of the same bounded job:
+`run` waits until the device and app are ready, runs your command, and keeps
+its exit code. If it fails, logs, screenshots and a JUnit report are saved in
+`.adb-ready/artifacts/`. There's a ready-made
+[GitHub Actions emulator workflow](./examples/ci-emulator/) you can copy.
 
-```bash
-npx adb-ready run --avd Pixel_9_API_36 --deploy --variant debug -- \
-  maestro test .maestro/smoke.yaml
-```
+## What it won't do
 
-Each executed run retains a redacted evidence bundle with its result,
-timeline, problems, focused logcat, native verifier output and artifacts, AI
-context, JUnit XML, and GitHub step summary. Maestro and Android CLI primitives
-are pinned to the leased target automatically. Existing matching emulators are reused; only an
-emulator started by that run is stopped. Failed readiness checks show the selected
-transport serial beside the observed failure in the terminal summary.
-Scripts also get deterministic JSON and NDJSON contracts:
+- It doesn't replace `adb`, Android Studio, Expo or React Native. It runs them.
+- It never restarts your ADB server behind your back.
+- It never switches to a different device in the middle of a session.
+- It doesn't upload anything. No account, no telemetry, no API keys.
+- Android only. There's no iOS support and none planned for now.
 
-```bash
-adb-ready devices --json --non-interactive
-adb-ready logs --package com.example.app --format ndjson
-adb-ready sessions list --status failed --since 24h --limit 5
-```
+## Status
 
-[Build a readiness-gated device job →](./docs/automation.md)
+This is a young project. I've tested it on a real phone only on macOS with a
+Galaxy Z Fold4 over wireless debugging. CI runs it on macOS, Linux and Windows
+against emulators. Other phones and setups should work, but I haven't tested them
+myself yet. If something breaks on yours, please
+[open an issue](https://github.com/Adam014/adb-ready/issues) with the output of
+`adb-ready doctor`.
 
-Need a hosted target first? Start from the maintained
-[GitHub Actions emulator workflow](./examples/ci-emulator/), which runs one
-bounded target-locked job and preserves evidence even when verification fails.
-For a dedicated real device, use the manual-only
-[self-hosted physical-device recipe](./examples/ci-physical/).
+## Docs
 
-## One target. One verified loop.
+- [Getting started](./docs/getting-started.md)
+- [Development sessions](./docs/dev-sessions.md)
+- [Devices and wireless debugging](./docs/targets-and-wireless.md)
+- [UI automation](./docs/ui-automation.md)
+- [Logs and debugging](./docs/logs-and-context.md)
+- [AI agent integration](./docs/agent-integration.md)
+- [CI and automation](./docs/automation.md)
+- [Configuration](./docs/configuration.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+- [Compatibility](./COMPATIBILITY.md)
 
-```text
-find or recover one Android target
-        ↓
-bind the complete run to that target
-        ↓
-prepare only the ports the project needs
-        ↓
-start the framework and wait for declared readiness
-        ↓
-watch target · ports · logs · child process
-        ↓
-recover safely or return bounded failure evidence
-```
+There's more (Firebase Test Lab, Gradle Managed Devices, running on several
+devices at once) in the [docs folder](./docs/). `adb-ready --help` lists every
+command.
 
-- Existing matching port mappings are reused; conflicts are not overwritten.
-- Routine successful health polls stay silent; only failures, recovery actions,
-  and meaningful session state changes become durable output.
-- `ready` means the selected target, required services, configured checks, and
-  framework launch have all succeeded while the owned development process is
-  not already failing; a passed port check alone never produces a ready
-  session.
-- Wireless and port recovery is bounded and independently verified.
-- An ADB server restart is never hidden inside recovery.
-- On exit, ADB Ready cleans only resources owned by that session.
-- The final exit code and a project-scoped session record are preserved.
+## License
 
-## Keep your existing stack
-
-| Projects | Package managers | CLI runtimes | Hosts |
-| --- | --- | --- | --- |
-| Expo · React Native · Flutter · Capacitor · Gradle · custom | npm · pnpm · Yarn · Bun | Node.js · Bun · Deno | macOS · Linux · Windows |
-
-The standard npm entrypoint requires Android SDK Platform-Tools and Node.js 22
-or newer. The published package is architecture-neutral JavaScript with no
-native addon or artificial OS/CPU block. A working ADB executable remains the
-Android transport backend.
-
-[See tested and upstream-capable support tiers →](./COMPATIBILITY.md)
-
-## Trust by default
-
-- One selected target is used consistently for every operation in a session.
-- Target leases prevent concurrent ADB Ready processes from mutating the same
-  target without an explicit takeover.
-- Destructive or device-wide actions require an explicit command or
-  confirmation.
-- Pairing codes never enter command-line arguments.
-- Session data is bounded, redacted, private to the local user, and never
-  uploaded by ADB Ready.
-- Crash diagnostics are promoted only after ADB Ready verifies the application
-  package on the selected target; unrelated device-process failures remain
-  explicitly unattributed evidence.
-- Stale UI references are rejected before input is sent.
-- UI hierarchy capture is serialized per target across CLI and MCP processes,
-  while independent targets remain parallel.
-- Field replacement verifies values without confusing a declared Android hint
-  for user-entered text.
-- Screen recordings require a readable MP4 and a real multi-frame timeline;
-  a filename and hash alone never count as verified video evidence.
-- Machine data stays on `stdout`; human diagnostics stay on `stderr`.
-
-[Review the complete threat model →](./docs/threat-model.md)
-
-## Documentation
-
-| Guide | Start here when you want to… |
-| --- | --- |
-| [Getting started](./docs/getting-started.md) | Reach the first ready development session. |
-| [Shell completion](./docs/completions.md) | Enable command discovery in Bash, zsh, fish, PowerShell, or Nushell. |
-| [Development sessions](./docs/dev-sessions.md) | Configure frameworks, commands, ports, readiness, and cleanup. |
-| [Targets and Wireless debugging](./docs/targets-and-wireless.md) | Pair, connect, recover, or explicitly select a target. |
-| [Apps and evidence](./docs/apps-and-evidence.md) | Control the app and capture screenshots or recordings. |
-| [Safe UI automation](./docs/ui-automation.md) | Find, act on, and verify the current Android UI. |
-| [Logs and AI context](./docs/logs-and-context.md) | Diagnose a failure with bounded, redacted evidence. |
-| [AI agent integration](./docs/agent-integration.md) | Connect an MCP-capable coding agent. |
-| [Automation](./docs/automation.md) | Use readiness, exit codes, JSON, NDJSON, JUnit, and CI artifacts. |
-| [Stability and versioning](./docs/stability.md) | Understand the 1.x API, schema, deprecation, and migration guarantees. |
-| [Gradle Managed Devices](./docs/gradle-managed-devices.md) | Run build-owned virtual-device and group tests with normalized evidence. |
-| [Firebase Test Lab](./docs/firebase-test-lab.md) | Run explicit remote instrumentation or Robo matrices with bounded evidence. |
-| [Target pools and fan-out](./docs/target-pools.md) | Bound parallel verification across an explicit target set. |
-| [Configuration](./docs/configuration.md) | Share project presets, hooks, aliases, and policies. |
-| [Troubleshooting](./docs/troubleshooting.md) | Resolve a known setup, target, UI, or session problem. |
-| [Compatibility](./COMPATIBILITY.md) | Check hosts, runtimes, package managers, and support tiers. |
-| [Example configs](./examples/README.md) | Copy a framework or custom-project configuration. |
-
-Run `adb-ready --help` for the complete command list or
-`adb-ready help COMMAND` for focused options.
-
-## Project
-
-[Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md) ·
-[Security](./SECURITY.md) · [MIT License](./LICENSE)
-
-ADB Ready is Android-only. It exposes target-bound workflows rather than a
-generic remote shell.
+[MIT](./LICENSE). [Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md)
