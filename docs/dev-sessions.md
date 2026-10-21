@@ -101,7 +101,7 @@ Detection is deliberately bounded:
 
 - only `EXPO_PUBLIC_*` variables are inspected;
 - only `localhost`, `127.0.0.1`, and `[::1]` URLs with explicit ports qualify;
-- the URL value is never retained or printed—results expose only the variable
+- the URL value is never retained or printed; results expose only the variable
   name, port, and loaded `.env` basenames;
 - an explicit mapping for the same device port always wins; and
 - cleanup still removes only mappings created by the current session.

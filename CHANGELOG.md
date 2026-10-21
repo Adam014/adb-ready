@@ -9,6 +9,18 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-10-21
+
+### Changed
+
+- Rewrite the README: shorter, with why the tool exists and what it won't do.
+  Advanced workflows stay in `docs/`.
+- Shorten the package description.
+
+### Removed
+
+- Remove the funding metadata.
+
 ## [1.0.5] - 2026-10-05
 
 ### Changed
@@ -586,7 +598,9 @@ deprecation policy in [Stability and versioning](./docs/stability.md).
   explainable configuration precedence.
 - Human, plain, JSON, and NDJSON output across Node, Bun, and Deno entrypoints.
 
-[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/Adam014/adb-ready/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/Adam014/adb-ready/compare/v1.0.5...v1.0.6
+[1.0.5]: https://github.com/Adam014/adb-ready/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/Adam014/adb-ready/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/Adam014/adb-ready/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Adam014/adb-ready/compare/v1.0.1...v1.0.2

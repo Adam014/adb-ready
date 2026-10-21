@@ -3,7 +3,7 @@
 ADB Ready exposes Android workflows to local AI agents through a typed Model
 Context Protocol (MCP) server. The agent works with the same deterministic
 target, application identity, verification rules, and structured problems as
-the CLI—without receiving a generic shell or raw ADB command.
+the CLI, without receiving a generic shell or raw ADB command.
 
 ## Install and verify
 
