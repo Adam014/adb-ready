@@ -105,7 +105,7 @@
     "yarn": "1.22.22"
   },
   "dependencies": {
-    "@expo/env": "2.4.3",
+    "@expo/env": "2.5.3",
     "@modelcontextprotocol/server": "2.1.0",
     "zod": "4.6.5"
   }
